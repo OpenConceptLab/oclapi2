@@ -26,12 +26,13 @@ from core.common import ERRBIT_LOGGER
 from core.common.constants import HEAD, ALL, INDEX_BATCH_SIZE
 from core.common.models import BatchIndexRun
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts, index_concepts_mapped_codes, get_batch_index_relations
+    post_import_update_resource_counts, index_concepts_mapped_codes, get_batch_index_relations, \
+    run_deferred_import_indexing
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
 from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, \
     DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_FLAGS_SECONDS, \
-    DEFERRED_INDEX_REJECTED_RETRY_SECONDS
+    DEFERRED_INDEX_REJECTED_RETRY_SECONDS, DEFERRED_INDEX_RUN_SECONDS, DEFERRED_INDEX_BEAT_SECONDS
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
@@ -1375,7 +1376,10 @@ class DeferredImportIndex(models.Model):
 
     @staticmethod
     def get_window():
-        """IMPORT_INDEX_WINDOW's (start, end) times in UTC, or None when it's empty or not 'HH:MM-HH:MM'."""
+        """
+        IMPORT_INDEX_WINDOW's (start, end) times in UTC, or None when it's empty, not 'HH:MM-HH:MM', or shorter than the
+        time between beat's runs, which might then never fall in it.
+        """
         value = (settings.IMPORT_INDEX_WINDOW or '').strip()
         if not value:
             return None
@@ -1383,6 +1387,12 @@ class DeferredImportIndex(models.Model):
             start, end = (datetime.strptime(part.strip(), '%H:%M').time() for part in value.split('-'))
         except ValueError:
             logger.error('IMPORT_INDEX_WINDOW %r is not HH:MM-HH:MM, so deferred import indexing is paused', value)
+            return None
+        minutes = (end.hour * 60 + end.minute - start.hour * 60 - start.minute) % (24 * 60)
+        if minutes * 60 < DEFERRED_INDEX_BEAT_SECONDS:
+            logger.error(
+                'IMPORT_INDEX_WINDOW %r is shorter than the %s minutes between runs, so deferred import indexing is '
+                'paused', value, DEFERRED_INDEX_BEAT_SECONDS // 60)
             return None
         return start, end
 
@@ -1410,59 +1420,74 @@ class DeferredImportIndex(models.Model):
         """
         Updates the superseded versions whose replacements are searchable now, and while the window is open, indexes
         the INDEX and MAPPED_CODES rows in order, updating them again every DEFERRED_INDEX_FLAGS_SECONDS and at the end.
-        Returns how many rows it finished. One runner at a time: the lock is renewed after each batch and expires if its
-        runner dies, so a later run picks up where it stopped.
+        After DEFERRED_INDEX_RUN_SECONDS of indexing it stops and queues the next run behind the indexing tasks queued
+        meanwhile, so they share the worker. Returns how many rows it finished.
+
+        One runner at a time: a run holds a lock it renews before each batch, and stops if the lock is no longer its
+        own. The lock expires if its runner dies, so a later run picks up where it stopped.
         """
         if not cls.objects.exists():
             return 0
         token = uuid.uuid4().hex
         if not django_cache.add(DEFERRED_INDEX_LOCK_KEY, token, timeout=DEFERRED_INDEX_LOCK_SECONDS):
             return 0
+        deadline = time.monotonic() + DEFERRED_INDEX_RUN_SECONDS
+
+        def keep_going(indexing=True):
+            """Whether to start another batch: the lock is still this run's, and for indexing, time is left."""
+            if django_cache.get(DEFERRED_INDEX_LOCK_KEY) != token:
+                return False
+            django_cache.touch(DEFERRED_INDEX_LOCK_KEY, timeout=DEFERRED_INDEX_LOCK_SECONDS)
+            return not indexing or (time.monotonic() < deadline and cls.is_window_open())
+
+        resume = False
         try:
-            done = cls.update_latest_flags()
+            done = cls.update_latest_flags(keep_going)
             if cls.is_window_open():
                 flagged_at = time.monotonic()
                 for row in iter(lambda: cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).first(), None):
-                    if row.process() != cls.DONE:
-                        break  # the window closed, or the row failed
+                    if row.process(keep_going) != cls.DONE:
+                        break  # out of time, the window closed, the lock was lost, or the row failed
                     done += 1
                     if time.monotonic() - flagged_at >= DEFERRED_INDEX_FLAGS_SECONDS:
-                        done += cls.update_latest_flags()
+                        done += cls.update_latest_flags(keep_going)
                         flagged_at = time.monotonic()
-                done += cls.update_latest_flags()
+                done += cls.update_latest_flags(keep_going)
+                resume = time.monotonic() >= deadline and keep_going(indexing=False) and cls.is_window_open() and \
+                    cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).exists()
         finally:
             if django_cache.get(DEFERRED_INDEX_LOCK_KEY) == token:
                 django_cache.delete(DEFERRED_INDEX_LOCK_KEY)
+        if resume:
+            run_deferred_import_indexing.apply_async(queue='indexing', expires=DEFERRED_INDEX_BEAT_SECONDS - 60)
         logger.info('Deferred import indexing: %s row(s) done, %s waiting', done, cls.objects.count())
         return done
 
     @classmethod
-    def update_latest_flags(cls):
-        """Processes the LATEST_FLAGS rows, stopping at a failure. Returns how many it finished."""
+    def update_latest_flags(cls, keep_going):
+        """Processes the LATEST_FLAGS rows, stopping at a failure or once keep_going says to. How many it finished."""
         done = 0
         for row in cls.get_pending().filter(stage=cls.Stage.LATEST_FLAGS):
-            result = row.process()
+            if not keep_going(indexing=False):
+                break
+            result = row.process(keep_going)
             if result == cls.FAILED:
                 break
             done += result == cls.DONE
         return done
 
-    @staticmethod
-    def renew_lock():
-        django_cache.touch(DEFERRED_INDEX_LOCK_KEY, timeout=DEFERRED_INDEX_LOCK_SECONDS)
-
     def get_model(self):
         return {'concept': Concept, 'mapping': Mapping}[self.resource]
 
-    def process(self):
+    def process(self, keep_going):
         """
-        Works on this row: DONE (and deleted), WAITING (kept, with what's left) or FAILED. A failed row is held back, so
-        the rows after it go on: for DEFERRED_INDEX_REJECTED_RETRY_SECONDS if Elasticsearch was only refusing writes for
-        now, which doesn't count as an attempt; otherwise for DEFERRED_INDEX_RETRY_SECONDS, so an outage costs each row
-        one attempt a night.
+        Works on this row, starting each batch only if keep_going() says so: DONE (and deleted), WAITING (kept, with
+        what's left) or FAILED. A failed row is held back, so the rows after it go on: for
+        DEFERRED_INDEX_REJECTED_RETRY_SECONDS if Elasticsearch was only refusing writes for now, which doesn't count as
+        an attempt; otherwise for DEFERRED_INDEX_RETRY_SECONDS, so an outage costs each row one attempt a night.
         """
         try:
-            finished = self.update_flags() if self.stage == self.Stage.LATEST_FLAGS else self.index()
+            finished = self.update_flags() if self.stage == self.Stage.LATEST_FLAGS else self.index(keep_going)
         except Exception as ex:  # pylint: disable=broad-except
             delay = DEFERRED_INDEX_REJECTED_RETRY_SECONDS
             if not BatchIndexRun.is_rejected(ex):
@@ -1479,14 +1504,14 @@ class DeferredImportIndex(models.Model):
             return self.DONE
         return self.WAITING
 
-    def index(self):
+    def index(self, keep_going):
         """
-        Indexes the row's ids INDEX_BATCH_SIZE at a time while the window is open, without forcing a refresh, as the
+        Indexes the row's ids INDEX_BATCH_SIZE at a time while keep_going() says to, without forcing a refresh, as the
         import's own indexing does. Saves what's left after each batch. Whether it got through them all.
         """
         model = self.get_model()
         while self.ids:
-            if not self.is_window_open():
+            if not keep_going():
                 return False
             batch = self.ids[:INDEX_BATCH_SIZE]
             if self.stage == self.Stage.INDEX:
@@ -1502,7 +1527,6 @@ class DeferredImportIndex(models.Model):
                 model.index_mapped_codes(model.objects.filter(id__in=batch))
             self.ids = self.ids[INDEX_BATCH_SIZE:]
             self.save(update_fields=['ids', 'updated_at'])
-            self.renew_lock()
         return True
 
     def update_flags(self):
@@ -1518,7 +1542,6 @@ class DeferredImportIndex(models.Model):
         if waiting and len(waiting) < len(self.ids):
             self.ids = sorted(waiting)
             self.save(update_fields=['ids', 'updated_at'])
-        self.renew_lock()
         return not waiting
 
     def hand_over(self, stage, ids):

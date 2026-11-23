@@ -17,11 +17,12 @@ from core.common.exceptions import BatchIndexingError
 from core.common.tasks import run_deferred_import_indexing, batch_index_resources, get_batch_index_relations, \
     index_concepts_mapped_codes
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.concepts.documents import ConceptDocument
+from core.common.constants import ACCESS_TYPE_NONE
+from core.concepts.documents import ConceptDocument, MappedCodes, RELEASE_MAP_CODES
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_MAX_ATTEMPTS, \
-    DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_REJECTED_RETRY_SECONDS
+    DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_REJECTED_RETRY_SECONDS, DEFERRED_INDEX_BEAT_SECONDS
 from core.importers.importer import ImporterSubtask
 from core.importers.models import BulkImportInline, DeferredImportIndex, ImportIndexer, CREATED
 from core.mappings.documents import MappingDocument
@@ -204,6 +205,15 @@ class DeferredImportIndexWindowTest(OCLTestCase):
             with override_settings(IMPORT_INDEX_WINDOW=window), self.assertLogs('core.importers.models', 'ERROR'):
                 self.assertFalse(self.is_open(2))
 
+    def test_window_shorter_than_the_time_between_runs_pauses_the_job(self):
+        for window, hour, minute in [('02:00-02:05', 2, 1), ('02:00-02:00', 2, 0), ('23:55-00:04', 0, 1)]:
+            with override_settings(IMPORT_INDEX_WINDOW=window), \
+                    self.assertLogs('core.importers.models', 'ERROR') as logs:
+                self.assertFalse(self.is_open(hour, minute))
+            self.assertIn('shorter than the 10 minutes between runs', logs.output[0])
+        with override_settings(IMPORT_INDEX_WINDOW='23:55-00:05'):
+            self.assertTrue(self.is_open(0, 1))
+
     @override_settings(IMPORT_INDEX_WINDOW='01:00-04:30')
     def test_window_is_checked_against_the_current_time_by_default(self):
         for hour, is_open in [(3, True), (5, False)]:
@@ -306,7 +316,7 @@ class DeferredImportIndexRunTest(OCLTestCase):
             (INDEX, 'concept', {concept.id, second.id}),
             (LATEST_FLAGS, 'concept', {first.id}),  # as soon as its replacement is searchable
             (INDEX, 'mapping', {mapping.id, mapping.get_latest_version().id}),
-            (MAPPED_CODES, 'concept', {concept.id, second.id}),
+            (MAPPED_CODES, 'concept', {concept.id, first.id, second.id}),  # first: no release, so HEAD's codes too
         ])
         self.assertFalse(DeferredImportIndex.objects.exists())
         self.assertIsNone(cache.get(DEFERRED_INDEX_LOCK_KEY))  # released
@@ -563,28 +573,62 @@ class DeferredImportIndexRunTest(OCLTestCase):
         rows = {(row.stage, row.resource): row for row in DeferredImportIndex.objects.all()}
         row_ids = {key: set(row.ids) for key, row in rows.items()}
 
+        def go_on(indexing=True):  # pylint: disable=unused-argument
+            return True
+
         def ids(queryset):
             return set(queryset.values_list('id', flat=True))
 
         with patch.object(DeferredImportIndex, 'is_window_open', return_value=True):
             with patch.object(Mapping, 'batch_index') as batch_index_mock:
-                self.assertEqual(rows[(INDEX, 'mapping')].process(), DeferredImportIndex.DONE)
+                self.assertEqual(rows[(INDEX, 'mapping')].process(go_on), DeferredImportIndex.DONE)
             queryset, document = batch_index_mock.call_args[0]
             self.assertEqual((ids(queryset), document), (row_ids[(INDEX, 'mapping')], MappingDocument))
             self.assertEqual(batch_index_mock.call_args[1], {'refresh': False, **get_batch_index_relations(Mapping)})
 
             with patch.object(Concept, 'index_mapped_codes') as mapped_codes_mock:
-                rows[(MAPPED_CODES, 'concept')].process()
+                rows[(MAPPED_CODES, 'concept')].process(go_on)
             self.assertEqual(ids(mapped_codes_mock.call_args[0][0]), row_ids[(MAPPED_CODES, 'concept')])
 
         # in TEST_MODE, every replacement counts as searchable
         with patch.object(Concept, 'index_latest_flags', return_value=set()) as latest_flags_mock:
-            self.assertEqual(rows[(LATEST_FLAGS, 'concept')].process(), DeferredImportIndex.DONE)
+            self.assertEqual(rows[(LATEST_FLAGS, 'concept')].process(go_on), DeferredImportIndex.DONE)
         self.assertEqual(ids(latest_flags_mock.call_args[0][0]), row_ids[(LATEST_FLAGS, 'concept')])
+
+    def test_run_indexes_for_a_few_minutes_then_queues_the_next_run(self):
+        self.concept_updates()
+
+        with patch('core.importers.models.DEFERRED_INDEX_RUN_SECONDS', 0), \
+                patch('core.importers.models.run_deferred_import_indexing') as task_mock:
+            self.assertEqual(self.run_rows(), 0)
+
+        self.assertEqual(self.indexed, [])  # out of time before its first batch
+        task_mock.apply_async.assert_called_once_with(queue='indexing', expires=DEFERRED_INDEX_BEAT_SECONDS - 60)
+        with patch('core.importers.models.run_deferred_import_indexing') as task_mock:
+            self.assertEqual(self.run_rows(), 3)
+        task_mock.apply_async.assert_not_called()  # done in time: beat's next run is enough
+        self.assertFalse(DeferredImportIndex.objects.exists())
+
+    def test_run_stops_once_its_lock_is_another_runners(self):
+        concept, (first, second) = self.concept_updates()
+
+        def take_over(*_):
+            cache.set(DEFERRED_INDEX_LOCK_KEY, 'another-runner')  # as when this run's lock expired and another took it
+
+        self.failure = take_over
+        self.assertEqual(self.run_rows(), 1)
+
+        self.assertEqual(self.indexed, [(INDEX, 'concept', {concept.id})])  # the first part's only batch
+        self.assertEqual(cache.get(DEFERRED_INDEX_LOCK_KEY), 'another-runner')  # neither renewed nor released
+        self.assertEqual(
+            deferred(), {(INDEX, 'concept'): {concept.id, second.id}, (LATEST_FLAGS, 'concept'): {first.id}})
 
     def test_beat_runs_it_on_the_indexing_queue(self):
         entry = app.conf.CELERYBEAT_SCHEDULE['deferred-import-indexing']
         self.assertEqual(entry['task'], run_deferred_import_indexing.name)
+        self.assertEqual(
+            (entry['schedule'], entry['options']['expire_seconds']),
+            (timedelta(seconds=DEFERRED_INDEX_BEAT_SECONDS), DEFERRED_INDEX_BEAT_SECONDS - 60))
         queue = app.amqp.router.route({}, run_deferred_import_indexing.name)['queue']
         self.assertEqual(getattr(queue, 'name', queue), 'indexing')
         with patch.object(DeferredImportIndex, 'run', return_value=3) as run_mock:
@@ -612,13 +656,39 @@ class LatestFlagsTest(OCLTestCase):
              '_id': first.id, 'retry_on_conflict': 3}
         )
         self.assertEqual(actions[first.id]['script']['source'], ESScript.LATEST_FLAGS_SCRIPT)
-        empty_codes = {'same_as_map_codes': [], 'other_map_codes': [], 'mapped_codes': []}
-        # in no release, the superseded version has no mappings to take codes from
-        self.assertEqual(actions[first.id]['script']['params'],
-                         {'is_latest_version': False, 'in_head': False, 'fields': empty_codes})
+        # in no release, the superseded version reads HEAD's codes, as prepare() gives them (MappedCodes)
+        params = actions[first.id]['script']['params']
+        self.assertEqual(
+            params, {'is_latest_version': False, 'in_head': False, 'fields': MappedCodes([first]).get_fields(first)})
+        self.assertEqual(
+            (params['fields']['same_as_map_codes'], params['fields'][RELEASE_MAP_CODES]), (['To'], []))
         params = actions[second.id]['script']['params']
         self.assertEqual((params['is_latest_version'], params['in_head']), (True, True))
         self.assertEqual(params['fields']['same_as_map_codes'], ['To'])  # HEAD's mappings
+
+    def test_superseded_version_only_in_a_private_release_keeps_that_release_s_codes(self, *_):
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='LatestFlagsPrivateOrg'))
+        ConceptFactory(parent=source, mnemonic='To')
+        run_import([concept_line(source, 'C1')])
+        run_import([mapping_line(source, 'C1', 'To')])
+        _, (first, ) = versions(source, 'C1')
+        private = OrganizationSourceFactory(
+            organization=source.organization, mnemonic=source.mnemonic, version='P', public_access=ACCESS_TYPE_NONE)
+        first.sources.add(private)
+        Mapping.objects.get(parent=source, id=F('versioned_object_id')).get_latest_version().sources.add(private)
+        fields = Concept.get_latest_flags_fields([first])[first.id]
+        self.assertEqual((fields['same_as_map_codes'], fields[RELEASE_MAP_CODES]), (['To'], []))  # P's are HEAD's
+        run_import([concept_line(source, 'C1', datatype='Text')])  # an import supersedes it
+        first.refresh_from_db()
+
+        fields = next(Concept.get_latest_flags_actions([first.id]))['script']['params']['fields']
+
+        # its own codes are now its public releases' (none), so a search in P reads P's from release_map_codes
+        self.assertEqual(fields['same_as_map_codes'], [])
+        self.assertEqual(
+            [(entry['source_version_id'], entry['same_as_map_codes']) for entry in fields[RELEASE_MAP_CODES]],
+            [([private.id], ['To'])])
+        self.assertEqual(fields, MappedCodes([first]).get_fields(first))
 
     def test_mapping_actions_set_what_a_new_version_changes(self, *_):
         source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='LatestFlagsMapOrg'))
@@ -686,9 +756,11 @@ class LatestFlagsTest(OCLTestCase):
 
 
 @tag('es')
+@override_settings(CACHES=LOCMEM_CACHE)  # the job's lock
 class DeferredImportSearchTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
+        cache.clear()
         self.token = UserProfile.objects.get(username='ocladmin').get_token()
 
     def search(self, url):
@@ -757,7 +829,8 @@ class DeferredImportSearchTest(OCLAPITestCase):
 
         # the flags then update outside the window, keeping the release in source_version
         self.assertEqual(self.run_job(window=False), 1)
-        self.assertEqual(self.get_document(first.id), (False, ['v1'], []))
+        # v1 is only in the document, not in the database, so the row reads HEAD's codes (MappedCodes)
+        self.assertEqual(self.get_document(first.id), (False, ['v1'], ['To']))
         self.assertEqual(self.search(zephyranthes_url), [('Zephyranthes', second.version)])
         self.assertEqual(self.search(source.concepts_url + '?q=Quillwort'), [])
 

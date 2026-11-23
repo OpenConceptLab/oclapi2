@@ -1413,11 +1413,14 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             }
 
     @staticmethod
-    def get_latest_flags_fields(instance):
-        """A superseded version's mapped codes come from its releases' mappings, not HEAD's (get_indexed_mappings)."""
-        from core.concepts.documents import ConceptDocument
-        same_as_codes, other_codes, mapped_codes = ConceptDocument.get_mapped_codes(instance)
-        return {'same_as_map_codes': same_as_codes, 'other_map_codes': other_codes, 'mapped_codes': mapped_codes}
+    def get_latest_flags_fields(instances):
+        """
+        The mapped codes prepare() gives these rows now, by row id (MappedCodes), release_map_codes included: once a row
+        isn't the latest, its own codes come from its public releases rather than HEAD, and so do the releases listed.
+        """
+        from core.concepts.documents import MappedCodes
+        mapped_codes = MappedCodes(instances)
+        return {instance.id: mapped_codes.get_fields(instance) for instance in instances}
 
     @classmethod
     def get_unreleased_older_ids(cls, versioned_object_ids):

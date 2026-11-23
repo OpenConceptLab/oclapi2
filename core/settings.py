@@ -312,9 +312,8 @@ ES_MAPPINGS_REPLICAS = int(os.environ.get('ES_MAPPINGS_REPLICAS', 0))
 # indexing them at once saturates the shared indexing worker for hours (and re-embeds every row of a semantic HEAD).
 # So do imports sent with index=false.
 IMPORT_INDEX_MAX_LINES = int(os.environ.get('IMPORT_INDEX_MAX_LINES', 5000))
-# When that off-peak job runs: 'HH:MM-HH:MM' in UTC, spanning midnight if the end is earlier than the start, and at
-# least as long as beat's 10 minutes between runs. Empty pauses it. The default keeps clear of the nightly export
-# windows.
+# When that off-peak job runs: 'HH:MM-HH:MM' in UTC, spanning midnight if the end is earlier than the start. Empty, or
+# shorter than beat's 10 minutes between runs, pauses it. The default keeps clear of the nightly export windows.
 IMPORT_INDEX_WINDOW = os.environ.get('IMPORT_INDEX_WINDOW', '01:00-04:30')
 
 CID_GENERATE = True

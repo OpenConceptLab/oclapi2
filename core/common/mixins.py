@@ -879,18 +879,20 @@ class SourceChildMixin(ChecksumModel):
         field = f'{cls._meta.model_name}_id'
         in_head = set(cls.sources.through.objects.filter(
             **{f'{field}__in': ids, 'source__version': HEAD}).values_list(field, flat=True))
-        for instance in cls.objects.filter(id__in=ids):
+        instances = list(cls.objects.filter(id__in=ids))
+        fields = cls.get_latest_flags_fields(instances)
+        for instance in instances:
             yield {
                 '_op_type': 'update', '_index': index_name, '_id': instance.id, 'retry_on_conflict': 3,
                 'script': {'source': ESScript.LATEST_FLAGS_SCRIPT, 'params': {
                     'is_latest_version': instance.is_latest_version, 'in_head': instance.id in in_head,
-                    'fields': cls.get_latest_flags_fields(instance)
+                    'fields': fields.get(instance.id, {})
                 }},
             }
 
     @staticmethod
-    def get_latest_flags_fields(instance):  # pylint: disable=unused-argument
-        """Other document fields that prepare() derives from whether the row is the latest version."""
+    def get_latest_flags_fields(instances):  # pylint: disable=unused-argument
+        """Other document fields that prepare() derives from whether a row is the latest version, by row id."""
         return {}
 
     @classmethod

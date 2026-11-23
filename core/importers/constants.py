@@ -7,8 +7,10 @@ SEED_FROM_IMPORT_IMPORT_TYPE = 'seed_from_import is not supported for npm import
 SEED_FROM_IMPORT_ENDPOINT = 'seed_from_import is not supported by this endpoint.'
 # The off-peak indexing of what large imports deferred (OpenConceptLab/ocl_online#268, DeferredImportIndex.run)
 DEFERRED_INDEX_LOCK_KEY = 'deferred_import_indexing'
-DEFERRED_INDEX_LOCK_SECONDS = 60 * 60  # renewed after each row, so a runner that dies frees the lock within this
+DEFERRED_INDEX_LOCK_SECONDS = 60 * 60  # renewed before each batch, so a runner that dies frees the lock within this
 DEFERRED_INDEX_MAX_ATTEMPTS = 5  # a row that failed this many times is skipped until its attempts are reset
 DEFERRED_INDEX_RETRY_SECONDS = 6 * 60 * 60  # a failed row waits this long, so mostly until the next night's window
 DEFERRED_INDEX_REJECTED_RETRY_SECONDS = 20 * 60  # a row whose writes Elasticsearch refused for now waits this long
 DEFERRED_INDEX_FLAGS_SECONDS = 10 * 60  # how often a run in the window updates the latest flags between rows
+DEFERRED_INDEX_RUN_SECONDS = 5 * 60  # how long a run indexes before it queues the next, so other indexing gets in
+DEFERRED_INDEX_BEAT_SECONDS = 10 * 60  # between runs from beat, as core/celery.py schedules them
