@@ -1506,14 +1506,17 @@ class SourceChildCommonBaseView(BaseAPIView):
         can view (get_viewable_query_collection_versions, get_collection_facet_criterion).
         """
         from core.collections.models import Collection
-        value = request.query_params.get('collection')
         params = self.params or {}
         owner_filters = self.get_parent_owner_filters(params)
-        if not value or value.startswith('!') or value.endswith('*') or not owner_filters:
+        # every key a search reads as `collection` (`Collection` too); values with `!` or `*` name no collection
+        values = [value for key, value in request.query_params.items() if to_snake_case(key) == 'collection' and (
+            value and not value.startswith('!') and not value.endswith('*'))]
+        if not values or not owner_filters:
             return
         version = None if self.has_concept_container_scope() else params.get('version')
         url_collection = (self.kwargs.get('collection'), self.get_parent_owner_filters())
-        for mnemonic in compact(name.strip('\"').strip('\'') for name in value.split(',')):  # as a search reads them
+        names = [name.strip('\"').strip('\'') for value in values for name in value.split(',')]  # as a search does
+        for mnemonic in dict.fromkeys(compact(names)):
             if (mnemonic, owner_filters) == url_collection:
                 continue
             head = Collection.get_version(mnemonic, HEAD, owner_filters)

@@ -2203,8 +2203,10 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
                           f'collection=!{prefix}P', f'collection={prefix}P*']:
                 self.assert_answers(f'/{resource}/?org={org}&{query}', 200, 200, 200)
             self.assert_answers(f'/{resource}/?org={org}&collection={prefix}Q&version=v9', 404, 404, 404)
-            # quoted, as a search reads it
+            # quoted, or capitalised, as a search reads it
             self.assert_answers(f'/{resource}/?org={org}&collection=%22{prefix}P%22', 401, 403, 200)
+            self.assert_answers(f'/{resource}/?org={org}&Collection={prefix}P', 401, 403, 200)
+            self.assert_answers(f'/{resource}/?org={org}&collection={prefix}R&Collection={prefix}P', 401, 403, 200)
             # an empty source, which leaves the source check out, leaves this one in
             self.assert_answers(f'/{resource}/?source=&org={org}&collection={prefix}P&version=v1', 401, 403, 200)
             # the owner the URL names; the version in a repository's URL is that repository's
