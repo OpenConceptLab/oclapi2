@@ -55,7 +55,7 @@ from core.common.permissions import (
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
-    canonical_url_param, all_versions_param, include_summary_param
+    canonical_url_param, all_versions_param, include_summary_param, include_health_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
@@ -1087,6 +1087,7 @@ class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView,
                 'references': [f'{references_uri}{reference_id}/' for reference_id in reference_ids]
             }
 
+    @swagger_auto_schema(manual_parameters=[include_health_param])
     def get(self, request, *args, **kwargs):
         self.get_queryset()
         return self.list(request, *args, **kwargs)

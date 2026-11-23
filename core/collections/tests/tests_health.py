@@ -543,6 +543,29 @@ class ExpansionHealthAPITest(OCLAPITestCase):
         self.assertEqual(len(member['health']['references']), 1)
         self.assertTrue(member['health']['references'][0].startswith(self.collection.uri + 'references/'))
 
+    def test_verbose_versions_list_shows_each_default_expansion_state(self):
+        response = self.client.get(self.collection.uri + 'versions/?verbose=true')
+
+        self.assertEqual(response.status_code, 200)
+        head = next(item for item in response.data if item['id'] == 'HEAD')
+        self.assertEqual(head['expansion_health']['state'], self.expansion.health['state'])
+
+    def test_version_export_leaves_out_expansion_health(self):
+        from core.collections.serializers import CollectionVersionExportSerializer
+        self.assertNotIn('expansion_health', CollectionVersionExportSerializer.Meta.fields)
+
+    def test_mapping_list_adds_each_members_class_when_asked(self):
+        from_concept, to_concept = ConceptFactory(), ConceptFactory()
+        mapping = MappingFactory(parent=from_concept.parent, from_concept=from_concept, to_concept=to_concept)
+        self.collection.add_expressions({'expressions': [mapping.uri]}, self.collection.created_by)
+
+        response = self.client.get(self.expansion.uri + 'mappings/?includeHealth=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIn('class', response.data[0]['health'])
+        self.assertEqual(len(response.data[0]['health']['references']), 1)
+
     def test_member_list_ignores_include_health_with_the_toggle_off(self):
         with patch.object(Expansion, 'is_health_on', return_value=False):
             response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
