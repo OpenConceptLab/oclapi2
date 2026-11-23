@@ -4163,6 +4163,8 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(evaluated_urls(private.uri), [private.uri])
         self.assertEqual(evaluated_urls(f'{source.uri}v3'), [f'{source.uri}v3'])
         self.assertEqual(evaluated_urls(private.uri.rstrip('/')), [private.uri.rstrip('/')])
+        # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
+        self.assertEqual(evaluated_urls(source.uri), [recorded.uri])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
