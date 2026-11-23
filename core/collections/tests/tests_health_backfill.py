@@ -120,6 +120,16 @@ class ExpansionHealthBackfillTest(OCLTestCase):
         self.assertIn(f'{second.uri}:', out)
         self.assertNotIn(f'{third.uri}:', out)
 
+    def test_pause_waits_only_between_expansions_whose_health_was_computed(self):
+        second = self.another_expansion()
+        third = self.another_expansion()
+        self.clear(third)
+        Expansion.objects.filter(id=second.id).update(is_processing=True)
+        with patch('core.common.management.commands.backfill_expansion_health.time.sleep') as sleep:
+            self.run_command(self.expansion.uri, second.uri, third.uri, pause=2)
+
+        sleep.assert_called_once_with(2)
+
     def test_collection_version_uri_takes_its_default_expansion(self):
         self.assertIn(f'{self.expansion.uri}:', self.run_command(self.collection.uri))
 

@@ -40,9 +40,8 @@ class Command(BaseCommand):
         self.reasons = Counter()
         mode = 'APPLY' if options['apply'] else 'DRY RUN'
         self.stdout.write(f'{mode}. Rules version {RULES_VERSION}.')
-        for index, expansion_id in enumerate(self.get_expansion_ids()):
-            if index and options['pause']:
-                time.sleep(options['pause'])
+        self.has_computed = False
+        for expansion_id in self.get_expansion_ids():
             self.backfill(expansion_id)
         totals = {**self.totals, 'states': dict(self.states), 'reasons': dict(self.reasons)}
         self.stdout.write(f'{mode} done: {json.dumps(totals, sort_keys=True)}')
@@ -81,6 +80,10 @@ class Command(BaseCommand):
             self.totals[f'skipped_{skipped.replace(" ", "_")}'] += 1
             self.write({'expansion': expansion.uri, 'id': expansion.id, 'skipped': skipped})
             return
+        # waits only between computations: a skip costs nothing
+        if self.has_computed and self.options['pause']:
+            time.sleep(self.options['pause'])
+        self.has_computed = True
         before = {'state': (expansion.health or {}).get('state'), 'is_current': expansion.health_is_current,
                   'rules_version': (expansion.health or {}).get('rules_version')}
         started = time.time()
