@@ -236,13 +236,13 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
 
         self.assertEqual(self.backfill(after=heads['A'])[:2], (1, batches[1:]))
 
-    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_PAGE_SIZE', 1)
-    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_CHUNK_SIZE', 1)
-    def test_the_backfill_pauses_after_each_chunk(self):
-        self.run_import([  # C, new in v3: a third concept with a row to rewrite
-            self.concept('A'), self.concept('B'), self.concept('C'), self.mapping('M2', 'B', 'X02'),
+    @patch('core.concepts.management.commands.concept_release_map_codes.BACKFILL_PAGE_SIZE', 2)
+    def test_the_backfill_pauses_after_each_chunk_it_writes(self):
+        self.run_import([  # C and D, new in v3: concepts with a row to rewrite
+            self.concept('A'), self.concept('B'), self.concept('C'), self.concept('D'), self.mapping('M2', 'B', 'X02'),
             self.mapping('M3', 'B', 'X03'), self.version('v3')])
-        events = []
+        self.run_import([self.concept('E'), self.concept('F')], isolated_version=False)  # no rows to rewrite: HEAD's
+        events, out = [], io.StringIO()
 
         def pages(versioned_object_ids, size):
             for page in chunks(versioned_object_ids, size):
@@ -253,15 +253,16 @@ class ReleaseMapCodesTest(ReleasesFixture, OCLTestCase):
         with patch(f'{command}.time.sleep', side_effect=events.append), patch(f'{command}.chunks', pages), \
                 patch.object(Concept, 'batch_index_partial_by_ids', side_effect=lambda *_, **__: events.append(
                     'chunk')):
-            BackfillCommand(stdout=io.StringIO()).backfill(Source.objects.get(uri=LOINC), pause=2.5)
+            BackfillCommand(stdout=out).backfill(Source.objects.get(uri=LOINC), pause=2.5)
 
-        # a chunk is yielded once the next concept's page is read, and that read waits for the pause
-        self.assertEqual(events, ['page', 'page', 'chunk', 2.5, 'page', 'chunk', 2.5, 'chunk', 2.5])
+        # a chunk ends with its page, and the next page is read after the pause; one with no rows still checkpoints
+        self.assertEqual(events, ['page', 'chunk', 2.5, 'page', 'chunk', 2.5, 'page'])
+        self.assertRegex(out.getvalue().splitlines()[-1], ': chunk 3: 0 docs of 2 concepts .*; 6/6 concepts, 4 docs')
 
     @patch('core.concepts.management.commands.concept_release_map_codes.connections')
     def test_the_backfill_refuses_a_pause_it_cant_wait(self, connections):
-        for pause in (-1, float('nan'), float('inf')):
-            with self.assertRaisesMessage(CommandError, '--pause takes a number of seconds, 0 or more'):
+        for pause in (-1, float('nan'), float('inf'), 3601):
+            with self.assertRaisesMessage(CommandError, '--pause takes 0 to 3600 seconds'):
                 call_command('concept_release_map_codes', source=[LOINC], pause=pause, stdout=io.StringIO())
         connections.get_connection.assert_not_called()  # before the mapping, or any doc, is written
 

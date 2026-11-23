@@ -1,4 +1,3 @@
-import math
 import time
 from collections import defaultdict
 
@@ -15,6 +14,7 @@ from core.sources.models import Source
 
 BACKFILL_CHUNK_SIZE = 1000  # rows, about: a concept's rows are never split between chunks
 BACKFILL_PAGE_SIZE = 200  # the concepts whose rows one query reads
+MAX_PAUSE = 3600  # seconds
 
 
 class Command(BaseCommand):
@@ -49,8 +49,8 @@ class Command(BaseCommand):
             raise CommandError('--source rewrites docs in the concepts index only: leave out --index')
         if options['after'] is not None and len(options['source']) != 1:
             raise CommandError('--after picks up one source: give exactly one --source')
-        if not 0 <= options['pause'] < math.inf:  # not after the first chunk is written
-            raise CommandError('--pause takes a number of seconds, 0 or more')
+        if not 0 <= options['pause'] <= MAX_PAUSE:  # not after the first chunk is written
+            raise CommandError(f'--pause takes 0 to {MAX_PAUSE} seconds')
         index = options['index'] or ConceptDocument._index._name  # pylint: disable=protected-access
         sources = [self.get_source(url) for url in options['source']]
         es = connections.get_connection()
@@ -86,7 +86,8 @@ class Command(BaseCommand):
         now takes HEAD's active codes. Returns how many.
 
         A concept's rows go in one chunk, so its mappings are read once (OpenConceptLab/ocl_online#748). After each
-        chunk it prints the last concept done, which `after` takes to skip those, then waits `pause` seconds.
+        chunk it prints the last concept done, which `after` takes to skip those, then, if it wrote any doc, waits
+        `pause` seconds.
         """
         started = time.monotonic()
         versioned_objects = Concept.objects.filter(parent_id=source.id, id=F('versioned_object_id'))
@@ -106,7 +107,7 @@ class Command(BaseCommand):
                 f'{time.monotonic() - chunk_started:.1f}s; {done}/{total} concepts, {docs} docs, '
                 f'{time.monotonic() - started:.0f}s so far'
                 + (f'; to resume: --after {last}' if last is not None else ''))
-            if pause:  # before the next chunk's rows are read too
+            if pause and ids:  # before the next chunk's rows are read too
                 time.sleep(pause)
             chunk_started = time.monotonic()
         return docs
@@ -115,8 +116,8 @@ class Command(BaseCommand):
     def get_chunks(source, versioned_object_ids, after=None):
         """
         Yields (the last versioned object id, how many concepts, the row ids) for each chunk of the rows backfill
-        rewrites: the rows of `versioned_object_ids`, in that order, whole concepts at a time (first, unless resuming,
-        the rows that have no versioned object, with None as the last).
+        rewrites: the rows of `versioned_object_ids`, in that order, whole concepts at a time, BACKFILL_PAGE_SIZE
+        concepts at most (first, unless resuming, the rows that have no versioned object, with None as the last).
         """
         release_ids = list(source.versions.exclude(version=HEAD).values_list('id', flat=True))
 
@@ -136,14 +137,15 @@ class Command(BaseCommand):
         if after is None:
             if ids := get_rows(Concept.objects.filter(parent_id=source.id, versioned_object_id__isnull=True))[None]:
                 yield None, 0, ids
-        last, concepts, ids = None, 0, []
+        last = None
+        # a chunk ends with its page, so a long run of concepts with no rows to rewrite still checkpoints page by page
         for page in chunks(versioned_object_ids, BACKFILL_PAGE_SIZE):
             rows = get_rows(Concept.objects.filter(versioned_object_id__in=page))
+            concepts, ids = 0, []
             for versioned_object_id in page:
                 if ids and len(ids) + len(rows[versioned_object_id]) > BACKFILL_CHUNK_SIZE:
                     yield last, concepts, ids
                     concepts, ids = 0, []
                 last, concepts = versioned_object_id, concepts + 1
                 ids.extend(rows[versioned_object_id])
-        if concepts:
             yield last, concepts, ids
