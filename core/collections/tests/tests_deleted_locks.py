@@ -1,4 +1,4 @@
-from mock import patch
+from mock import patch, Mock
 
 from core.collections.health import UNHEALTHY
 from core.collections.models import Expansion
@@ -10,6 +10,8 @@ from core.concepts.tests.factories import ConceptFactory
 from core.sources.tests.factories import OrganizationSourceFactory
 
 
+# deleting a version queues its exports' removal, and CI has no broker
+@patch('core.common.models.delete_s3_objects', Mock())
 class DeletedLockTest(OCLTestCase):
     def setUp(self):
         super().setUp()
