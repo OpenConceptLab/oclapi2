@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, connection, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -1020,48 +1020,50 @@ def index_source_public_access(self, source_id):
     source.remove_processing(task_id)
 
 
-@app.task(base=QueueOnceCustomTask)
+# A count task releases its QueueOnce lock as it starts, so a count queued while it runs is kept and reads what was
+# committed meanwhile (one queued before it starts is dropped, as that one reads it anyway). Counts of one repo version
+# and field then take turns on an advisory lock, so the last to run is the last to save.
+COUNT_TASK_ONCE = {'unlock_before_run': True}
+
+
+def update_active_count(model, instance_id, field):
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+                [f'{model.__name__}.{field}.{instance_id}']
+            )
+        instance = model.objects.filter(id=instance_id).first()
+        if instance:
+            before = getattr(instance, field)
+            getattr(instance, f'set_{field}')()
+            if before != getattr(instance, field):
+                # an update, not a save: search documents hold no counts, so there's nothing to index
+                model.objects.filter(id=instance_id).update(**{field: getattr(instance, field)})
+
+
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if source:
-        before_active_concepts = source.active_concepts
-        source.set_active_concepts()
-        if before_active_concepts != source.active_concepts:
-            source.save(update_fields=['active_concepts'])
+    update_active_count(Source, source_id, 'active_concepts')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if source:
-        before_active_mappings = source.active_mappings
-        source.set_active_mappings()
-        if before_active_mappings != source.active_mappings:
-            source.save(update_fields=['active_mappings'])
+    update_active_count(Source, source_id, 'active_mappings')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    if collection:
-        before_active_concepts = collection.active_concepts
-        collection.set_active_concepts()
-        if before_active_concepts != collection.active_concepts:
-            collection.save(update_fields=['active_concepts'])
+    update_active_count(Collection, collection_id, 'active_concepts')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    if collection:
-        before_active_mappings = collection.active_mappings
-        collection.set_active_mappings()
-        if before_active_mappings != collection.active_mappings:
-            collection.save(update_fields=['active_mappings'])
+    update_active_count(Collection, collection_id, 'active_mappings')
 
 
 @app.task
