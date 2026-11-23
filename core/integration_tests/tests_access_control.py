@@ -2155,6 +2155,13 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertEqual(response.status_code, 200, (url, user))
         return self.keys([(row['id'],) for row in response.data], resource)
 
+    def exported(self, url, user, resource):
+        """The keys of this test's rows in the CSV export `url` answers."""
+        with patch('core.common.mixins.write_csv_to_s3', return_value='https://exports.test/export.csv') as export:
+            response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, (url, user))
+        return self.keys([(row['mnemonic'],) for row in export.call_args[0][0]], resource)
+
     def assert_lists(self, query, outsiders, members, resources=('concepts', 'mappings')):
         """Signed out and an outsider list `outsiders`; a member and staff list `members`."""
         for resource in resources:
@@ -2216,40 +2223,22 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assert_answers(f'{self.r_v1.uri}{resource}/?collection={prefix}R', 200, 200, 200)
 
     def test_csv_exports_count_only_versions_the_requester_can_view(self):
-        exports = []
-
-        def export(data, *_args, **_kwargs):
-            exports.append([(row['mnemonic'],) for row in data])
-            return 'https://exports.test/export.csv'
-
         prefix = self.tag
         cases = [(f'collection={prefix}P', [], ['inP']), (f'collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1']),
                  (f'collection={prefix}Q&version=v1', [], ['inQv1']), (f'collection={prefix}R', ['inRv1'], ['inRv1'])]
-        with patch('core.common.mixins.write_csv_to_s3', side_effect=export):
-            for resource, (query, outsiders, members) in itertools.product(['concepts', 'mappings'], cases):
-                for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
-                                       (self.staff, members)]:
-                    exports.clear()
-                    response = self.request('get', f'/{resource}/?csv=true&{query}', user)
-                    self.assertEqual(response.status_code, 200)
-                    self.assertEqual(self.keys(exports[0], resource), sorted(expected), (resource, query, user))
+        for resource, (query, outsiders, members) in itertools.product(['concepts', 'mappings'], cases):
+            for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                   (self.staff, members)]:
+                url = f'/{resource}/?csv=true&{query}'
+                self.assertEqual(self.exported(url, user, resource), sorted(expected), (url, user))
 
     def test_csv_exports_match_the_version_and_its_access_in_one_expansion(self):
         both = ConceptFactory(parent=self.source, mnemonic=f'inQboth{self.tag}')
         self.q_head.expansion.concepts.add(both)
         self.q_v1.expansion.concepts.add(both)
-        exports = []
-
-        def export(data, *_args, **_kwargs):
-            exports.append([(row['mnemonic'],) for row in data])
-            return 'https://exports.test/export.csv'
-
-        with patch('core.common.mixins.write_csv_to_s3', side_effect=export):
-            for user, expected in [(None, []), (self.outsider, []), (self.member, ['inQboth', 'inQv1'])]:
-                exports.clear()
-                response = self.request('get', f'/concepts/?csv=true&collection={self.tag}Q&version=v1', user)
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(self.keys(exports[0], 'concepts'), expected, user)
+        url = f'/concepts/?csv=true&collection={self.tag}Q&version=v1'
+        for user, expected in [(None, []), (self.outsider, []), (self.member, ['inQboth', 'inQv1'])]:
+            self.assertEqual(self.exported(url, user, 'concepts'), expected, user)
 
     def test_deleted_versions_match_nothing(self):
         """The index keeps a deleted version's members until they're indexed again."""
