@@ -124,19 +124,21 @@ class ReferenceConversions:
     def is_visible(self, repo_version):
         """Whether the collection's owner can view it: a publicly viewable version (its HEAD public too) or the
         owner's own. Once per version, as is_publicly_viewable reads the HEAD"""
-        if repo_version.id not in self._visible:
+        key = get_key(repo_version)
+        if key not in self._visible:
             if self.collection.organization_id:
                 owned = repo_version.organization_id == self.collection.organization_id
             else:
                 owned = repo_version.user_id == self.collection.user_id
-            self._visible[repo_version.id] = owned or repo_version.is_publicly_viewable
-        return self._visible[repo_version.id]
+            self._visible[key] = owned or repo_version.is_publicly_viewable
+        return self._visible[key]
 
     def can_requester_view(self, repo_version):
         """Once per version: for an org-private one, has_view_access is a membership query"""
-        if repo_version.id not in self._viewable_by_requester:
-            self._viewable_by_requester[repo_version.id] = repo_version.has_view_access(self.user)
-        return self._viewable_by_requester[repo_version.id]
+        key = get_key(repo_version)
+        if key not in self._viewable_by_requester:
+            self._viewable_by_requester[key] = repo_version.has_view_access(self.user)
+        return self._viewable_by_requester[key]
 
     @staticmethod
     def get_chosen_by(version, locked):
@@ -343,3 +345,8 @@ class ReferenceConversions:
 
 def get_id(instance):
     return instance.id if instance else None
+
+
+def get_key(repo_version):
+    """A source version and a collection version can share an id, so a cache keys them by type too"""
+    return type(repo_version).__name__, repo_version.id

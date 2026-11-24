@@ -255,6 +255,19 @@ class ReferenceConversionsTest(OCLAPITestCase):
 
         self.assertEqual(len({call.args[0].id for call in has_view_access.call_args_list}), has_view_access.call_count)
 
+    def test_a_source_and_a_collection_version_with_one_id_get_their_own_answers(self):
+        conversions = ReferenceConversions(self.head(), self.admin)
+        source_version, collection_version = type(self.source)(id=424242), Collection(id=424242)
+
+        with patch.object(type(self.source), 'has_view_access', return_value=True), \
+                patch.object(Collection, 'has_view_access', return_value=False):
+            self.assertTrue(conversions.can_requester_view(source_version))
+            self.assertFalse(conversions.can_requester_view(collection_version))
+        with patch.object(type(self.source), 'is_publicly_viewable', new_callable=PropertyMock, return_value=True), \
+                patch.object(Collection, 'is_publicly_viewable', new_callable=PropertyMock, return_value=False):
+            self.assertTrue(conversions.is_visible(source_version))
+            self.assertFalse(conversions.is_visible(collection_version))
+
     def test_a_reference_that_is_not_resource_versioned_is_not_supported(self):
         plain = self.add(f'{self.source.uri}concepts/c1/')
 
