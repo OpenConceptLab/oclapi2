@@ -6,6 +6,7 @@ from django.conf import settings
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 from django.core.exceptions import SuspiciousOperation
+from django.urls import Resolver404, resolve
 from pydash import get
 from request_logging.middleware import LoggingMiddleware
 from rest_framework.exceptions import AuthenticationFailed
@@ -103,21 +104,30 @@ class SlowRequestLogMiddleware(BaseMiddleware):
         response = self.get_response(request)
         ms = int((time.monotonic() - start) * 1000)
         if settings.SLOW_REQUEST_LOG_MS and ms >= settings.SLOW_REQUEST_LOG_MS:
-            match = getattr(request, 'resolver_match', None)
-            view = getattr(match, 'func', None)
-            view = getattr(view, 'view_class', view)
             try:
-                emit({
-                    'event': 'slow_request',
-                    'view': getattr(view, '__name__', type(view).__name__) if view else None,
-                    'route': getattr(match, 'route', None),
-                    'method': request.method,
-                    'status': response.status_code,
-                    'ms': ms,
-                })
+                self.log(request, response, ms)
             except Exception:  # noqa: BLE001 - a log line never fails the request it describes
                 pass
         return response
+
+    @staticmethod
+    def log(request, response, ms):
+        match = getattr(request, 'resolver_match', None)
+        if match is None:  # answered before URL resolution, e.g. by a failure in authentication
+            try:
+                match = resolve(request.path_info, getattr(request, 'urlconf', None))
+            except Resolver404:
+                pass
+        view = getattr(match, 'func', None)
+        view = getattr(view, 'view_class', view)
+        emit({
+            'event': 'slow_request',
+            'view': getattr(view, '__name__', type(view).__name__) if view else None,
+            'route': getattr(match, 'route', None),
+            'method': request.method,
+            'status': response.status_code,
+            'ms': ms,
+        })
 
 
 class ResponseHeadersMiddleware(BaseMiddleware):

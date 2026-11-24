@@ -377,7 +377,9 @@ class SlowRequestLogMiddlewareTest(SimpleTestCase):
 
     def test_wraps_every_middleware_but_fhir_errors_so_it_times_the_whole_request(self):
         self.assertEqual(settings.MIDDLEWARE[:2], [
-            'core.middlewares.middlewares.FhirErrorMiddleware', 'core.middlewares.middlewares.SlowRequestLogMiddleware'])
+            'core.middlewares.middlewares.FhirErrorMiddleware',
+            'core.middlewares.middlewares.SlowRequestLogMiddleware',
+        ])
 
     @override_settings(SLOW_REQUEST_LOG_MS=20)
     def test_a_slow_request_logs_its_view_and_route(self):
@@ -409,6 +411,14 @@ class SlowRequestLogMiddlewareTest(SimpleTestCase):
     @override_settings(SLOW_REQUEST_LOG_MS=0)
     def test_zero_turns_it_off(self):
         self.assertEqual(self.records(RequestFactory().get(self.path), delay=0.01), [])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_a_request_answered_before_url_resolution_still_names_its_view(self):
+        """A slow failure in authentication, before Django resolves the URL, still counts for its view."""
+        records = self.records(RequestFactory().get(self.path), delay=0.01, status=500, resolved=False)
+
+        self.assertEqual([(record['view'], record['route']) for record in records], [(
+            'SourceVersionMappedSourcesListView', 'orgs/<str:org>/sources/<str:source>/<str:version>/mapped-sources/')])
 
     @override_settings(SLOW_REQUEST_LOG_MS=1)
     def test_an_unresolved_path_has_no_view_or_route(self):
