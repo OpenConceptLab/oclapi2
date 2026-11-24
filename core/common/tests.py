@@ -2,6 +2,7 @@ import datetime
 import importlib
 import json
 import os
+import shutil
 import sys
 import time
 import unittest
@@ -1384,6 +1385,7 @@ class UtilsTest(OCLTestCase):
     def test_write_rows_to_csv(self):
         """Rows are written under the headers with their serializers; None is blank and datetimes are ISO"""
         cwd = cd_temp()
+        temp_dir = os.getcwd()
         try:
             csv_file = write_rows_to_csv(
                 [{'Name': 'a', 'Tags': ['x', 'y'], 'At': datetime.datetime(2026, 1, 2, 3, 4, 5), 'Note': None}],
@@ -1392,6 +1394,7 @@ class UtilsTest(OCLTestCase):
                 content = file.read()
         finally:
             os.chdir(cwd)
+            shutil.rmtree(temp_dir)
 
         self.assertEqual(csv_file.name, 'rows.csv')
         self.assertEqual(content, 'Name,Tags,At,Note\r\na,"x,y",2026-01-02T03:04:05,\r\n')

@@ -102,6 +102,7 @@ class SourceVersionBaseView(SourceBaseView):
 
 
 class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_label = 'Source'
     csv_type_field = 'source_type'
     serializer_class = SourceListSerializer
     is_searchable = True

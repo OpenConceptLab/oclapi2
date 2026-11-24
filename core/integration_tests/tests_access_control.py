@@ -933,10 +933,7 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
 
     def test_repo_list_rows_keep_the_list_order(self):
         first, second = UserSourceFactory(user=self.owner), UserSourceFactory(user=self.owner)
-        view = SourceListView()
-        view.get_csv_label = lambda: 'Source'
-
-        rows = view.get_csv_rows(Source.objects.filter(id__in=[first.id, second.id]).order_by('-id'))
+        rows = SourceListView().get_csv_rows(Source.objects.filter(id__in=[first.id, second.id]).order_by('-id'))
 
         self.assertEqual([row['URI'] for row in rows], [second.uri, first.uri])
 

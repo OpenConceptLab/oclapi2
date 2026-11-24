@@ -162,6 +162,7 @@ class CollectionVersionBaseView(CollectionBaseView):
 
 
 class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_label = 'Collection'
     csv_type_field = 'collection_type'
     serializer_class = CollectionListSerializer
     is_searchable = True

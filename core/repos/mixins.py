@@ -13,13 +13,11 @@ from core.repos.serializers import RepoExternalExportSerializer
 
 class RepoListCSVMixin:
     """CSV export of a source or collection list: a row per listed repository, under display headers."""
+    csv_label = None  # 'Source' or 'Collection'
     csv_type_field = None  # 'source_type' or 'collection_type'
 
-    def get_csv_label(self):
-        return self.get_queryset().model.__name__
-
     def get_csv_headers(self):
-        label = self.get_csv_label()
+        label = self.csv_label
         return [
             'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
             'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
@@ -28,7 +26,7 @@ class RepoListCSVMixin:
     def get_csv_rows(self, queryset):
         """Read again by id, as the list may be a union, and kept in the list's order."""
         headers = self.get_csv_headers()
-        ids = [repo.id for repo in queryset]
+        ids = list(queryset.values_list('id', flat=True))
         position = {repo_id: index for index, repo_id in enumerate(ids)}
         repos = queryset.model.objects.filter(id__in=ids).select_related('organization', 'user', 'updated_by')
         return [
