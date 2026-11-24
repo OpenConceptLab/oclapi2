@@ -27,7 +27,7 @@ class SchemaErrorLoggingTest(SimpleTestCase):
 
     def test_does_not_log_a_graphql_error_a_resolver_raises(self):
         error = GraphQLError(
-            f"Source '{QUERY_MARKER}' was not found.", source=Source(QUERY), positions=[2], path=['concepts'],
+            f"Source '{QUERY_MARKER}' was not found.", path=['concepts'],
             original_error=GraphQLError(f"Source '{QUERY_MARKER}' was not found."))
         with self.assertNoLogs('strawberry.execution'):
             schema.process_errors([error])

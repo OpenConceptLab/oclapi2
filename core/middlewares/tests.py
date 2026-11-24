@@ -296,9 +296,10 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
     def json_post(self):
         return self.factory.post('/orgs/', data=json.dumps({'name': REQUEST_MARKER}), content_type='application/json')
 
-    def log_lines(self, request, status):
+    def log_lines(self, request, status=400, response=None):
         """Pass the request through the middleware to a view that answers with a marker; return what was logged."""
-        middleware = CustomLoggerMiddleware(lambda req: JsonResponse({'name': RESPONSE_MARKER}, status=status))
+        middleware = CustomLoggerMiddleware(
+            lambda req: response or JsonResponse({'name': RESPONSE_MARKER}, status=status))
         with self.assertLogs('django.request', level='DEBUG') as logs:
             middleware(request)
         return [re.sub(r'\x1b\[[0-9;]*m', '', record.getMessage()) for record in logs.records]
@@ -328,10 +329,7 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
                     '/orgs/', HTTP_AUTHORIZATION=f'Token {REQUEST_MARKER}', HTTP_X_API_KEY=REQUEST_MARKER,
                     HTTP_COOKIE=f'sessionid={REQUEST_MARKER}', HTTP_X_CSRFTOKEN=REQUEST_MARKER,
                     HTTP_X_AUTH_TOKEN=REQUEST_MARKER)
-                middleware = CustomLoggerMiddleware(lambda req: self.json_response_with_cookies())
-                with self.assertLogs('django.request', level='DEBUG') as logs:
-                    middleware(request)
-                lines = [record.getMessage() for record in logs.records]
+                lines = self.log_lines(request, response=self.json_response_with_cookies())
 
                 self.assert_no_marker(lines)
                 self.assertTrue(any('X-Csrftoken' in line and 'Cookie' in line for line in lines))

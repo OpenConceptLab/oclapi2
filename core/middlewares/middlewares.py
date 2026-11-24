@@ -54,12 +54,8 @@ class CustomLoggerMiddleware(LoggingMiddleware):
             return self.get_response(request)
         return super().__call__(request)
 
-    @staticmethod
-    def log_bodies():
-        return settings.ENV == 'development'
-
     def _log_request_body(self, request, logging_context, log_level, cached_request_body):
-        if self.log_bodies():
+        if settings.ENV == 'development':
             super()._log_request_body(request, logging_context, log_level, cached_request_body)
 
     def _log_resp(self, level, response, logging_context):
@@ -71,7 +67,7 @@ class CustomLoggerMiddleware(LoggingMiddleware):
             for name, value in response.items()
         }
         self.logger.log(level, headers, logging_context)
-        if self.log_bodies():
+        if settings.ENV == 'development':
             body = '(data_stream)' if response.streaming else self._chunked_to_max(response.content)
             self.logger.log(level, body, logging_context)
 
