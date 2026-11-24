@@ -158,6 +158,35 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(batch_index_resources_mock.call_args_list, [
             call('concept', {'id__in': [in_head.id]}), call('mapping', {'id__in': [mapping.id]})])
 
+        # a failure after the rows are deleted (here, queueing the export cleanup) still reindexes the members
+        batch_index_resources_mock.reset_mock()
+        head = OrganizationCollectionFactory()
+        ExpansionFactory(collection_version=head).concepts.add(in_head)
+        with patch('core.common.models.delete_s3_objects', Mock(apply_async=Mock(side_effect=ConnectionError))), \
+                self.assertRaises(ConnectionError), self.captureOnCommitCallbacks(execute=True):
+            head.delete(force=True)
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [in_head.id]})
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.common.models.batch_index_resources')
+    def test_deleting_an_organization_indexes_its_collections_former_members_again(self, batch_index_resources_mock):
+        """Organization.delete deletes every collection row in one transaction, so the reindex follows its commit."""
+        concept = ConceptFactory()  # another owner's, which outlives the organization
+        org = OrganizationFactory()
+        head = OrganizationCollectionFactory(organization=org)
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=org, version='v1')
+        ExpansionFactory(collection_version=head).concepts.add(concept)
+        ExpansionFactory(collection_version=v1).concepts.add(concept.get_latest_version())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            org.delete()
+            batch_index_resources_mock.assert_not_called()
+
+        self.assertEqual(
+            {id_ for call_args in batch_index_resources_mock.call_args_list for id_ in call_args[0][1]['id__in']},
+            {concept.id, concept.get_latest_version().id})
+        self.assertEqual({call_args[0][0] for call_args in batch_index_resources_mock.call_args_list}, {'concept'})
+
     @patch('core.common.models.delete_s3_objects')
     def test_delete_head_clears_export_and_external_export_s3_objects_for_all_versions(
             self, delete_s3_objects_mock

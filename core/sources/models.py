@@ -1089,7 +1089,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         concept_ids = list(self.concepts.values_list('id', flat=True))
         mapping_ids = list(self.mappings.values_list('id', flat=True))
         super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
-        transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released))
+        transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released), robust=True)
 
     def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False, user=None):
         """

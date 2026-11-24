@@ -331,12 +331,15 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         delete commits, they are.
         """
         version_ids = list(self.versions.values_list('id', flat=True)) if self.is_head else [self.id]
-        concept_ids, mapping_ids = (set(
-            relation.through.objects.filter(expansion__collection_version_id__in=version_ids).values_list(
-                field, flat=True)) for relation, field in ((Expansion.concepts, 'concept_id'),
-                                                          (Expansion.mappings, 'mapping_id')))
-        super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
-        transaction.on_commit(lambda: self.queue_children_reindex(concept_ids, mapping_ids))
+        expansions = {'expansion__collection_version_id__in': version_ids}
+        concept_ids = set(Expansion.concepts.through.objects.filter(**expansions).values_list('concept_id', flat=True))
+        mapping_ids = set(Expansion.mappings.through.objects.filter(**expansions).values_list('mapping_id', flat=True))
+        user = get(self, 'head.updated_by') or self.updated_by  # HEAD's last editor, as Source.delete's
+        try:
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        finally:  # the rows may be gone even if a later step (export cleanup) failed; a rollback drops this
+            transaction.on_commit(
+                lambda: self.queue_children_reindex(concept_ids, mapping_ids, user), robust=True)
 
     def delete_references(self, expressions):
         if expressions == ALL:  # Deprecated: Old way

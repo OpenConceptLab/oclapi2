@@ -35,7 +35,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
 from core.common.utils import to_owner_uri, chunks
-from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS
+from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS, REINDEX_CHUNK_SIZE
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
@@ -1019,15 +1019,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def queue_children_reindex(self, concept_ids, mapping_ids, user=None):
         """
         Indexes again these concepts and mappings, whose documents name what they belonged to: a deleted version's
-        former members, whose links are gone, or the rows a seed superseded. DROPPED_CHILDREN_CHUNK_SIZE a Task on the
+        former members, whose links are gone, or the rows a seed superseded. REINDEX_CHUNK_SIZE a Task on the
         indexing queue, with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed
         Task. user: who the Tasks belong to (and can cancel them), by default this repository's last editor.
         """
-        from core.sources.constants import DROPPED_CHILDREN_CHUNK_SIZE
         from core.tasks.models import Task
         user = user or self.updated_by
         for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
-            for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):
+            for chunk in chunks(sorted(ids), REINDEX_CHUNK_SIZE):
                 args = [resource, {'id__in': chunk}]
                 if get(settings, 'TEST_MODE', False):
                     batch_index_resources(*args)

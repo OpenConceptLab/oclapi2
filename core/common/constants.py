@@ -155,6 +155,7 @@ CASCADE_DIRECTION_PARAM = 'reverse'
 OMIT_IF_EXISTS_IN = 'omitIfExistsIn'
 INCLUDE_SELF = 'includeSelf'
 FACET_SIZE = 100
+REINDEX_CHUNK_SIZE = 5000  # ids a reindex Task takes (queue_children_reindex)
 ALL = '*'
 CANONICAL_URL_REQUEST_PARAM = 'canonicalUrl'
 SAME_STANDARD_CHECKSUM_ERROR = 'No changes detected. Standard checksum is same as last version.'
