@@ -40,7 +40,13 @@ class CustomLoggerMiddleware(LoggingMiddleware):
     """
     django-request-logging: logs each request's method and path, and its status. Request and response bodies are
     logged only in development; the library would log them at DEBUG, or at ERROR for a 4xx or 5xx response.
+    Credential headers (those analytics events redact) are masked.
     """
+    def __init__(self, get_response=None):
+        super().__init__(get_response)
+        # The library matches request.headers names exactly, and Django title-cases them ('X-Api-Key').
+        self.sensitive_headers = [name.title() for name in AnalyticsEventEmitter.SENSITIVE_HEADERS]
+
     def __call__(self, request):
         if request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
             return self.get_response(request)
@@ -57,8 +63,12 @@ class CustomLoggerMiddleware(LoggingMiddleware):
     def _log_resp(self, level, response, logging_context):
         if self.log_bodies():
             super()._log_resp(level, response, logging_context)
-        elif re.match('^application/json', response.get('Content-Type', ''), re.I):
-            self.logger.log(level, response.headers, logging_context)  # the headers the library logs with the body
+        elif re.match('^application/json', response.get('Content-Type', ''), re.I):  # the library logs their headers
+            headers = {
+                name: '*****' if name.lower() in AnalyticsEventEmitter.SENSITIVE_HEADERS else value
+                for name, value in response.items()
+            }
+            self.logger.log(level, headers, logging_context)
 
 
 class FixMalformedLimitParamMiddleware(BaseMiddleware):

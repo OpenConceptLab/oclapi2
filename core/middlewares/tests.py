@@ -324,19 +324,22 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
     def test_masks_credential_headers(self):
         request = self.factory.get(
             '/orgs/', HTTP_AUTHORIZATION=f'Token {REQUEST_MARKER}', HTTP_X_API_KEY=REQUEST_MARKER,
-            HTTP_COOKIE=f'sessionid={REQUEST_MARKER}')
-        middleware = CustomLoggerMiddleware(lambda req: self.json_response_setting_cookie())
+            HTTP_COOKIE=f'sessionid={REQUEST_MARKER}', HTTP_X_CSRFTOKEN=REQUEST_MARKER,
+            HTTP_X_AUTH_TOKEN=REQUEST_MARKER)
+        middleware = CustomLoggerMiddleware(lambda req: self.json_response_with_cookies())
         with self.assertLogs('django.request', level='DEBUG') as logs:
             middleware(request)
         lines = [record.getMessage() for record in logs.records]
 
         self.assert_no_marker(lines)
-        self.assertTrue(any('X-Api-Key' in line and 'Cookie' in line for line in lines))
+        self.assertTrue(any('X-Csrftoken' in line and 'Cookie' in line for line in lines))
+        self.assertTrue(any('Set-Cookie' in line for line in lines))
 
     @staticmethod
-    def json_response_setting_cookie():
+    def json_response_with_cookies():
         response = JsonResponse({}, status=400)
         response.set_cookie('sessionid', RESPONSE_MARKER)
+        response['Set-Cookie'] = f'token={RESPONSE_MARKER}'
         return response
 
     @override_settings(ENV='development')
