@@ -186,8 +186,9 @@ class ExceptionHandlerTest(SimpleTestCase):
         # a capability policy's 403 body can carry objects for client apps to render; they aren't messages
         body = {
             'detail': 'Content is read-only.', 'error_code': 'content_read_only', 'limit': 0, 'used': 3,
+            'renews_at': None, 'scope': ['First', 2],
             'notice': {'title': 'Example notice', 'actions': [{'label': 'Example action', 'url': 'https://x'}]},
-            'links': {'docs': 'https://x'},
+            'links': {'docs': 'https://x'}, 'mixed': ['Example message', {'title': 'Example notice'}],
         }
         response = self.handle(WriteRefused(body))
 
@@ -195,13 +196,21 @@ class ExceptionHandlerTest(SimpleTestCase):
         self.assertEqual(
             [(item['details']['text'], item.get('expression')) for item in response.data['issue']],
             [('Content is read-only.', ['detail']), ('content_read_only', ['error_code']), ('0', ['limit']),
-             ('3', ['used'])])
+             ('3', ['used']), ('None', ['renews_at']), ('First', ['scope']), ('2', ['scope'])])
+
+    def test_a_refusal_body_listing_objects_makes_issues_only_of_its_messages(self):
+        response = self.handle(WriteRefused(['Example message', {'title': 'Example notice'}]))
+
+        self.assertEqual(
+            [(item['details']['text'], item.get('expression')) for item in response.data['issue']],
+            [('Example message', None)])
 
     def test_a_refusal_body_of_objects_only_is_answered_with_its_status(self):
-        response = self.handle(WriteRefused({'notice': {'title': 'Example notice'}}))
+        for body in ({'notice': {'title': 'Example notice'}}, [{'title': 'Example notice'}]):
+            response = self.handle(WriteRefused(body))
 
-        self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'])
-        self.assertEqual(response.data['issue'][0]['details']['text'], 'Forbidden')
+            self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'], body)
+            self.assertEqual(response.data['issue'][0]['details']['text'], 'Forbidden', body)
 
     def test_server_side_api_exceptions_never_return_a_5xx(self):
         class Unavailable(exceptions.APIException):

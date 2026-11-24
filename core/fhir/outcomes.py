@@ -152,9 +152,11 @@ def refusal_messages(body):
     A capability refusal's body without the objects it carries for OCL's apps to show in place of its `detail`: as
     issues, every value in them would be an error of its own.
     """
-    if not isinstance(body, dict):
-        return body
-    return {key: value for key, value in body.items() if is_message(value)}
+    if isinstance(body, dict):
+        return {key: value for key, value in body.items() if is_message(value)}
+    if isinstance(body, (list, tuple)):
+        return [item for item in body if is_message(item)]
+    return body
 
 
 def with_tx_issue_types(outcome):
@@ -268,8 +270,11 @@ def outcome_for_exception(exc):
             headers['Retry-After'] = str(int(exc.wait))
         status_code = exc.status_code
         code = status_issue_code(status_code)
-        detail = refusal_messages(exc.detail) if isinstance(exc, UsageRefused) else exc.detail
-        outcome = operation_outcome(*(detail_issues(detail, code) or [issue(code, status_text(status_code))]))
+        if isinstance(exc, UsageRefused):  # with no messages left, its status: an OperationOutcome needs an issue
+            issues = detail_issues(refusal_messages(exc.detail), code) or [issue(code, status_text(status_code))]
+        else:
+            issues = detail_issues(exc.detail, code)
+        outcome = operation_outcome(*issues)
         if status_code >= 500:
             report_server_error(status_code, exc)
     else:
