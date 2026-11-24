@@ -1148,6 +1148,8 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             name = row.get('name') or row.get('Name') if reranker else None
             es_search.to_queryset(False, True, False, name, encoder_model)
+            if visible_repo_criteria:  # as the database has them now, so a stale index document can't show
+                es_search.queryset = Concept.get_viewable(es_search.queryset, self.request.user)
             print(f"[{cid}] ES Search (including reranker={reranker}) executed in {time.time() - start_time} seconds")
             start_time = time.time()
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': original_filters}

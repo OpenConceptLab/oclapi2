@@ -902,6 +902,15 @@ class SourceChildMixin(ChecksumModel):
         return instance1.get_checksums() == instance2.get_checksums()
 
     @staticmethod
+    def get_viewable(queryset, user):
+        """The concepts or mappings of `queryset` in repos `user` (None or anonymous for the public) can view."""
+        if get(user, 'is_staff'):
+            return queryset
+        if not get(user, 'is_authenticated'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        return SourceChildMixin.apply_user_criteria(queryset, user)
+
+    @staticmethod
     def apply_user_criteria(queryset, user):
         queryset = queryset.exclude(
             Q(parent__user_id__isnull=False, public_access=ACCESS_TYPE_NONE) & ~Q(parent__user_id=user.id))

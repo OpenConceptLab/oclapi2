@@ -137,6 +137,10 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
         return cls.objects.filter(public_access=ACCESS_TYPE_VIEW)
 
     @classmethod
+    def get_viewable(cls, queryset, user):
+        return cls.get_visible_to(user, queryset)
+
+    @classmethod
     def get_visible_to(cls, user, queryset):
         """Limits `queryset` to the orgs `user` can view: public orgs and the user's own. Staff can view all."""
         if get(user, 'is_superuser') or get(user, 'is_staff'):
