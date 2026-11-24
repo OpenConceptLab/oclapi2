@@ -469,6 +469,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     # A release request may have left its indexing here: it waits for a rerun, as on a failed seed
                     instance.record_seed_stage(None)
                     raise
+                if instance.released:
+                    # created released, it holds HEAD's members only now, which can change their class
+                    from core.collections.models import Expansion
+                    Expansion.mark_health_not_current_for_repository(instance)
             elif autoexpand:
                 if not seed_from_head:
                     instance.cascade_children_to_expansion(index=True, sync=sync)
