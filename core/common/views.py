@@ -1166,8 +1166,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         results = self.__get_fuzzy_search_results(
             source_versions=source_versions, other_filters=other_filters, sort=False
         ) if self.is_fuzzy_search else self.__get_search_results()
-        if results is None:  # nothing to search for, such as a query of only quotes
-            return None
 
         results = results.extra(size=0)
         search = CustomESSearch(results)
@@ -1349,8 +1347,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_search_stats(
             self, source_versions=None, other_filters=None
     ):
-        search = self.__get_search_aggregations(source_versions, other_filters)
-        return search.get_aggregations(self.is_verbose(), self.is_raw()) if search else []  # as for no hits
+        return self.__get_search_aggregations(
+            source_versions, other_filters
+        ).get_aggregations(self.is_verbose(), self.is_raw())
 
     def is_repo_version_children_request(self):
         if self.is_source_child_document_model() and self.kwargs and 'source' in self.kwargs:

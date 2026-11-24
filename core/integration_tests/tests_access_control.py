@@ -1686,7 +1686,9 @@ class DetailHeadAccessTest(AccessTestMixin, OCLAPITestCase):
                 self.assert_head_answers_as_get(url, user, 200)
 
     def test_head_on_a_private_detail_is_refused_as_get_is(self):
-        for url in self.urls[ACCESS_TYPE_NONE]:
+        expansions_url = self.urls[ACCESS_TYPE_NONE][-1]
+        for url in [*self.urls[ACCESS_TYPE_NONE], expansions_url + '?q=%20&searchStatsOnly=true',
+                    expansions_url + '?q=x&searchStatsOnly=true']:
             self.assert_head_answers_as_get(url, None, 401)
             self.assert_head_answers_as_get(url, self.outsider, 403)
             self.assert_head_answers_as_get(url, self.member, 200)

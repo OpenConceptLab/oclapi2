@@ -686,11 +686,13 @@ class FuzzySearchListsTest(CrossRepoAccessBaseTest):
             response = self.client.get(f'{url}?fuzzy=true&q={self.name}&min_score=0.01')
             self.assertEqual((response.status_code, len(response.data)), (200, 1), url)
 
-    def test_stats_only_search_for_nothing_answers_an_empty_list(self):
+    def test_stats_only_search_for_nothing_answers_as_the_list(self):
         for url in ['/mappings/', self.collection.uri + 'concepts/', self.public_source.uri + 'concepts/']:
             for fuzzy, query in itertools.product(['true', 'false'], ['%22%22', '%20', "''"]):
-                response = self.client.get(f'{url}?fuzzy={fuzzy}&q={query}&searchStatsOnly=true')
-                self.assertEqual((response.status_code, response.data), (200, []), (url, fuzzy, query))
+                params = f'?fuzzy={fuzzy}&q={query}'
+                response = self.client.get(url + params + '&searchStatsOnly=true')
+                self.assertEqual(response.status_code, 200, (url, params))
+                self.assertEqual(list(response.data), list(self.client.get(url + params).data), (url, params))
 
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
