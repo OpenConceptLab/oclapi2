@@ -375,6 +375,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 update_active_count(self.__class__, self.id, field)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+        from core.collections.models import Expansion
         from core.mappings.models import Mapping
         to_index = {Concept: [], Mapping: []}
         with transaction.atomic():
@@ -396,6 +397,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                         source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
                     if model is Concept:
                         HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
+                    # they left HEAD, which changes their class in the expansions that hold them
+                    Expansion.mark_health_out_of_date_for_members(
+                        f'{model.__name__.lower()}s', [*chunk, *latest_ids])
                     to_index[model] += [*chunk, *latest_ids]
 
         if to_index[Concept] or to_index[Mapping]:

@@ -401,6 +401,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.save()
             # a seed that ended before this made it the default stored no health
             if Expansion.objects.filter(id=expansion.id, is_processing=False, health_is_current__isnull=True).exists():
+                # the seed saved what it found (unresolved repositories among it) on its own copy
+                expansion.refresh_from_db()
                 expansion.update_health()
 
         return expansion
@@ -2607,8 +2609,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             # None, not False: nothing is queued, so the next change queues a recompute
             expansions.filter(health_revision=revision).update(health_is_current=None)
             return None
-        if not expansions.filter(health_revision=revision).update(health=health, health_is_current=True):
-            # marked while it computed: a fresh run reads the change
+        # the store bumps it too, so an older run that ends after a newer one (a rebuild's) can't overwrite it
+        if not expansions.filter(health_revision=revision).update(
+                health=health, health_is_current=True, health_revision=F('health_revision') + 1):
+            # marked, or stored by a newer run, while it computed: a fresh run reads the change
             self.queue_health_recompute(self.id)
             return None
         self.health = health
@@ -2674,14 +2678,23 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     def mark_health_out_of_date_for_members(cls, resource_type, member_ids):
         """A member leaving or re-entering HEAD changes its class. The default expansions holding it are marked out
         of date, and each that wasn't already is recomputed, as a frozen release would otherwise never be"""
+        if not member_ids:
+            return
         expansion_ids = list(cls.objects.filter(
             collection_version__expansion_uri=F('uri'), **{f'{resource_type}__id__in': member_ids}
         ).values_list('id', flat=True).distinct())
+        if not expansion_ids:
+            return
         if not cls.is_health_on():
             cls.mark_health_not_current(expansion_ids)
             return
-        for expansion in cls.objects.filter(id__in=expansion_ids):
-            expansion.mark_health_out_of_date()
+        expansions = cls.objects.filter(id__in=expansion_ids)
+        # bumped first, as mark_health_out_of_date does, then the ones not already out of date are flipped and queued
+        expansions.update(health_revision=F('health_revision') + 1)
+        queued_ids = list(expansions.exclude(health_is_current=False).values_list('id', flat=True))
+        cls.objects.filter(id__in=queued_ids).update(health_is_current=False)
+        for expansion_id in queued_ids:
+            cls.queue_health_recompute(expansion_id)
 
     def mark_health_out_of_date(self):
         """Marks the health out of date and queues one recompute, however many changes follow before it runs. With the
@@ -2693,11 +2706,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.health_is_current = None
             return
         self.health_is_current = False
-        if not expansions.exclude(health_is_current=False).update(health_is_current=False, health_revision=bump):
-            # already out of date: its queued run reads this change too
-            expansions.update(health_revision=bump)
-            return
-        self.queue_health_recompute(self.id)
+        # bumped on its own first, so a run that read the old revision can't then store its result as current
+        expansions.update(health_revision=bump)
+        if expansions.exclude(health_is_current=False).update(health_is_current=False):
+            self.queue_health_recompute(self.id)
 
     def clear_processing(self, full_save=False):
         if self.is_processing:
