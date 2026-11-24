@@ -11,7 +11,7 @@ from core.capabilities.constants import WRITE_ACTION_EDIT
 from core.capabilities.policy import get_capability_policy
 from core.capabilities.writes import get_write_refusal, get_write_target
 from core.common.checksums import ChecksumModel
-from core.common.constants import ISO_639_1, LATEST, HEAD, ALL, ACCESS_TYPE_NONE
+from core.common.constants import ISO_639_1, LATEST, HEAD, ALL
 from core.common.db_functions import ImmutableUnaccent
 from core.common.mixins import SourceChildMixin
 from core.common.models import VersionedModel, ConceptContainerModel
@@ -1433,15 +1433,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         """
         from core.concepts.documents import ConceptDocument
         return cls.batch_index_partial_by_ids(queryset, ConceptDocument, cls.get_mapped_codes_actions, refresh=False)
-
-    @staticmethod
-    def get_viewable(queryset, user):
-        """The concepts of `queryset` in repos `user` (None or anonymous for the public) can view."""
-        if get(user, 'is_staff'):
-            return queryset
-        if not get(user, 'is_authenticated'):
-            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
-        return Concept.apply_user_criteria(queryset, user)
 
     def get_viewable_hierarchy_concept_urls(self, relation, user, repo_version=None):
         """
