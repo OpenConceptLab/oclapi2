@@ -1080,8 +1080,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             service.delete_objects(prefix, key_pattern=key_pattern)
 
     def get_export_paths_to_delete(self):
-        return self.get_export_key_prefixes() + [
-            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
+        """Also the prefix without the default expansion: a version exported before it had one keeps that export."""
+        prefixes = self.get_export_key_prefixes()
+        bare = self.get_version_export_path(suffix=None, with_expansion=False)
+        if bare != prefixes[0][0]:
+            prefixes.append((bare, get_export_key_pattern(bare)))
+        return prefixes + [(path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
@@ -1648,12 +1652,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
         return self.get_version_export_path(suffix=f"{last_update}.zip")
 
-    def get_version_export_path(self, suffix='*'):
+    def get_version_export_path(self, suffix='*', with_expansion=True):
         owner = self.parent
         owner_type = f'{owner.get_url_kwarg()}s'
         # each dynamic part is one segment, so a version like 'a/b' can't pass for version 'a' with expansion 'b'
         parts = [owner.mnemonic, f'{self.resource_type.lower()}s', self.mnemonic, self.version]
-        expansion = get(self, 'expansion.mnemonic')
+        expansion = get(self, 'expansion.mnemonic') if with_expansion else None
         if expansion:
             parts.append(expansion)
         path = f"{owner_type}/" + '/'.join(quote(part, safe='') for part in parts) + '.'

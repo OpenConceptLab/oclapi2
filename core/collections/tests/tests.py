@@ -45,7 +45,7 @@ from core.common.tasks import update_collection_active_mappings_count
 from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count, \
     update_active_count
 from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
-from core.common.utils import to_owner_uri, get_falsy_values, drop_version
+from core.common.utils import to_owner_uri, get_falsy_values, drop_version, get_export_key_pattern
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -213,6 +213,21 @@ class CollectionTest(OCLTestCase):
 
         called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
         self.assertEqual(called_paths, expected_paths)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_version_clears_its_exports_with_and_without_its_default_expansion(self, delete_s3_objects_mock):
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        bare = v1.get_version_export_path(suffix=None)  # where an export made before it had an expansion went
+        v1.expansion_uri = ExpansionFactory(collection_version=v1).uri
+        v1.save()
+        expanded = v1.get_version_export_path(suffix=None)
+        self.assertNotEqual(expanded, bare)
+
+        v1.delete(force=True, sync=True)
+
+        for prefix in (bare, expanded):
+            delete_s3_objects_mock.assert_any_call(prefix, get_export_key_pattern(prefix))
 
     def test_add_expressions(self):
         collection = OrganizationCollectionFactory()
