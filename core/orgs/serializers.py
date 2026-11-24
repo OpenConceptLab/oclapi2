@@ -129,6 +129,7 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
 
     def update(self, instance, validated_data):
         request_user = self.context['request'].user
+        sets_access = 'public_access' in validated_data and not instance.is_same_access(validated_data['public_access'])
         instance.description = validated_data.get('description', instance.description)
         instance.public_access = validated_data.get('public_access', instance.public_access)
         instance.name = validated_data.get('name', instance.name)
@@ -138,9 +139,9 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
         instance.extras = validated_data.get('extras', instance.extras)
         instance.text = validated_data.get('text', instance.text)
         instance.updated_by = request_user
-        if 'public_access' in validated_data:
+        if sets_access:
             instance.save()
-        else:  # a concurrent write's access stays
+        else:  # sends no access, or the one it loaded: a concurrent write's access stays
             instance.save_keeping_access()
         if instance.id:
             instance.set_checksums()

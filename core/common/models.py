@@ -26,6 +26,7 @@ from elasticsearch import ApiError, TransportError
 from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
 from pydash import get
 
+from core.capabilities.constants import WRITE_ACTION_PUBLISH
 from core.capabilities.writes import check_make_private, check_publish
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
@@ -311,6 +312,12 @@ class BaseModel(models.Model):
         self.public_access = normalize_public_access(self.public_access, self.public_access_for_retired_edit)
         super().save(
             *args, force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+
+    def is_same_access(self, public_access):
+        """Whether `public_access` is the access this row has as loaded, in any case, the retired Edit as stored"""
+        def normalized(value):
+            return (normalize_public_access(value, self.public_access_for_retired_edit) or '').lower()
+        return normalized(public_access) == normalized(self.public_access)
 
     @classmethod
     def get_fields_but_access(cls):
@@ -1424,17 +1431,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         The tasks the save queues go once its transaction ends. keep_access=True keeps the stored row's access whatever
         it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
         with no lock, and the save runs under autocommit, as other REST writes do. A blank access is stored as None
-        instead, so that save writes it, under the lock. A save that sets an access others can view (a REST edit that
-        sends it) reads the stored row under the lock too, and asks the capability policy about publishing when that
-        row is private, so a concurrent write that made it private isn't published unasked (unless the request read a
-        private HEAD, so its own check asked).
+        instead, so that save writes it, under the lock. A save that sets an access others can view, when the request's
+        own check didn't ask about publishing (a version under a private HEAD), reads the stored row under the lock too
+        and asks then, so a write that made it viewable meanwhile, such as publishing its HEAD, isn't published unasked.
         """
         keep_private = kwargs.pop('keep_private', False)
         keep_access = kwargs.pop('keep_access', False)
-        sets_viewable_access = not keep_private and not keep_access and obj.public_can_view
-        # a HEAD loaded as private: the request's own check asked about publishing it
-        asked_to_publish = obj.is_head and not obj.is_public_access(
-            obj.get_dirty_fields().get('public_access', obj.public_access))
+        sets_viewable_access = not keep_private and not keep_access and obj.public_can_view and get(
+            obj, '_checked_write_action') != WRITE_ACTION_PUBLISH
         lock = keep_private or sets_viewable_access or (
             keep_access and cls.objects.filter(id=obj.id, public_access='').exists())
         errors = {}
@@ -1473,8 +1477,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.updated_by = updated_by
                 # a row made private, or moved while private: the capability policy may refuse it
                 check_make_private(obj.updated_by, obj, original_repo)
-                # as stored now: a concurrent write may have made it private
-                if sets_viewable_access and not asked_to_publish:
+                if sets_viewable_access:  # as stored now, which a concurrent write may have changed
                     check_publish(obj.updated_by, obj, original_repo)
                 if queue_schema_update_task:
                     target_schema = obj.custom_validation_schema
