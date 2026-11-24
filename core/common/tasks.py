@@ -518,21 +518,38 @@ def compute_expansion_health(expansion_id):
 
 @app.task(ignore_result=True)
 def recheck_expansion_health(limit=None):
-    """Nightly: recomputes, a batch at a time, the default expansions whose health isn't current. A release, retire
-    or delete leaves them so, and a frozen release never gets another change. One with a run queued (False) is taken
-    too, in case that run never came: a duplicate is harmless, as a store checks the revision"""
+    """Nightly: queues, a batch at a time, a recompute of each default expansion whose health isn't current. A
+    release, retire or delete leaves them so, and a frozen release never gets another change. One with a run queued
+    (False) is taken too, in case that run never came: a duplicate is harmless, as a store checks the revision.
+    The ones tried longest ago, or never, go first, so rows that fail every night don't starve the rest; the runs are
+    spread over a window, one task each. Returns how many were queued"""
     from django.db.models import F
-    from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT
+    from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT, EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
     from core.collections.models import Expansion
     if not Expansion.is_health_on():
         return 0
     expansion_ids = list(Expansion.objects.exclude(health_is_current=True).filter(
         is_processing=False, is_active=True, collection_version__is_active=True,
         collection_version__expansion_uri=F('uri')
-    ).order_by('id').values_list('id', flat=True)[:limit or EXPANSION_HEALTH_RECHECK_LIMIT])
-    for expansion_id in expansion_ids:
-        compute_expansion_health(expansion_id)
-    return len(expansion_ids)
+    ).order_by(F('health_checked_at').asc(nulls_first=True), 'id').values_list('id', flat=True)[
+        :EXPANSION_HEALTH_RECHECK_LIMIT if limit is None else min(limit, EXPANSION_HEALTH_RECHECK_LIMIT)])
+    if not expansion_ids:
+        return 0
+    spacing = EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS / len(expansion_ids)
+    queued = 0
+    for index, expansion_id in enumerate(expansion_ids):
+        if get(settings, 'TEST_MODE', False):
+            compute_expansion_health(expansion_id)
+        else:
+            try:
+                compute_expansion_health.apply_async((expansion_id,), queue='default', countdown=int(index * spacing))
+            except Exception:  # pylint: disable=broad-except
+                logger.exception('Could not queue expansion health for %s', expansion_id)
+                break
+        queued += 1
+    # only those queued count as tried, so the rest keep their place for tomorrow's batch
+    Expansion.objects.filter(id__in=expansion_ids[:queued]).update(health_checked_at=timezone.now())
+    return queued
 
 
 @app.task
