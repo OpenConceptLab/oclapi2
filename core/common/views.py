@@ -29,7 +29,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
     CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER, FACET_SIZE
 from core.common.exceptions import Http400
-from core.common.mixins import PathWalkerMixin
+from core.common.mixins import PathWalkerMixin, SourceChildMixin
 from core.common.permissions import CanViewConceptDictionary
 from core.common.search import CustomESSearch, EXACT_OWNER_FIELD
 from core.common.serializers import RootSerializer
@@ -54,6 +54,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
+    search_checks_access = False  # the search filtered its hits by access, so they load through get_viewable_hits
     is_page_size_capped = False  # concept, mapping and reference lists: `limit` is capped at settings.LIST_MAX_LIMIT
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
@@ -1057,6 +1058,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria())
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
+        # an org search in the requester's own scope reads the index's members, so it's checked as well
+        self.search_checks_access = visibility_criteria is not None or self.is_org_document()
         faceted_criterion = self.get_faceted_criterion()
         if faceted_criterion:
             results = results.filter(faceted_criterion)
@@ -1311,7 +1314,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 brief=self.is_brief()
             )
             self.total_count = es_search.total - offset
-            return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
+            queryset = self.get_viewable_hits(es_search.queryset) if self.search_checks_access else es_search.queryset
+            return queryset, es_search.scores, es_search.max_score, es_search.highlights
         except RequestError as ex:  # pragma: no cover
             reason = get(
                 ex, 'info.error.caused_by.reason', ''
@@ -1325,6 +1329,33 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             raise Http400(detail=reason or get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
         except TransportError as ex:  # pragma: no cover
             raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
+
+    def get_viewable_hits(self, hits):
+        """
+        The hits the requester can view, as the database has them now: a hit whose index document is stale, such as a
+        repository made private before it was reindexed, is left out, and so is a concept or mapping of a source the
+        requester can't view (a source made private commits before its save signal makes them private). One query for
+        the page (one per model for the repo search, whose hits are sources and collections). Like the search's access
+        filter, it keeps the repositories, concepts and mappings the requester created. The page can then hold fewer
+        hits than its limit, while num_found stays the index's count.
+        """
+        user = self.request.user
+        if not isinstance(hits, models.QuerySet):  # the repo search's sources and collections
+            viewable_ids = {
+                (model, _id) for model in {type(hit) for hit in hits}
+                for _id in self.get_viewable_hits(model.objects.filter(
+                    id__in=[hit.id for hit in hits if isinstance(hit, model)])).values_list('id', flat=True)
+            }
+            return [hit for hit in hits if (type(hit), hit.id) in viewable_ids]
+        viewable = hits.model.get_viewable(hits, user)
+        if issubclass(hits.model, SourceChildMixin):
+            from core.sources.models import Source
+            parents = Source.get_viewable(Source.objects.filter(id__in=hits.order_by().values('parent_id')), user)
+            viewable = viewable.filter(parent_id__in=parents.values('id'))
+        if user.is_authenticated and not user.is_staff and (
+                self.is_concept_container_document_model() or self.is_source_child_document_model()):
+            viewable = hits.filter(models.Q(id__in=viewable.values('id')) | models.Q(created_by_id=user.id))
+        return viewable
 
     def get_search_results_qs(self):
         return self.__get_queryset_from_search_results(self.__get_search_results())
