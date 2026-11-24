@@ -7,7 +7,7 @@ from django_elasticsearch_dsl.registries import registry
 from pydash import compact, get
 
 from core.common.constants import HEAD
-from core.common.utils import jsonify_safe, flatten_extras, drop_version
+from core.common.utils import jsonify_safe, flatten_extras, drop_version, chunks
 from core.concepts.embeddings import ConceptVectors, needs_vectors
 from core.concepts.models import Concept
 
@@ -24,6 +24,9 @@ RELEASE_MAP_CODES = 'release_map_codes'
 MAP_CODE_FIELDS = ('same_as_map_codes', 'other_map_codes')
 MAPPED_CODES_PATH = 'mapped_codes'
 MAPPING_VALUES = ('map_type', 'to_concept_code', 'to_source_url')
+# The versioned objects one query reads releases' mappings for. With a few hundred, PostgreSQL reads every row of
+# mappings instead of using indexes (OpenConceptLab/ocl_online#748)
+MAPPED_CODES_QUERY_SIZE = 50
 
 
 def to_mapped_codes(mappings):
@@ -63,7 +66,8 @@ class MappedCodes:
     - each release whose own mappings (the active ones, as Concept.get_version_mappings reads them) give other codes
       is in an entry of release_map_codes (one per distinct set of codes, naming its releases by id), which a search
       in that release reads instead (ConceptDocument.scope_map_codes_to_release).
-    Two queries for all the rows, plus HEAD's mappings for each of HEAD's rows.
+    Two queries for all the rows (a mappings query per MAPPED_CODES_QUERY_SIZE versioned objects), plus HEAD's
+    mappings for each of HEAD's rows.
     """
     def __init__(self, concepts):
         from core.mappings.models import Mapping
@@ -81,12 +85,13 @@ class MappedCodes:
             return
         source_ids = {source_id for releases in self.releases.values() for source_id in releases}
         versioned_object_ids = {concept.versioned_object_id for concept in concepts if concept.id in self.releases}
-        for source_id, versioned_object_id, *values in Mapping.sources.through.objects.filter(
-                source_id__in=source_ids, mapping__from_concept__versioned_object_id__in=versioned_object_ids,
-                mapping__is_active=True
-        ).values_list('source_id', 'mapping__from_concept__versioned_object_id', 'mapping_id',
-                      *(f'mapping__{value}' for value in MAPPING_VALUES)):
-            self.mappings[(source_id, versioned_object_id)][values[0]] = dict(zip(MAPPING_VALUES, values[1:]))
+        for batch in chunks(sorted(compact(versioned_object_ids)), MAPPED_CODES_QUERY_SIZE):
+            for source_id, versioned_object_id, *values in Mapping.sources.through.objects.filter(
+                    source_id__in=source_ids, mapping__from_concept__versioned_object_id__in=batch,
+                    mapping__is_active=True
+            ).values_list('source_id', 'mapping__from_concept__versioned_object_id', 'mapping_id',
+                          *(f'mapping__{value}' for value in MAPPING_VALUES)):
+                self.mappings[(source_id, versioned_object_id)][values[0]] = dict(zip(MAPPING_VALUES, values[1:]))
 
     def get_release_mappings(self, concept, source_id):
         return self.mappings.get((source_id, concept.versioned_object_id), {})
