@@ -185,6 +185,10 @@ class ListWithHeadersMixin(ListModelMixin):
         if query_string:
             key_body += '?' + query_string
             key_headers += '?' + query_string
+        if self.only_facets():  # facets name only the collections the requester can view, so each gets their own
+            requester = f"#requester={get(request.user, 'id') if get(request.user, 'is_authenticated') else ''}"
+            key_body += requester
+            key_headers += requester
 
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 

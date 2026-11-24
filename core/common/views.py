@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
-from elasticsearch_dsl import Q
+from elasticsearch_dsl import Q, TermsFacet
 from pydash import get, compact
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
@@ -27,7 +27,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER, FACET_SIZE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.permissions import CanViewConceptDictionary
@@ -68,6 +68,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     collection_facets = ('collection', 'collection_url', 'collection_owner_url')
     max_viewable_collection_urls = 1000
     _viewable_collection_urls = None  # get_viewable_collection_urls's, read once per request and facet value
+    # the facets that name collection versions or expansions, with the index field holding the URLs they come from
+    collection_url_facets = {'collection': 'collection_url', 'collection_version': 'collection_url',
+                             'expansion': 'expansion_url'}
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -717,6 +720,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_facets(self):  # pylint: disable=too-many-branches
         facets = {}
         parent_repo = None
+        is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
+        url_facets = {}
 
         if self.facet_class:
             if self.is_user_document():
@@ -731,6 +736,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 parent_repo = params['parent'] = get(self, 'parent_resource')
             if self.map_codes_release:
                 params['release'] = self.map_codes_release
+            url_facets = self.get_collection_url_facets(is_global_scope)
+            if url_facets:
+                params['extra_facets'] = url_facets
 
             faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
@@ -743,7 +751,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets.pop('updatedBy', None)
         if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
-        is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
 
         normalized_facet_concept_class = facets.pop('_conceptClass', None) or []
         normalized_facet_datatype = facets.pop('_datatype', None) or []
@@ -767,11 +774,81 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 facets.pop('collection_owner_url', None)
         facets.pop('is_in_latest_source_version', None)
         facets.pop('is_latest_version', None)
+        if url_facets:
+            self.keep_collection_facets_viewable(facets, url_facets, params['_search'])
 
         if parent_repo and self.is_concept_document():
             return parent_repo.get_ordered_concept_facets_by_filter_order(facets)
 
         return facets
+
+    def get_collection_url_facets(self, is_global_scope):
+        """
+        Facets listing the collection version URLs among a search's matches, and outside global search (where the
+        expansion facet is returned) their expansion URLs, with counts, for keep_collection_facets_viewable. None
+        ({}) for staff, who can view every version, or for a search of anything but concepts and mappings.
+        """
+        from core.collections.models import Collection
+        if not self.is_source_child_document_model() or Collection.get_viewable_versions_criteria(
+                self.request.user) is None:
+            return {}
+        fields = ['collection_url'] if is_global_scope else ['collection_url', 'expansion_url']
+        return {f'_{field}': TermsFacet(field=field, size=self.max_viewable_collection_urls) for field in fields}
+
+    def keep_collection_facets_viewable(self, facets, url_facets, search):
+        """
+        The collection, collection_version and expansion facets name the collection versions and expansions a match
+        is in as the index lists them: those the requester can't view, and those since deleted, too. Here each name
+        counts only the matches in the ones they can view, as the collection filter matches them
+        (get_collection_facet_criterion), and a name with none is left out. url_facets: get_collection_url_facets',
+        whose buckets, taken out of `facets`, give the URLs among the matches with their counts (the top
+        max_viewable_collection_urls: past them a name can undercount, never show). A name with one URL takes its
+        count; those with several are counted in one more request.
+        """
+        url_counts = {name[1:]: {key: count for key, count, _ in facets.pop(name, [])} for name in url_facets}
+        names = self.get_viewable_collection_facet_urls(
+            [facet for facet in self.collection_url_facets if facets.get(facet)], url_counts)
+        counts, recounts = {}, {}
+        for (facet, name), urls in names.items():
+            field = self.collection_url_facets[facet]
+            if len(urls) == 1:
+                counts[facet, name] = url_counts[field][urls[0]]
+            else:
+                recounts[facet, name] = Q('terms', **{field: urls})
+        if recounts:
+            search = search.extra(size=0).params(request_timeout=ES_REQUEST_TIMEOUT)
+            search.aggs.bucket('viewable', 'filters', filters={str(i): query for i, query in enumerate(
+                recounts.values())})
+            try:
+                buckets = search.execute().aggregations.viewable.buckets
+            except TransportError as ex:  # pragma: no cover
+                raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
+            counts.update({key: buckets[str(i)].doc_count for i, key in enumerate(recounts)})
+        for facet in self.collection_url_facets:
+            if facet in facets:
+                facets[facet] = sorted(
+                    [(name, count, False) for (_facet, name), count in counts.items() if _facet == facet and count],
+                    key=lambda bucket: (-bucket[1], bucket[0]))[:FACET_SIZE]
+
+    def get_viewable_collection_facet_urls(self, facets, url_counts):
+        """
+        {(facet, name): urls}: for each of these collection facets, the names it would show for the URLs in
+        url_counts of the collection versions (or expansions) the requester can view, each with those URLs.
+        """
+        from core.collections.models import Collection, Expansion
+        viewable = Collection.objects.filter(Collection.get_viewable_versions_criteria(self.request.user))
+        names = {}
+        if {'collection', 'collection_version'} & set(facets):
+            for uri, mnemonic, version in viewable.filter(
+                    uri__in=url_counts.get('collection_url', [])).values_list('uri', 'mnemonic', 'version'):
+                names.setdefault(('collection', mnemonic), []).append(uri)
+                names.setdefault(('collection_version', version), []).append(uri)
+        if 'expansion' in facets:
+            for uri, mnemonic in Expansion.objects.filter(
+                    uri__in=url_counts.get('expansion_url', []), collection_version__in=viewable).values_list(
+                        'uri', 'mnemonic'):
+                names.setdefault(('expansion', mnemonic), []).append(uri)
+        return {key: urls for key, urls in names.items() if key[0] in facets}
 
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()

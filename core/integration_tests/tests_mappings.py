@@ -1090,7 +1090,7 @@ class MappingListCacheTest(OCLAPITestCase):
 
     def test_repo_version_mappings_facets_are_cached(self):
         body_key, _ = self.source_v1.get_mappings_cache_keys()
-        facets_key = body_key + '?facetsOnly=true'
+        facets_key = body_key + '?facetsOnly=true#requester='  # each requester's own; signed out share one
 
         response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/?facetsOnly=true')
 
@@ -1105,7 +1105,7 @@ class MappingListCacheTest(OCLAPITestCase):
 
         self.assertEqual(self.client.get(url).status_code, 200)
 
-        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+        cache.set(body_key + '?facetsOnly=true#requester=', {'facets': {'fields': {'fromCache': []}}})
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
@@ -1118,7 +1118,7 @@ class MappingListCacheTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('facets', response.data)
-        self.assertIsNone(cache.get(body_key + '?facetsOnly=true'))
+        self.assertIsNone(cache.get(body_key + '?facetsOnly=true#requester='))
 
     def test_repo_version_mappings_with_search_are_not_cached(self):
         body_key, headers_key = self.source_v1.get_mappings_cache_keys()

@@ -2108,7 +2108,8 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         super().setUp()
         self.patch_concept_es_mapping_for_ci()
         self.tag = f'qc{uuid.uuid4().hex[:6]}'
-        self.source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        self.source = OrganizationSourceFactory(
+            organization=self.org, mnemonic=f'src{self.tag}', public_access=ACCESS_TYPE_VIEW)
         nowhere = ConceptFactory(parent=self.source, mnemonic=f'nowhere{self.tag}')
         self.concepts, self.mappings = {}, {}
         for key in ['inP', 'inQhead', 'inQv1', 'inRv1']:
@@ -2271,6 +2272,95 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.listed(url, self.member, 'concepts'), ['inP'], url)
             self.assertEqual(self.listed(url, self.outsider, 'concepts'), [], url)
             self.assertEqual(self.listed(url, None, 'concepts'), [], url)
+        # a cached facetsOnly answer is each requester's own
+        url = f'{release.uri}concepts/'
+        self.assertIn(f'{self.tag}P', self.collection_facet(url, self.member))
+        self.assertIn(f'{self.tag}P', self.collection_facet(url, self.staff))
+        self.assertNotIn(f'{self.tag}P', self.collection_facet(url, self.outsider))
+        self.assertNotIn(f'{self.tag}P', self.collection_facet(url, None))
+        self.assertIn(f'{self.tag}P', self.collection_facet(url, self.member))
+
+    def facets(self, url, user):
+        """The facets `url` answers (facetsOnly), each a {name: count}."""
+        response = self.request('get', f'{url}{"&" if "?" in url else "?"}facetsOnly=true', user)
+        self.assertEqual(response.status_code, 200, (url, user))
+        return {facet: {bucket[0]: bucket[1] for bucket in buckets}
+                for facet, buckets in response.data['facets']['fields'].items()}
+
+    def collection_facet(self, url, user):
+        """The collection facet `url` answers, this test's collections only."""
+        return {name: count for name, count in self.facets(url, user).get('collection', {}).items()
+                if name.startswith(self.tag)}
+
+    def add_latest_versions_to_heads(self):
+        """P's and Q's HEADs hold their concepts' and mappings' latest versions too, which facets read."""
+        for head, key in [(self.p_head, 'inP'), (self.q_head, 'inQhead')]:
+            head.expansion.concepts.add(self.concepts[key].get_latest_version())
+            head.expansion.mappings.add(self.mappings[key].get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
+    def assert_collection_facets(  # pylint: disable=too-many-arguments
+            self, outsiders, members, resources=('concepts', 'mappings'), staff=None, lists=True):
+        """
+        Signed out and an outsider see the collection facet of this test's source `outsiders`; a member `members`, and
+        staff `staff` (by default `members`). With `lists`, each name counts what its collection filter lists for them
+        (a list filtered by collection reads every version; facets, like the unfiltered list, the latest).
+        """
+        for resource in resources:
+            url = f'/{resource}/?source={self.source.mnemonic}'
+            for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                   (self.staff, staff or members)]:
+                facet = self.collection_facet(url, user)
+                self.assertEqual(facet, {f'{self.tag}{name}': count for name, count in expected.items()}, (url, user))
+                for name, count in facet.items() if lists else []:
+                    rows = self.listed(f'{url}&collection={name}', user, resource)
+                    self.assertEqual(len(rows), count, (name, user, resource, rows))
+
+    def test_the_collection_facet_names_only_versions_the_requester_can_view(self):
+        # facets read latest versions: Q's v1 alone holds one, which only members can view
+        self.assert_collection_facets({'R': 1}, {'P': 1, 'Q': 1, 'R': 1}, lists=False)
+        self.add_latest_versions_to_heads()
+        self.assert_collection_facets({'Q': 1, 'R': 1}, {'P': 1, 'Q': 2, 'R': 1})
+        # a private collection of the same name under another owner counts only for those who can view it
+        other = OrganizationFactory()
+        other_q = OrganizationCollectionFactory(
+            organization=other, mnemonic=self.q_head.mnemonic, public_access=ACCESS_TYPE_NONE)
+        ExpansionFactory(collection_version=other_q).concepts.add(
+            *[concept.get_latest_version() for concept in self.concepts.values()])
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        self.assert_collection_facets(
+            {'Q': 1, 'R': 1}, {'P': 1, 'Q': 2, 'R': 1}, ['concepts'], staff={'P': 1, 'Q': 4, 'R': 1})
+
+    def test_the_collection_facet_leaves_out_deleted_versions(self):
+        """The index keeps a deleted version's members until they're indexed again; staff see the index as it is."""
+        self.add_latest_versions_to_heads()
+        Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).delete()
+        for resource in ['concepts', 'mappings']:
+            url = f'/{resource}/?source={self.source.mnemonic}'
+            self.assertEqual(self.collection_facet(url, self.member), {f'{self.tag}Q': 2, f'{self.tag}R': 1})
+            self.assertEqual(self.collection_facet(url, self.staff),
+                             {f'{self.tag}P': 1, f'{self.tag}Q': 2, f'{self.tag}R': 1})
+
+    def test_collection_version_and_expansion_facets_name_only_versions_the_requester_can_view(self):
+        hidden = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=f'{self.tag}S', version=f'hidden{self.tag}', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        ExpansionFactory(collection_version=hidden, mnemonic=f'hidden{self.tag}').concepts.add(
+            *[concept.get_latest_version() for concept in self.concepts.values()])
+        self.add_latest_versions_to_heads()
+        url = f'{self.source.uri}concepts/'
+        for user in [None, self.outsider]:
+            facets = self.facets(url, user)
+            self.assertEqual(self.collection_facet(url, user), {f'{self.tag}Q': 1, f'{self.tag}R': 1}, user)
+            self.assertNotIn(f'hidden{self.tag}', facets['collection_version'], user)
+            self.assertNotIn(f'hidden{self.tag}', facets['expansion'], user)
+            self.assertEqual(facets['collection_version']['v1'], 1, user)
+        for user in [self.member, self.staff]:
+            facets = self.facets(url, user)
+            self.assertEqual(facets['collection_version'][f'hidden{self.tag}'], 4, user)
+            self.assertEqual(facets['expansion'][f'hidden{self.tag}'], 4, user)
+        self.assertEqual(self.facets(url, self.member)['collection_version']['v1'], 3)
 
     def test_a_prefix_matching_too_many_versions_answers_400(self):
         url = f'/concepts/?collection={self.tag}*'
