@@ -529,6 +529,65 @@ class ExpansionHealthTest(OCLTestCase):
 
         self.assertEqual(count_queries(2), count_queries(6))
 
+    def test_a_pinned_repositorys_versions_are_read_only_for_the_members_pinned_references_judge(self):
+        releases = [self.release(f'v{number}') for number in range(1, 5)]
+        self.expansion.evaluated_source_versions.add(releases[0])
+        unpinned = []
+        for _ in range(3):
+            concept = ConceptFactory(parent=self.source)
+            version = concept.get_latest_version()
+            version.sources.add(*releases)
+            self.reference(concept, version)
+            unpinned.append(version)
+        concept = ConceptFactory(parent=self.source)
+        pinned = concept.get_latest_version()
+        pinned.sources.add(*releases)
+        reference = CollectionReference(
+            expression=pinned.uri, collection=self.collection, system=self.source.uri, code=concept.mnemonic,
+            resource_version=pinned.version)
+        reference.save()
+        reference.concepts.add(pinned)
+        self.expansion.concepts.add(pinned)
+
+        health = ExpansionHealth(self.expansion)
+        members = health.get_member_rows('concepts')
+        member_rows = list(members.values_list('id', 'versioned_object_id'))
+        attributions = health.get_attributions('concepts', members)
+        pinned_member_ids = health.get_pinned_member_ids(member_rows, attributions)
+        containments = health.get_containments(
+            'concepts', members, sorted(set().union(*attributions.values())), pinned_member_ids)
+
+        self.assertEqual(pinned_member_ids, [pinned.id])
+        # rows grow with the pinned members times their repository's versions, not with every member
+        for version in unpinned:
+            self.assertEqual(containments[version.id], {('source', releases[0].id)})
+        self.assertEqual(len(containments[pinned.id]), 5)  # HEAD and the four releases
+        self.assertEqual(self.classify()[pinned.id], RELEASE)
+
+    def test_queries_do_not_grow_with_a_pinned_repositorys_versions(self):
+        other = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=other)
+        version = concept.get_latest_version()
+        reference = CollectionReference(
+            expression=version.uri, collection=self.collection, system=other.uri, code=concept.mnemonic,
+            resource_version=version.version)
+        reference.save()
+        reference.concepts.add(version)
+        self.expansion.concepts.add(version)
+
+        def count_queries(releases_count):
+            for number in range(releases_count):
+                version.sources.add(OrganizationSourceFactory(
+                    mnemonic=other.mnemonic, organization=other.organization, version=f'{releases_count}.{number}',
+                    released=True))
+            health = ExpansionHealth(Expansion.objects.get(id=self.expansion.id))
+            with CaptureQueriesContext(connection) as context:
+                self.assertEqual(health.classify('concepts')[version.id][0], RELEASE)
+            return len(context.captured_queries)
+
+        # another owner's public versions: their visibility is one query, not one per version
+        self.assertEqual(count_queries(2), count_queries(6))
+
 
 class ExpansionHealthStorageTest(OCLTestCase):
     def setUp(self):
