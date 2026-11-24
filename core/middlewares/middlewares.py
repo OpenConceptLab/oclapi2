@@ -12,6 +12,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from core.capacity.logs import emit
 from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
@@ -95,15 +96,36 @@ class ResponseHeadersMiddleware(BaseMiddleware):
     def __call__(self, request):
         start_time = time.time()
         response = self.get_response(request)
+        seconds = time.time() - start_time
         response[VERSION_HEADER] = settings.VERSION
         try:
             response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
         except Exception:  # noqa: BLE001 - skip user header when session unavailable (e.g., async context)
             response[REQUEST_USER_HEADER] = ''
-        response[RESPONSE_TIME_HEADER] = time.time() - start_time
+        response[RESPONSE_TIME_HEADER] = seconds
         response[REQUEST_URL_HEADER] = request.get_full_path() or request.path
         response[REQUEST_METHOD_HEADER] = request.method
+        self.log_if_slow(request, response, int(seconds * 1000))
         return response
+
+    @staticmethod
+    def log_if_slow(request, response, ms):
+        """
+        A request taking SLOW_REQUEST_LOG_MS or more (0 turns this off) writes one JSON line to the API log, where
+        CloudWatch metric filters can count slow requests by view. It names no user and leaves out the query string.
+        """
+        if not settings.SLOW_REQUEST_LOG_MS or ms < settings.SLOW_REQUEST_LOG_MS:
+            return
+        view = getattr(getattr(request, 'resolver_match', None), 'func', None)
+        view = getattr(view, 'view_class', view)
+        emit({
+            'event': 'slow_request',
+            'view': getattr(view, '__name__', type(view).__name__) if view else None,
+            'method': request.method,
+            'status': response.status_code,
+            'ms': ms,
+            'path': request.path,
+        })
 
 
 class CurrentUserMiddleware(BaseMiddleware):

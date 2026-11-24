@@ -1,16 +1,20 @@
 import json
 import re
+import time
 from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse, JsonResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.urls import resolve
 from rest_framework.exceptions import AuthenticationFailed
 
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, \
     SSOUsernameCaseMismatchRefused
-from core.middlewares.middlewares import CustomLoggerMiddleware, RequireAuthenticationMiddleware
+from core.capacity import logs as capacity_logs
+from core.middlewares.middlewares import CustomLoggerMiddleware, RequireAuthenticationMiddleware, \
+    ResponseHeadersMiddleware
 
 
 @override_settings(
@@ -351,3 +355,56 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
 
         self.assertTrue(any(REQUEST_MARKER in line for line in lines))
         self.assertTrue(any(RESPONSE_MARKER in line for line in lines))
+
+
+class SlowRequestLogTest(SimpleTestCase):
+    """A request at or over SLOW_REQUEST_LOG_MS writes one JSON line to the API log, for CloudWatch metric filters."""
+    path = '/orgs/CIEL/sources/CIEL/v2026-10-23/mapped-sources/'
+
+    def setUp(self):
+        capacity_logs._sink.update(sink=None, pid=None)  # pylint: disable=protected-access
+
+    def tearDown(self):
+        capacity_logs._sink.update(sink=None, pid=None)  # pylint: disable=protected-access
+
+    def lines(self, request, delay=0, status=200, resolved=True):
+        """Pass the request through the middleware to a view taking `delay` seconds; return the lines written."""
+        def view(req):
+            if resolved:
+                req.resolver_match = resolve(req.path)
+            time.sleep(delay)
+            return HttpResponse(status=status)
+
+        written = []
+        with patch('core.capacity.logs.write', side_effect=written.append):
+            ResponseHeadersMiddleware(view)(request)
+            if capacity_logs._sink['sink']:  # pylint: disable=protected-access
+                self.assertTrue(capacity_logs.get_sink().drain(2))
+        return [json.loads(line) for line in written]
+
+    @override_settings(SLOW_REQUEST_LOG_MS=20)
+    def test_a_slow_request_writes_one_line_without_user_or_query(self):
+        request = RequestFactory().get(self.path + '?excludeSelf=false&brief=true', HTTP_AUTHORIZATION='Token secret')
+
+        lines = self.lines(request, delay=0.03, status=503)
+
+        self.assertEqual(len(lines), 1)
+        line = lines[0]
+        self.assertGreaterEqual(line.pop('ms'), 20)
+        self.assertEqual(line, {
+            'event': 'slow_request', 'view': 'SourceVersionMappedSourcesListView', 'method': 'GET', 'status': 503,
+            'path': self.path})
+
+    @override_settings(SLOW_REQUEST_LOG_MS=60000)
+    def test_a_request_under_the_threshold_writes_nothing(self):
+        self.assertEqual(self.lines(RequestFactory().get(self.path)), [])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=0)
+    def test_zero_turns_it_off(self):
+        self.assertEqual(self.lines(RequestFactory().get(self.path), delay=0.01), [])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_an_unresolved_path_has_no_view(self):
+        lines = self.lines(RequestFactory().get('/no/such/path/'), delay=0.01, status=404, resolved=False)
+
+        self.assertEqual([line.get('view') for line in lines], [None])
