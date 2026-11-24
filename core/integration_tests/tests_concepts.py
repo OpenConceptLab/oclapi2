@@ -4095,6 +4095,31 @@ class ConceptReactivateViewTest(OCLAPITestCase):
 
 
 class ConceptParentsViewTest(OCLAPITestCase):
+    def test_get_200_source_version_preserves_parent_before_move(self):
+        source = OrganizationSourceFactory()
+        old_parent = ConceptFactory(parent=source, mnemonic='old-parent')
+        new_parent = ConceptFactory(parent=source, mnemonic='new-parent')
+        child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'child', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+            'parent_concept_urls': [old_parent.uri]
+        })
+        version1 = OrganizationSourceFactory(version='v1', mnemonic=source.mnemonic, organization=source.organization)
+        version1.seed_concepts(index=False)
+        token = UserProfile.objects.filter(is_superuser=True).first().get_token()
+        updated = self.client.patch(
+            child.uri, {'parent_concept_urls': [new_parent.uri], 'update_comment': 'Move parent'},
+            HTTP_AUTHORIZATION='Token ' + token, format='json'
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+
+        version_parents = self.client.get(f'{version1.uri}concepts/{child.mnemonic}/parents/')
+        head_parents = self.client.get(f'{source.uri}concepts/{child.mnemonic}/parents/')
+        self.assertEqual(version_parents.status_code, 200)
+        self.assertEqual(head_parents.status_code, 200)
+        self.assertEqual([data['id'] for data in version_parents.data], ['old-parent'])
+        self.assertEqual([data['id'] for data in head_parents.data], ['new-parent'])
+
     def test_get_200(self):
         parent_concept1 = ConceptFactory()
         parent_concept2 = ConceptFactory()
@@ -4134,6 +4159,28 @@ class ConceptParentsViewTest(OCLAPITestCase):
 
 
 class ConceptChildrenViewTest(OCLAPITestCase):
+    def test_get_200_source_version_lists_only_its_own_children(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+
+        def new_child(mnemonic):
+            return Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': mnemonic, 'parent': source,
+                'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+                'parent_concept_urls': [parent_concept.uri]
+            })
+
+        new_child('old-child')
+        version1 = OrganizationSourceFactory(version='v1', mnemonic=source.mnemonic, organization=source.organization)
+        version1.seed_concepts(index=False)
+        new_child('new-child')  # added after v1, under the unchanged parent that v1 shares with HEAD
+
+        version1_children = self.client.get(f'{version1.uri}concepts/{parent_concept.mnemonic}/children/')
+        head_children = self.client.get(f'{source.uri}concepts/{parent_concept.mnemonic}/children/')
+
+        self.assertEqual([data['id'] for data in version1_children.data], ['old-child'])
+        self.assertEqual(sorted(data['id'] for data in head_children.data), ['new-child', 'old-child'])
+
     def test_get_200(self):
         parent_concept = ConceptFactory()
         child_concept1 = ConceptFactory()
