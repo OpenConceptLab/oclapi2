@@ -680,9 +680,11 @@ class SourceChildMixin(ChecksumModel):
         from core.collections.models import Expansion
         # the cascade takes the membership rows (a versioned object's, its versions' too), so expansions go first
         rows = self.__class__.objects.filter(versioned_object_id=self.id) if self.is_versioned_object else [self]
-        Expansion.mark_health_not_current_for_members(
+        after_delete = Expansion.mark_health_not_current_for_members(
             f'{self.__class__.__name__.lower()}s', [self.id, *[row.id for row in rows]])
-        return super().delete(*args, **kwargs)
+        result = super().delete(*args, **kwargs)
+        after_delete()
+        return result
 
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()

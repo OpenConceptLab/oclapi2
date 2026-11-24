@@ -1,7 +1,11 @@
+from datetime import timedelta
+
 from django.db import connection
 from django.db.models import F
+from django.db.models.signals import pre_delete
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from mock import patch, Mock
 
 from core.collections.health import (
@@ -12,10 +16,12 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tasks import seed_children_to_new_version, recheck_expansion_health
 from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.models import UserProfile
 
 
 class ExpansionHealthTest(OCLTestCase):
@@ -832,6 +838,85 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
         self.assertIsNone(self.stored()[1])
 
+    def recompute_meanwhile(self):
+        """A pre_delete receiver standing for a recompute that stores current health between a mark and the delete"""
+        expansion_id = self.expansion.id
+
+        def recompute(**_):
+            Expansion.objects.filter(id=expansion_id).update(health_is_current=True)
+        pre_delete.connect(recompute, sender=Concept, weak=False, dispatch_uid='a-recompute-meanwhile')
+        self.addCleanup(pre_delete.disconnect, sender=Concept, dispatch_uid='a-recompute-meanwhile')
+
+    def test_a_recompute_between_a_hard_delete_mark_and_the_delete_is_not_left_current(self):
+        concept = ConceptFactory()
+        self.add(concept)
+        self.recompute_meanwhile()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            concept.delete()
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_the_nightly_recheck_takes_the_ones_tried_longest_ago_first(self):
+        tried = self.another_default_expansion()
+        never_tried = self.another_default_expansion()
+        Expansion.objects.filter(id__in=[self.expansion.id, tried.id, never_tried.id]).update(health_is_current=None)
+        Expansion.objects.filter(id=self.expansion.id).update(health_checked_at=timezone.now())
+        Expansion.objects.filter(id=tried.id).update(health_checked_at=timezone.now() - timedelta(days=1))
+
+        self.assertEqual(recheck_expansion_health(limit=1), 1)
+        self.assertTrue(Expansion.objects.get(id=never_tried.id).health_is_current)
+        self.assertEqual(recheck_expansion_health(limit=1), 1)
+        self.assertTrue(Expansion.objects.get(id=tried.id).health_is_current)
+        self.assertIsNone(self.stored()[1])
+
+    def test_the_nightly_recheck_queues_one_spread_out_run_each(self):
+        others = [self.another_default_expansion() for _ in range(2)]
+        ids = [self.expansion.id, *[other.id for other in others]]
+        Expansion.objects.filter(id__in=ids).update(health_is_current=False)
+
+        with override_settings(TEST_MODE=False), \
+                patch('core.common.tasks.compute_expansion_health.apply_async') as apply_async:
+            self.assertEqual(recheck_expansion_health(), 3)
+
+        self.assertEqual([call.args[0] for call in apply_async.call_args_list], [(id_,) for id_ in ids])
+        countdowns = [call.kwargs['countdown'] for call in apply_async.call_args_list]
+        self.assertEqual(countdowns, sorted(countdowns))
+        self.assertGreater(countdowns[-1], countdowns[0])
+        self.assertFalse(Expansion.objects.filter(id__in=ids, health_checked_at__isnull=True).exists())
+
+    def test_a_nightly_recheck_that_cannot_queue_leaves_them_first_for_the_next(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health_is_current=None)
+
+        with override_settings(TEST_MODE=False), \
+                patch('core.common.tasks.compute_expansion_health.apply_async', side_effect=OSError('down')):
+            self.assertEqual(recheck_expansion_health(), 0)
+
+        self.assertIsNone(Expansion.objects.values_list('health_checked_at', flat=True).get(id=self.expansion.id))
+
+    def test_a_value_set_mark_reads_the_two_through_tables_by_collection_id(self):
+        value_set = OrganizationCollectionFactory()
+        explicit, evaluated = self.another_default_expansion(), self.another_default_expansion()
+        explicit.explicit_collection_versions.add(value_set)
+        evaluated.evaluated_collection_versions.add(value_set)
+
+        with CaptureQueriesContext(connection) as context:
+            Expansion.mark_health_not_current_for_value_set(value_set)
+
+        selects = [query['sql'] for query in context.captured_queries if query['sql'].startswith('SELECT')]
+        self.assertEqual(len(selects), 2)
+        self.assertFalse(any('"collection_expansions"' in sql for sql in selects))
+        self.assertEqual(
+            list(Expansion.objects.filter(id__in=[explicit.id, evaluated.id]).values_list(
+                'health_is_current', flat=True)), [None, None])
+        self.assertTrue(self.stored()[1])
+
+    @staticmethod
+    def another_default_expansion():
+        return Expansion.persist(
+            index=False, collection_version=OrganizationCollectionFactory(), mnemonic='autoexpand-HEAD',
+            claim_default=True)
+
     def test_the_nightly_recheck_recomputes_default_expansions_that_are_not_current(self):
         other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
         Expansion.objects.filter(id__in=[self.expansion.id, other.id]).update(health=None, health_is_current=None)
@@ -964,6 +1049,22 @@ class ExpansionHealthAPITest(OCLAPITestCase):
         self.concept = ConceptFactory()
         self.collection.add_expressions({'expressions': [self.concept.uri]}, self.collection.created_by)
         self.expansion.refresh_from_db()
+
+    def test_a_db_hard_delete_marks_again_once_the_delete_has_run(self):
+        expansion_id = self.expansion.id
+
+        def recompute_meanwhile(**_):
+            Expansion.objects.filter(id=expansion_id).update(health_is_current=True)
+        pre_delete.connect(recompute_meanwhile, sender=Concept, weak=False, dispatch_uid='a-db-delete-meanwhile')
+        self.addCleanup(pre_delete.disconnect, sender=Concept, dispatch_uid='a-db-delete-meanwhile')
+        admin = UserProfile.objects.get(username='ocladmin')
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(
+                self.concept.uri + '?db=true&hardDelete=true', HTTP_AUTHORIZATION='Token ' + admin.get_token())
+
+        self.assertEqual(response.status_code, 204)
+        self.assertIsNone(Expansion.objects.values_list('health_is_current', flat=True).get(id=expansion_id))
 
     def test_expansion_detail_and_list_show_health_to_a_viewer(self):
         detail = self.client.get(self.expansion.uri)

@@ -1675,7 +1675,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     health_is_current = models.BooleanField(null=True, blank=True)
     # bumped by every mark, so a computation that started before a change can't store its result as current
     health_revision = models.IntegerField(default=0)
-    HEALTH_FIELDS = ('health', 'health_is_current', 'health_revision')
+    # when the nightly recheck last queued it, so the ones tried longest ago go first
+    health_checked_at = models.DateTimeField(null=True, blank=True)
+    HEALTH_FIELDS = ('health', 'health_is_current', 'health_revision', 'health_checked_at')
     # the locked repo versions deleted since it was built, recorded at delete time: the delete drops the lock itself
     deleted_locked_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
     SEPARATELY_WRITTEN_FIELDS = (*HEALTH_FIELDS, 'deleted_locked_repo_versions')
@@ -2743,17 +2745,27 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     @classmethod
     def mark_health_not_current_for_value_set(cls, collection_version):
-        """Expansions whose value-set references were judged against this collection version's expansion"""
-        cls.mark_health_not_current(list(cls.objects.filter(
-            models.Q(explicit_collection_versions=collection_version) |
-            models.Q(evaluated_collection_versions=collection_version)
-        ).values_list('id', flat=True).distinct()))
+        """Expansions whose value-set references were judged against this collection version's expansion. Read from
+        the two through tables by collection id, which their index answers, rather than a join of the expansions"""
+        expansion_ids = set()
+        for relation in ('explicit_collection_versions', 'evaluated_collection_versions'):
+            expansion_ids.update(getattr(cls, relation).through.objects.filter(
+                collection_id=collection_version.id).values_list('expansion_id', flat=True))
+        cls.mark_health_not_current(sorted(expansion_ids))
 
     @classmethod
     def mark_health_not_current_for_members(cls, resource_type, member_ids):
-        """Expansions holding these concepts or mappings, before a hard delete takes the membership rows"""
-        cls.mark_health_not_current(list(cls.objects.filter(
-            **{f'{resource_type}__id__in': member_ids}).values_list('id', flat=True).distinct()))
+        """Expansions holding these concepts or mappings, before a hard delete takes the membership rows. Returns what
+        to run once the delete has run: mark the same expansions again on commit, so a recompute that ran between the
+        mark and the delete isn't left current"""
+        expansion_ids = list(cls.objects.filter(
+            **{f'{resource_type}__id__in': member_ids}).values_list('id', flat=True).distinct())
+        cls.mark_health_not_current(expansion_ids)
+
+        def after_delete():
+            if expansion_ids:
+                transaction.on_commit(lambda: cls.mark_health_not_current(expansion_ids))
+        return after_delete
 
     @classmethod
     def mark_health_out_of_date_for_members(cls, resource_type, member_ids):

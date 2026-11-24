@@ -52,7 +52,9 @@ EXPANSION_HEALTH_TOGGLE = 'EXPANSION_HEALTH_TOGGLE'
 EXPANSION_HEALTH_DEBOUNCE_SECONDS = 60
 # a repo version's fields that expansion health reads
 HEALTH_RELEVANT_VERSION_FIELDS = {'released', 'retired', 'is_active', 'public_access', 'expansion_uri'}
-EXPANSION_HEALTH_RECHECK_LIMIT = 1000
+EXPANSION_HEALTH_RECHECK_LIMIT = 5000
+# the nightly recheck spreads its runs over this long, so they don't all reach the workers at once
+EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS = 4 * 60 * 60
 VERSION_EXPANSION_LOCK = 'lock'
 VERSION_EXPANSION_LATEST = 'latest'
 VERSION_EXPANSION_NONE = 'none'
