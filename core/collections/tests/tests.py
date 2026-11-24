@@ -218,15 +218,16 @@ class CollectionTest(OCLTestCase):
     def test_delete_version_clears_its_exports_with_and_without_its_default_expansion(self, delete_s3_objects_mock):
         head = OrganizationCollectionFactory()
         v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
-        bare = v1.get_version_export_path(suffix=None)  # where an export made before it had an expansion went
+        bare = [  # where an export made before it had an expansion went
+            v1.get_version_export_path(suffix=None), v1.get_legacy_version_export_path(suffix=None)]
         v1.expansion_uri = ExpansionFactory(collection_version=v1).uri
         v1.save()
-        expanded = v1.get_version_export_path(suffix=None)
-        self.assertNotEqual(expanded, bare)
+        expanded = [v1.get_version_export_path(suffix=None), v1.get_legacy_version_export_path(suffix=None)]
+        self.assertFalse(set(expanded) & set(bare))
 
         v1.delete(force=True, sync=True)
 
-        for prefix in (bare, expanded):
+        for prefix in bare + expanded:
             delete_s3_objects_mock.assert_any_call(prefix, get_export_key_pattern(prefix))
 
     def test_add_expressions(self):
