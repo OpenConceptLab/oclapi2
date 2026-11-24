@@ -841,6 +841,61 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertTrue(self.stored()[1])
         self.assertEqual(Expansion.objects.values_list('health_is_current', flat=True).get(id=other.id), None)
 
+    def test_deleting_a_reference_that_did_not_resolve_clears_what_it_left_unresolved(self):
+        expression = '/orgs/missing/sources/missing/concepts/c1/'
+        reference = CollectionReference(
+            expression=expression, collection=self.collection, system='/orgs/missing/sources/missing/', code='c1')
+        reference.save()
+        expansion = Expansion.objects.get(id=self.expansion.id)
+        expansion.add_references([reference], index=False)
+        expansion.mark_health_out_of_date()
+        self.assertEqual([reason['code'] for reason in self.stored()[0]['reasons']], ['unresolved_references'])
+
+        self.collection.delete_references([expression])
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual((health['state'], health['reasons']), (EMPTY, []))
+        self.assertEqual(Expansion.objects.get(id=self.expansion.id).unresolved_repo_versions, [])
+
+    @patch('core.sources.models.Source.index_resources_for_self_as_latest_released', Mock(return_value=True))
+    @patch('core.sources.models.Source.index_children', Mock())
+    @patch('core.common.tasks.export_source', Mock())
+    def test_a_version_created_released_leaves_health_not_current_once_it_is_seeded(self):
+        concept = ConceptFactory()
+        member = concept.get_latest_version()
+        self.add(member)
+        self.expansion.evaluated_source_versions.add(concept.parent)
+        self.assertEqual(self.stored()[0]['members']['concepts'][HEAD_MEMBER], 1)
+        release = OrganizationSourceFactory(
+            mnemonic=concept.parent.mnemonic, organization=concept.parent.organization, version='v1', released=True)
+        # created, but holding nothing until the seed copies HEAD's members
+        self.assertTrue(self.stored()[1])
+
+        seed_children_to_new_version('source', release.id, False)  # pylint: disable=no-value-for-parameter
+
+        self.assertIsNone(self.stored()[1])
+        recheck_expansion_health()
+        self.assertEqual(self.stored()[0]['members']['concepts'][RELEASE], 1)
+
+    def test_a_run_that_ends_during_a_build_stores_nothing_and_leaves_it_to_the_build(self):
+        def compute(_health):
+            # a rebuild starts, and clears the members, while it computes
+            Expansion.objects.filter(id=self.expansion.id).update(is_processing=True)
+            return {'state': HEALTHY}
+
+        with patch.object(ExpansionHealth, 'compute', autospec=True, side_effect=compute) as computed:
+            self.assertIsNone(Expansion.objects.get(id=self.expansion.id).update_health())
+
+        computed.assert_called_once()
+        self.assertNotEqual(self.stored()[0]['state'], HEALTHY)
+
+    def test_a_reevaluate_leaves_health_stored_before_not_current_whatever_the_toggle(self):
+        with patch.object(Expansion, 'is_health_on', return_value=False):
+            Expansion.objects.get(id=self.expansion.id).seed_children(index=False, force_reevaluate=True)
+
+        self.assertIsNone(self.stored()[1])
+
     def test_the_nightly_recheck_also_takes_ones_whose_queued_run_never_came(self):
         Expansion.objects.filter(id=self.expansion.id).update(health_is_current=False)
 
