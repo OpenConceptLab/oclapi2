@@ -533,9 +533,10 @@ class ExpansionHealthStorageTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.collection = OrganizationCollectionFactory()
-        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
-        self.collection.expansion_uri = self.expansion.uri
-        self.collection.save()
+        # the default before it seeds, as a version's own build makes it, so the seed stores health
+        self.expansion = Expansion.persist(
+            index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD', claim_default=True)
+        self.assertEqual(self.collection.expansion_uri, self.expansion.uri)
 
     def add(self, *concepts):
         self.collection.add_expressions(
@@ -723,9 +724,10 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
     def test_editing_a_member_in_head_recomputes_the_expansions_holding_it(self):
         concept = ConceptFactory()
-        self.add(concept)
-        self.assertEqual(self.stored()[0]['state'], HEAD_RESOLVED)
         member = concept.get_latest_version()
+        # a reference to the version itself: one to the concept would hold the HEAD concept
+        self.add(member)
+        self.assertEqual(self.stored()[0]['members']['concepts'][HEAD_MEMBER], 1)
 
         # the edit takes the old version out of HEAD, so the member it was is now interim
         member.unmark_latest_version()
@@ -733,6 +735,13 @@ class ExpansionHealthStorageTest(OCLTestCase):
         health, is_current = self.stored()
         self.assertTrue(is_current)
         self.assertEqual(health['members']['concepts'][INTERIM], 1)
+
+    def test_a_seed_that_ends_before_its_expansion_is_the_default_still_stores_health(self):
+        collection = OrganizationCollectionFactory()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            collection.cascade_children_to_expansion(index=False)
+
+        self.assertTrue(collection.expansion.health_is_current)
 
     def test_a_hard_deleted_member_leaves_the_expansions_holding_it_not_current(self):
         concept = ConceptFactory()
