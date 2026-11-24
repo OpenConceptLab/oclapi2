@@ -149,6 +149,8 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
             first.get('map_type', None) == second.get('map_type', None)
 
     def update(self, instance, validated_data):
+        if self.refuses_another_id(instance, validated_data):
+            return instance
         mappings = validated_data.pop('mappings', [])
         new_version = validated_data.get('version')
 
@@ -173,7 +175,8 @@ class ConceptMapDetailSerializer(FhirRepositorySerializerMixin, serializers.Mode
         source.released = False  # HEAD must never be released
         source.custom_validation_schema = source_head.custom_validation_schema
 
-        errors = Source.persist_changes(source, user, None)
+        # a private HEAD stays private, as in CodeSystemDetailSerializer.update
+        errors = Source.persist_changes(source, user, None, keep_private=True)
 
         if errors:
             self._errors.update(errors)

@@ -7,6 +7,7 @@ import time
 import unittest
 import uuid
 from collections import OrderedDict
+from types import SimpleNamespace
 from unittest.mock import patch, Mock, MagicMock, ANY
 
 import django
@@ -69,7 +70,8 @@ from core.common.utils import (
     get_start_of_month, es_id_in, es_to_pks, id_batches, web_url, get_queue_task_names,
     get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
-    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size)
+    get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size,
+    write_csv_to_s3)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.documents import MappingDocument
@@ -478,6 +480,17 @@ class IdentifierSerializerTest(OCLTestCase):
                 ('http://example.org/fhir/CodeSystem/x', 'sources', 'http://example.org/fhir/CodeSystem/x'),
                 (None, 'sources', None)):
             self.assertEqual(convert(url, kind), expected, url)
+
+
+class ExportUploadFailure(Exception):
+    """Raised by a fake storage service so a test can tell an upload failure from any other error"""
+
+
+def fake_csv_file_for(*_, **__):
+    """Stands in for djqscsv.csv_file_for: writes data.csv in the current directory and returns its handle"""
+    with open('data.csv', 'w', encoding='utf-8') as csv_file:
+        csv_file.write('a,b\n1,2\n')
+    return SimpleNamespace(name='data.csv', close=lambda: None)
 
 
 class UtilsTest(OCLTestCase):
@@ -1325,6 +1338,76 @@ class UtilsTest(OCLTestCase):
             )
 
         export_service_mock.upload_file.assert_called_once()
+
+    @patch('core.common.utils.get_export_service')
+    def test_write_export_file_restores_process_state_after_upload(self, get_export_service_mock):
+        """A successful export leaves the working directory as it was and removes its temp directory"""
+        export_dirs = []
+        export_service = get_export_service_mock.return_value
+        export_service.upload_file.side_effect = lambda **_: export_dirs.append(os.getcwd())
+        cwd = os.getcwd()
+
+        with override_settings(TEST_MODE=False):
+            write_export_file(
+                OrganizationSourceFactory(), 'source', 'core.sources.serializers.SourceVersionExportSerializer',
+                Mock(), time.time()
+            )
+
+        self.assertEqual(os.getcwd(), cwd)
+        self.assertEqual(len(export_dirs), 1)
+        self.assertNotEqual(export_dirs[0], cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
+
+    @patch('core.common.utils.get_export_service')
+    def test_write_export_file_restores_process_state_when_upload_raises(self, get_export_service_mock):
+        """A failed upload reaches the caller, and still restores the working directory and removes the temp files"""
+        export_dirs = []
+
+        def failing_upload(**_):
+            export_dirs.append(os.getcwd())
+            raise ExportUploadFailure()
+
+        get_export_service_mock.return_value.upload_file.side_effect = failing_upload
+        cwd = os.getcwd()
+
+        with override_settings(TEST_MODE=False):
+            with self.assertRaises(ExportUploadFailure):
+                write_export_file(
+                    OrganizationSourceFactory(), 'source', 'core.sources.serializers.SourceVersionExportSerializer',
+                    Mock(), time.time()
+                )
+
+        self.assertEqual(os.getcwd(), cwd)
+        self.assertEqual(len(export_dirs), 1)
+        self.assertFalse(os.path.exists(export_dirs[0]))
+
+    @patch('core.common.utils.get_export_service')
+    @patch('core.common.utils.csv_file_for')
+    def test_write_csv_to_s3_restores_working_directory(self, csv_file_for_mock, get_export_service_mock):
+        """The zipped CSV is uploaded from a temp directory and the working directory is restored afterwards"""
+        csv_file_for_mock.side_effect = fake_csv_file_for
+        get_export_service_mock.return_value.url_for.return_value = 'https://csv-url'
+        cwd = os.getcwd()
+
+        self.assertEqual(write_csv_to_s3([], 'ocladmin'), 'https://csv-url')
+
+        self.assertEqual(os.getcwd(), cwd)
+        upload_kwargs = get_export_service_mock.return_value.upload_file.call_args.kwargs
+        self.assertTrue(upload_kwargs['key'].startswith('downloads/reader/ocladmin/'))
+
+    @patch('core.common.utils.get_export_service')
+    @patch('core.common.utils.csv_file_for')
+    def test_write_csv_to_s3_restores_working_directory_when_upload_raises(
+            self, csv_file_for_mock, get_export_service_mock):
+        """A failed CSV upload reaches the caller and does not leave the process inside the temp directory"""
+        csv_file_for_mock.side_effect = fake_csv_file_for
+        get_export_service_mock.return_value.upload_file.side_effect = ExportUploadFailure()
+        cwd = os.getcwd()
+
+        with self.assertRaises(ExportUploadFailure):
+            write_csv_to_s3([], 'ocladmin')
+
+        self.assertEqual(os.getcwd(), cwd)
 
     @patch('core.common.utils.settings')
     @patch('core.common.utils.requests.get')

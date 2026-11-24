@@ -28,6 +28,16 @@ class SwaggerSchemaTest(OCLAPITestCase):
             self.assertEqual(schema['type'], 'array', path)
             self.assertIn('$ref', schema['items'], path)
 
+    def test_org_list_routes_under_a_user_are_list_only(self):
+        paths = self.get_schema()['paths']
+
+        for path in (
+                '/users/{user}/orgs/sources/', '/users/{user}/orgs/collections/', '/users/{user}/orgs/map-projects/',
+                '/user/orgs/sources/', '/user/orgs/collections/'
+        ):
+            self.assertIn('get', paths[path], path)
+            self.assertNotIn('post', paths[path], path)
+
     def test_list_endpoints_document_paging_parameters(self):
         parameters = self.get_schema()['paths']['/orgs/{org}/sources/']['get']['parameters']
 

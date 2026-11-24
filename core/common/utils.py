@@ -44,21 +44,23 @@ def cd_temp():
     return cwd
 
 
-def write_csv_to_s3(data, requester, **kwargs):  # pragma: no cover
+def write_csv_to_s3(data, requester, **kwargs):
     """Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL."""
     cwd = cd_temp()
-    csv_file = csv_file_for(data, **kwargs)
-    csv_file.close()
-    zip_file_name = csv_file.name + '.zip'
-    with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        zip_file.write(csv_file.name)
+    try:
+        csv_file = csv_file_for(data, **kwargs)
+        csv_file.close()
+        zip_file_name = csv_file.name + '.zip'
+        with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.write(csv_file.name)
 
-    key = f'downloads/reader/{requester}/' + zip_file.filename
-    get_export_service().upload_file(
-        key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
-        metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
-    )
-    os.chdir(cwd)
+        key = f'downloads/reader/{requester}/' + zip_file.filename
+        get_export_service().upload_file(
+            key=key, file_path=os.path.abspath(zip_file.filename), binary=True,
+            metadata={'ContentType': 'application/zip'}, headers={'content-type': 'application/zip'}
+        )
+    finally:
+        os.chdir(cwd)  # an upload that raises must not leave the process inside the temp directory
     return get_export_service().url_for(key)
 
 
@@ -185,11 +187,28 @@ def get_class(kls):
 
 def write_export_file(
         version, resource_type, resource_serializer_type, logger, start_time
+):
+    """
+    Builds the export zip of a version in a temp directory and uploads it. The working directory is restored and
+    the temp files are removed even when serializing or uploading raises, so a failed export leaves no state behind.
+    """
+    cwd = cd_temp()
+    tmp_dir_path = os.getcwd()
+    logger.info(f'Writing export file to tmp directory: {cwd}')
+    try:
+        _write_export_file(version, resource_type, resource_serializer_type, logger, start_time)
+    finally:
+        os.chdir(cwd)
+        if not get(settings, 'TEST_MODE', False):
+            logger.info(f'Removing tmp {tmp_dir_path}.')
+            shutil.rmtree(tmp_dir_path, ignore_errors=True)
+
+
+def _write_export_file(
+        version, resource_type, resource_serializer_type, logger, start_time
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
-    cwd = cd_temp()
-    logger.info(f'Writing export file to tmp directory: {cwd}')
 
     logger.info(f'Found {resource_type} version {version.version}.  Looking up resource...')
     logger.info(f'Found {resource_type} {version.mnemonic}.  Serializing attributes...')
@@ -231,6 +250,10 @@ def write_export_file(
         out.write(f'{resource_string[:-1]}, "concepts": [')
 
         concept_serializer_class = get_class('core.concepts.serializers.ConceptVersionExportSerializer')
+        is_source_version = not is_collection and not version.is_head  # lists only the version's own hierarchy
+        hierarchy = ['parent_concepts'] if is_source_version else [
+            'parent_concepts', 'child_concepts',
+            'versioned_object__parent_concepts', 'versioned_object__child_concepts']
         if version.is_head and not is_collection:
             all_versioned_object_ids = list(
                 Concept.objects.filter(
@@ -262,16 +285,17 @@ def write_export_file(
                 id__in=batch_ids).filter(**filters).select_related(
                 'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by', 'versioned_object'
             ).prefetch_related(
-                'names', 'descriptions', 'parent_concepts', 'child_concepts',
-                'versioned_object__parent_concepts', 'versioned_object__child_concepts'
+                'names', 'descriptions', *hierarchy
             ).order_by('-id')
             concept_versions = list(queryset)
             if concept_versions:
                 if written_concepts:
                     out.write(', ')
-                data = concept_serializer_class(
-                    concept_versions, many=True, context={'prev_version_uris': all_prev_version_uris}
-                ).data
+                context = {'prev_version_uris': all_prev_version_uris}
+                if is_source_version:
+                    context['version_hierarchy'] = concept_serializer_class.get_version_hierarchy(
+                        version, concept_versions)
+                data = concept_serializer_class(concept_versions, many=True, context=context).data
                 concept_string = json.dumps(data, cls=encoders.JSONEncoder)
                 out.write(concept_string[1:-1])
                 written_concepts = True
@@ -363,13 +387,6 @@ def write_export_file(
     logger.info(f'Upload response status: {str(upload_status_code)}')
     uploaded_path = export_service.url_for(s3_key)
     logger.info(f'Uploaded to {uploaded_path}.')
-
-    if not get(settings, 'TEST_MODE', False):
-        tmp_dir_path = file_path.replace('/export.zip', '')
-        logger.info(f'Removing tmp {tmp_dir_path}.')
-        shutil.rmtree(tmp_dir_path, ignore_errors=True)
-
-    os.chdir(cwd)
 
 
 def get_api_base_url():

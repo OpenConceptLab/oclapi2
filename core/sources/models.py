@@ -8,18 +8,19 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import UniqueConstraint, F, Max, Count, Q
+from django.db.models import UniqueConstraint, F, Max, Count, Q, OuterRef, Subquery, Exists
 from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
 
 from core.collections.constants import HEALTH_RELEVANT_VERSION_FIELDS
 from core.common.checksums import VersionCompareMixin
-from core.common.constants import HEAD, VERSION_UNCOPYABLE_EXTRAS
+from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, batch_index_resources, \
+    update_active_count
 from core.common.utils import split_canonical, to_camel_case, chunks
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
@@ -222,6 +223,60 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def get_resource_url_kwarg():
         return 'source'
 
+    @classmethod
+    def get_url_versions(cls, mnemonic, version, owner_filters):
+        """
+        The versions a URL under a source answers from: the source's HEAD, and the version the URL names or, for
+        `latest`, the newest released version as well as any version named `latest` (a source with no released
+        version has only its HEAD). None when the source, or the version the URL names, doesn't exist.
+        """
+        head = cls.get_version(mnemonic, HEAD, owner_filters)
+        if not head:
+            return None
+        versions = [head]
+        if version == LATEST:
+            versions += compact([
+                cls.find_latest_released_version_by({**owner_filters, 'mnemonic': mnemonic}),
+                cls.get_version(mnemonic, LATEST, owner_filters)])
+        elif version and version != HEAD:
+            named_version = cls.get_version(mnemonic, version, owner_filters)
+            if not named_version:
+                return None
+            versions.append(named_version)
+        return versions
+
+    @classmethod
+    def get_latest_release_scopes_for(cls, user):
+        """
+        The sources whose latest-release search `user` must see only part of, as (mnemonic, organization mnemonic,
+        username, latest release) of each: sources with a public HEAD and a released version that isn't public (active
+        ones only), owned by someone else. The latest release is the newest released version that isn't retired, as
+        get_latest_released_version picks it, and is None unless it's public, as then nothing of the source shows.
+        A search keeps to that exact release, because the index marks a release's members as latest only some time
+        after it becomes the latest. A private HEAD's content is already private itself, and staff can view every
+        version.
+        """
+        if get(user, 'is_staff'):
+            return []
+        # A version shares its mnemonic and owner with its HEAD. One of organization_id and user_id is NULL, and
+        # NULL never equals, so the OR matches on the owner that is set.
+        same_repo = Q(mnemonic=OuterRef('mnemonic')) & (
+            Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')))
+        latest_release = cls.objects.filter(
+            same_repo, is_active=True, released=True, retired=False).order_by('-created_at')
+        public_head = cls.objects.filter(
+            same_repo, is_active=True, version=HEAD, public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        releases = cls.objects.filter(is_active=True, released=True).exclude(version=HEAD).exclude(
+            public_access__in=cls.PUBLIC_ACCESS_VALUES).filter(Exists(public_head)).annotate(
+            latest_version=Subquery(latest_release.values('version')[:1]),
+            latest_access=Subquery(latest_release.values('public_access')[:1]))
+        if get(user, 'is_authenticated'):
+            releases = releases.exclude(user_id=user.id).exclude(organization_id__in=user.organizations.values('id'))
+        rows = releases.values_list(
+            'mnemonic', 'organization__mnemonic', 'user__username', 'latest_version', 'latest_access').distinct()
+        return [(mnemonic, org, username, latest_version if access in cls.PUBLIC_ACCESS_VALUES else None)
+                for mnemonic, org, username, latest_version, access in rows]
+
     @property
     def source(self):
         return self.mnemonic
@@ -309,12 +364,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             for chunk in chunks(ids, DROPPED_CHILDREN_CHUNK_SIZE):
                 self.batch_index(model.objects.filter(id__in=chunk), document)
         for chunk in chunks(mapping_ids, DROPPED_CHILDREN_CHUNK_SIZE):
-            # the rows that serve HEAD no longer map to the dropped; older releases' rows keep their codes
+            # the rows that read HEAD's codes no longer map to the dropped; older releases' rows keep their codes
             from_concept_ids = Mapping.objects.filter(id__in=chunk).values('from_concept__versioned_object_id')
             Concept.index_mapped_codes(Concept.objects.filter(
                 Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
-        if recount:
-            self.update_children_counts(sync=True)
+            if older_ids := Concept.get_unreleased_older_ids(from_concept_ids):
+                Concept.index_mapped_codes(Concept.objects.filter(id__in=older_ids))
+        if recount:  # with the count tasks' lock, as the post-import count takes it, so neither saves an older total
+            for field in ('active_concepts', 'active_mappings'):
+                update_active_count(self.__class__, self.id, field)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
         from core.mappings.models import Mapping
@@ -749,6 +807,20 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         except AlreadyQueued:
             pass
 
+    def index_release_rows_mapped_codes_async(self):
+        """
+        After this release's public_access changed, rebuilds the mapped codes of the rows only releases hold: their own
+        fields take the public releases' codes (MappedCodes, OpenConceptLab/ocl_online#703).
+        """
+        from core.common.tasks import index_concepts_mapped_codes
+        concept_ids = sorted(self.concepts.exclude(id=F('versioned_object_id')).exclude(
+            is_latest_version=True).values_list('id', flat=True))
+
+        def queue():  # once the access change is committed, which the tasks read
+            for chunk in chunks(concept_ids, DROPPED_CHILDREN_CHUNK_SIZE):
+                index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+        transaction.on_commit(queue)
+
     def index_public_access_async(self, user=None):
         """
         Queues the public_can_view re-index of this source's docs once the change is committed, marking the source
@@ -1007,6 +1079,48 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             PostgresQL.create_seq(
                 self.mappings_external_id_seq_name, 'sources.uri', 0, self.autoid_mapping_external_id_start_from
             )
+
+    def delete(self, using=None, keep_parents=False, force=False, sync=False):
+        """
+        A version's concepts and mappings keep its name in their search documents until they're indexed again, so a
+        later version of the same name would find them (OpenConceptLab/ocl_online#744). Once the delete commits, they
+        are indexed again, and if it was the latest release, the new latest release's members are flagged as such.
+        """
+        if self.is_head:
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+            return
+        head = self.head
+        was_latest_released = self.is_latest_released
+        concept_ids = list(self.concepts.values_list('id', flat=True))
+        mapping_ids = list(self.mappings.values_list('id', flat=True))
+        super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released))
+
+    def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False, user=None):
+        """
+        Indexes again these concepts and mappings of this repository (its HEAD), from what they belong to now: the rows
+        of a deleted version, whose links are gone, or the ones a seed superseded. DROPPED_CHILDREN_CHUNK_SIZE a Task,
+        with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed Task.
+        was_latest_released: a deleted version was the latest release, so the new one's members are flagged.
+        user: who the Tasks belong to (and can cancel them), by default HEAD's last editor.
+        """
+        user = user or self.updated_by
+        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
+            for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):
+                args = [resource, {'id__in': chunk}]
+                if get(settings, 'TEST_MODE', False):
+                    batch_index_resources(*args)
+                    continue
+                task = Task.new(queue='indexing', user=user, name=batch_index_resources.name, args=args)
+                try:
+                    batch_index_resources.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+                except Exception as ex:  # pylint: disable=broad-except
+                    task.state = FAILURE
+                    task.finished_at = timezone.now()
+                    task.record_exception(ex)
+        latest_released = self.get_latest_released_version() if was_latest_released else None
+        if latest_released:
+            latest_released.index_children_async(user, {'is_in_latest_source_version': True})
 
     def post_delete_actions(self):
         if self.is_head:

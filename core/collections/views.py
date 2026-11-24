@@ -17,6 +17,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.capabilities.exceptions import WriteRefused
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
     INCLUDE_REFERENCES_PARAM, CONCEPT_VERSION_ADDED_TO_COLLECTION,
@@ -50,7 +51,7 @@ from core.common.mixins import (
     ConceptContainerProcessingMixin, RepoVersionListMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
-    CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion, CanEditConceptDictionaryVersion
 )
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
@@ -112,7 +113,12 @@ class CollectionBaseView(BaseAPIView):
     def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params.dict()
 
-        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        # a route that names a version reads it (as its search does, and as its writes act on it), so a different
+        # version in the query string is refused rather than read; routes that name none read the query string's
+        url_version, query_version = self.kwargs.get('version', None), query_params.get('version', None)
+        if url_version and query_version and query_version != url_version:
+            raise Http400(detail=f'The URL names version {url_version}; the query string names {query_version}.')
+        version = url_version or query_version
         if not version and default_version_to_head:
             version = HEAD
         if version == LATEST:
@@ -245,6 +251,7 @@ class CollectionRetrieveUpdateDestroyView(
     CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = CollectionDetailSerializer
+    writes_own_object = True  # its DELETE deletes the repository, and its PUT/PATCH can publish it
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
@@ -543,6 +550,8 @@ class CollectionReferencesView(
         unresolved_reasons = dict(result[2]) if len(result) > 2 else {}
         if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if len(result) > 3 and result[3] is not None:  # the capability policy's refusal, kept apart from the errors
+            raise WriteRefused(result[3])
 
         added_references = CollectionReference.objects.filter(
             id__in=added_references_ids) if added_references_ids else []
@@ -564,7 +573,8 @@ class CollectionReferencesView(
                 added_original_expressions.add(expression)
 
         results = []
-        unresolved_items = self.get_unresolved_items(collection, added_references, unresolved_reasons)
+        unresolved_items = self.get_unresolved_items(
+            collection, added_references, unresolved_reasons, self.request.user)
 
         for expression in added_original_expressions:
             response_item = self.create_response_item(added_expressions, errors, expression, unresolved_items)
@@ -580,8 +590,9 @@ class CollectionReferencesView(
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
 
     @staticmethod
-    def get_unresolved_items(collection, references, unresolved_reasons):
-        """{expression: response item} of the added include references its expansion found nothing for"""
+    def get_unresolved_items(collection, references, unresolved_reasons, user):
+        """{expression: response item} of the added include references its expansion found nothing for.
+        A repository version `user` can't view is left out, so it answers as one that doesn't exist."""
         unresolved_refs = [reference for reference in references if reference.id in unresolved_reasons]
         expansion = collection.expansion if unresolved_refs else None
         if not expansion:
@@ -593,13 +604,15 @@ class CollectionReferencesView(
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
             if reason == REFERENCE_VERSION_NOT_HELD:
                 named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
+                named_version = named_version if named_version and named_version.has_view_access(user) else None
                 item['repo_versions'] = [named_version.uri if named_version else reference.system]
                 message_format = REFERENCE_NAMED_VERSION_NOT_HELD_FMT if named_version else \
                     REFERENCE_VERSION_NOT_HELD_FMT
                 item['message'] = message_format.format(
                     collection.name, item['repo_versions'][0], reference.resource_version)
             else:
-                item['repo_versions'] = reference.get_evaluated_repo_version_urls(expansion, system_version_cache)
+                item['repo_versions'] = reference.get_evaluated_repo_version_urls(
+                    expansion, user, system_version_cache)
                 message_format = REFERENCE_EXCLUDED_BY_PARAMETERS_FMT if reason == REFERENCE_EXCLUDED_BY_PARAMETERS \
                     else REFERENCE_RESOLVED_TO_NOTHING_FMT
                 item['message'] = message_format.format(
@@ -664,6 +677,8 @@ class CollectionReferencesView(
 
 
 class CollectionReferencesPreview(CollectionBaseView):
+    writes_content = False  # evaluates references without adding them
+
     def get_permissions(self):
         # evaluating arbitrary expressions (with cascade) is expensive: collection editors only (ocl_online#230)
         return [CanEditConceptDictionary()]
@@ -760,7 +775,7 @@ class CollectionVersionListView(
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_head(self):
         head = get(self.get_queryset().first(), 'head')
@@ -790,7 +805,9 @@ class CollectionVersionListView(
             raise Http404()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
+            "name": head_object.name, **request.data,
+            # the version is the URL's repository's, whatever the body says
+            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id,
             'version': version
         }
@@ -816,17 +833,20 @@ class CollectionVersionListView(
         queryset = super().get_queryset()
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
-        return Collection.annotate_expansion_health(queryset).order_by('-created_at')
+        if not self.request.query_params.get('csv'):  # djqscsv can't write values() that carry annotations
+            queryset = Collection.annotate_expansion_health(queryset)
+        return queryset.order_by('-created_at')
 
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -858,11 +878,12 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -919,7 +940,8 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        # a new expansion changes what the version resolves to: an edit of it
+        return [CanEditConceptDictionaryVersion()]
 
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset())
@@ -973,7 +995,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
 
 
 class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
-    """List all expansions across all versions of a collection."""
+    """List the expansions across the versions of a collection the requester can view."""
 
     def get_serializer_class(self):
         if self.is_verbose():
@@ -983,7 +1005,12 @@ class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset())
         self.check_object_permissions(self.request, instance)
-        return Expansion.objects.filter(collection_version_id__in=instance.versions.values_list('id', flat=True))
+        # viewing HEAD doesn't make a private release's expansions visible: only versions the requester can view
+        versions = instance.versions
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if viewable is not None:
+            versions = versions.filter(viewable)
+        return Expansion.objects.filter(collection_version_id__in=versions.values('id'))
 
     @swagger_auto_schema(
         manual_parameters=[verbose_param, include_summary_param, page_param, limit_param]
@@ -998,7 +1025,8 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        # deleting or re-evaluating an expansion changes what the version resolves to: an edit of it
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         expansion = self.get_queryset().first()
@@ -1500,6 +1528,8 @@ class ReferenceExpressionResolveView(APIView):
 
 
 class CollectionVersionExpansionProcessingView(CollectionVersionExpansionBaseView):
+    writes_content = False  # its POST only clears a processing flag
+
     def get_permissions(self):
         """Checked against the collection version. Clearing the flag needs staff or edit access to it."""
         if self.request.method == 'POST':
