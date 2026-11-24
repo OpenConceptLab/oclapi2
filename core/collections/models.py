@@ -344,6 +344,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                     expansion.delete_expressions(expressions)
                 self.references.all().delete()
                 if expansion:
+                    expansion.drop_unresolved_entries_of_deleted_references()
                     expansion.mark_health_out_of_date()
                 Expansion.mark_health_not_current_for_value_set(self)
             return
@@ -358,6 +359,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 expansion.delete_references(references)
             references.delete()
             if expansion:
+                expansion.drop_unresolved_entries_of_deleted_references()
                 expansion.mark_health_out_of_date()
             Expansion.mark_health_not_current_for_value_set(self)
 
@@ -2309,6 +2311,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     def seed_children(self, index=True, force_reevaluate=False):
         version = self.collection_version
+        if force_reevaluate:
+            # whatever the toggle, so a row stored current before isn't left so; the build computes it once it ends
+            Expansion.mark_health_not_current([self.id])
         # one built with lock or latest is rebuilt as it was built, whatever the toggle or default expansion is now:
         # HEAD rows swapped for resource versions and cascades without a cap
         swap_head = force_reevaluate and not version.is_head and bool(self.built_with)
@@ -2334,6 +2339,23 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 self.index_resources(list(concept_ids), list(mapping_ids))
                 self.full_index_resources(
                     list(previous_concept_ids - concept_ids), list(previous_mapping_ids - mapping_ids))
+
+    def drop_unresolved_entries_of_deleted_references(self):
+        """A deleted reference's unresolved entries go with it, so deleting it clears what it left unresolved. The
+        expansion parameters' own entries stay"""
+        entries = self.unresolved_repo_versions or []
+        if not entries:
+            return
+        named = set()
+        for system, expression, valuesets in self.collection_version.references.values_list(
+                'system', 'expression', 'valueset'):
+            named.update(compact([system, expression, *(valuesets or [])]))
+        kept = [
+            entry for entry in entries
+            if not str(entry.get('type') or '').startswith('reference.') or entry.get('url') in named]
+        if len(kept) != len(entries):
+            Expansion.objects.filter(id=self.id).update(unresolved_repo_versions=kept)
+            self.unresolved_repo_versions = kept
 
     def wait_until_processed(self):  # pragma: no cover
         processing = self.is_processing
@@ -2609,11 +2631,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             # None, not False: nothing is queued, so the next change queues a recompute
             expansions.filter(health_revision=revision).update(health_is_current=None)
             return None
-        # the store bumps it too, so an older run that ends after a newer one (a rebuild's) can't overwrite it
-        if not expansions.filter(health_revision=revision).update(
+        # the store bumps it too, so an older run that ends after a newer one (a rebuild's) can't overwrite it. Never
+        # during a build, which may have cleared the members: the build computes its own once it ends
+        if not expansions.filter(health_revision=revision, is_processing=False).update(
                 health=health, health_is_current=True, health_revision=F('health_revision') + 1):
             # marked, or stored by a newer run, while it computed: a fresh run reads the change
-            self.queue_health_recompute(self.id)
+            if not expansions.filter(is_processing=True).exists():
+                self.queue_health_recompute(self.id)
             return None
         self.health = health
         self.health_is_current = True
