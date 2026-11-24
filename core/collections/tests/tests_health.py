@@ -147,7 +147,7 @@ class ExpansionHealthTest(OCLTestCase):
         mismatch = next(reason for reason in self.health()['reasons'] if reason['code'] == 'version_mismatches')
         self.assertEqual(mismatch['head_concept'], 1)
 
-    def test_head_concept_judged_differently_is_ambiguous_and_still_counted_apart(self):
+    def test_head_concept_named_by_a_pinned_reference_too_stays_a_mismatch(self):
         head_concept = ConceptFactory(parent=self.source)
         self.reference(head_concept, head_concept)
         pinned = CollectionReference(
@@ -156,21 +156,22 @@ class ExpansionHealthTest(OCLTestCase):
         pinned.save()
         pinned.concepts.add(head_concept)
 
-        self.assertEqual(self.classify(), {head_concept.id: AMBIGUOUS})
-        ambiguous = next(reason for reason in self.health()['reasons'] if reason['code'] == 'ambiguous_members')
-        self.assertEqual(ambiguous, {'code': 'ambiguous_members', 'count': 1, 'head_concept': 1, 'head_mapping': 0})
+        # a HEAD object is a mismatch whichever reference judges it, so it is never ambiguous
+        self.assertEqual(self.classify(), {head_concept.id: MISMATCH})
+        reasons = {reason['code']: reason for reason in self.health()['reasons']}
+        self.assertEqual(reasons['version_mismatches']['head_concept'], 1)
+        self.assertNotIn('ambiguous_members', reasons)
 
     def test_member_two_references_judge_differently_is_ambiguous(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()
         release = self.release('v1', version)
-        self.expansion.evaluated_source_versions.add(release)
-        self.reference(concept, version)
-        pinned = CollectionReference(
-            expression=version.uri, collection=self.collection, system=self.source.uri, code=concept.mnemonic,
-            resource_version=version.version)
-        pinned.save()
-        pinned.concepts.add(version)
+        draft = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='draft', released=False)
+        version.sources.add(draft)
+        self.expansion.explicit_source_versions.add(release, draft)
+        self.reference(concept, version, version='v1')
+        self.reference(concept, version, version='draft')
 
         classes = ExpansionHealth(self.expansion).classify('concepts')
         self.assertEqual(classes[version.id][0], AMBIGUOUS)
@@ -533,9 +534,10 @@ class ExpansionHealthStorageTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.collection = OrganizationCollectionFactory()
-        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
-        self.collection.expansion_uri = self.expansion.uri
-        self.collection.save()
+        # the default before it seeds, as a version's own build makes it, so the seed stores health
+        self.expansion = Expansion.persist(
+            index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD', claim_default=True)
+        self.assertEqual(self.collection.expansion_uri, self.expansion.uri)
 
     def add(self, *concepts):
         self.collection.add_expressions(
@@ -723,9 +725,10 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
     def test_editing_a_member_in_head_recomputes_the_expansions_holding_it(self):
         concept = ConceptFactory()
-        self.add(concept)
-        self.assertEqual(self.stored()[0]['state'], HEAD_RESOLVED)
         member = concept.get_latest_version()
+        # a reference to the version itself: one to the concept would hold the HEAD concept
+        self.add(member)
+        self.assertEqual(self.stored()[0]['members']['concepts'][HEAD_MEMBER], 1)
 
         # the edit takes the old version out of HEAD, so the member it was is now interim
         member.unmark_latest_version()
@@ -733,6 +736,13 @@ class ExpansionHealthStorageTest(OCLTestCase):
         health, is_current = self.stored()
         self.assertTrue(is_current)
         self.assertEqual(health['members']['concepts'][INTERIM], 1)
+
+    def test_a_seed_that_ends_before_its_expansion_is_the_default_still_stores_health(self):
+        collection = OrganizationCollectionFactory()
+        with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
+            collection.cascade_children_to_expansion(index=False)
+
+        self.assertTrue(collection.expansion.health_is_current)
 
     def test_a_hard_deleted_member_leaves_the_expansions_holding_it_not_current(self):
         concept = ConceptFactory()
