@@ -1,4 +1,5 @@
 import base64
+import math
 import re
 from email.mime.image import MIMEImage
 from functools import cached_property
@@ -65,6 +66,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
     _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
+    # a fuzzy search's targets, which only the concept list sets: without them it keeps to the URL's scope
+    _source_versions = None
+    _extra_filters = None
     # the facets that keep a search of concepts or mappings to collection members (get_viewable_collection_urls)
     collection_facets = ('collection', 'collection_url', 'collection_owner_url')
     max_viewable_collection_urls = 1000
@@ -1142,7 +1146,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         min_score = self.request.query_params.get('min_score') or None
         if min_score:
-            results = results.extra(min_score=float(min_score))
+            try:
+                score = float(min_score)
+            except ValueError:
+                score = math.nan
+            if not math.isfinite(score):
+                raise Http400({'error': f"'min_score' must be a number, got '{min_score}'."})
+            results = results.extra(min_score=score)
 
         if sort:
             results = results.sort(*self._get_sort_attribute())

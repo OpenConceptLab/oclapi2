@@ -294,6 +294,20 @@ class CollectionRetrieveUpdateDestroyView(
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def get_reference_or_404(collection, reference_id):
+    """
+    The collection version's reference with this ID. A reference the version doesn't hold, or an ID no reference can
+    have, answers 404: versioned routes take any string, and IDs are ASCII digits only.
+    """
+    reference_id = str(reference_id)
+    reference = collection.references.filter(id=to_int(reference_id, None)).first() if (
+        reference_id.isascii() and reference_id.isdigit()) else None
+    if not reference:
+        raise Http404()
+
+    return reference
+
+
 class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = CollectionReferenceDetailSerializer
 
@@ -314,11 +328,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
         self.check_object_permissions(self.request, collection)
 
-        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
-        if not reference:
-            raise Http404()
-
-        return reference
+        return get_reference_or_404(collection, self.kwargs.get('reference'))
 
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         reference = self.get_object()
@@ -341,13 +351,7 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference_id = str(self.kwargs.get('reference'))  # versioned routes take any string; IDs are ASCII digits only
-        reference = collection.references.filter(id=to_int(reference_id, None)).first() if (
-            reference_id.isascii() and reference_id.isdigit()) else None
-        if not reference:
-            raise Http404()
-
-        return reference
+        return get_reference_or_404(collection, self.kwargs.get('reference'))
 
     def get_queryset(self):
         return self.get_reference()
@@ -878,7 +882,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         return [CanEditConceptDictionaryVersion()]
 
@@ -935,7 +939,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         return ExpansionSerializer
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         # a new expansion changes what the version resolves to: an edit of it
         return [CanEditConceptDictionaryVersion()]
@@ -1038,23 +1042,27 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
         self.request.instance = version
         return version.expansions.filter(mnemonic=self.kwargs.get('expansion'))
 
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        """Every DELETE of an expansion leaves its version's default expansion in place."""
+        expansion = self.get_object()
+        if expansion.is_default:
+            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
+        self.perform_destroy(expansion)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (CanViewConceptDictionary, )
-
-    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        obj = self.get_object()
-        if obj.is_default:
-            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CollectionVersionExpansionResolvedRepoUpdatesView(
     CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (HasAccessToVersionedObject, )
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
