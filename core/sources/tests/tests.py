@@ -3482,11 +3482,13 @@ class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
             cursor.execute('vacuum (analyze) mappings_sources')
 
         for repo, index in ((source, 'mappings_head_parent_to_source'), (version, 'mappings_id_incl_to_source')):
-            # only the mappings read: around it, tiny tables let the planner probe mappings by to_source_id instead
+            # tiny tables let the planner read mappings by the plain to_source_id index; hide it, then roll back
             sql, params = repo.get_mapped_source_ids().query.sql_with_params()
             with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute('drop index mappings_to_source_id_ee5ed6f2')
                 cursor.execute('set local enable_seqscan = off; set local enable_bitmapscan = off')
                 cursor.execute(f'explain {sql}', params)
                 plan = '\n'.join(row[0] for row in cursor.fetchall())
+                transaction.set_rollback(True)
 
             self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)
