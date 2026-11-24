@@ -172,6 +172,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             update_fields is None or 'expansion_uri' in update_fields)
         if self.id and switches_expansion:
             self.last_child_removal_at = timezone.now()  # another expansion may not list all of this one's members
+            self.__dict__.pop('version_export_path', None)
             if update_fields is not None:
                 update_fields = [*update_fields, 'last_child_removal_at']
 
@@ -354,7 +355,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 if self.expansion_uri:
                     self.expansion.delete_expressions(expressions)
                 if self.references.all().delete()[0]:
-                    self.mark_child_removal([self.id])
+                    self.mark_own_child_removal()
             return
 
         self.remove_references(self.references.filter(expression__in=expressions))
@@ -365,7 +366,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             if self.expansion_uri:
                 self.expansion.delete_references(references)
             if references.delete()[0]:  # an export lists references too, even one that has no members
-                self.mark_child_removal([self.id])
+                self.mark_own_child_removal()
 
     def get_cascaded_mapping_uris_from_concept_expressions(self, expressions):
         mapping_uris = []

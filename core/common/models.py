@@ -922,8 +922,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         them stops being served. An update, so the version's updated_at and save side effects are left alone.
         """
         ids = {_id for _id in ids if _id}
+        removed_at = timezone.now()
         if ids:
-            cls.objects.filter(id__in=ids).update(last_child_removal_at=timezone.now())
+            cls.objects.filter(id__in=ids).update(last_child_removal_at=removed_at)
+        return removed_at
+
+    def mark_own_child_removal(self):
+        """mark_child_removal for this version, kept on this instance too, so its export key here is the new one"""
+        self.last_child_removal_at = self.mark_child_removal([self.id])
+        self.__dict__.pop('version_export_path', None)
 
     def get_last_child_update_from_export_url(self, export_url):
         generic_path = self.get_version_export_path(suffix=None)

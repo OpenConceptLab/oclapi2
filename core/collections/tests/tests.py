@@ -7340,13 +7340,29 @@ class CollectionHeadExportKeyTest(OCLTestCase):
         self.collection.add_expressions(
             {'expressions': [f'{self.source.uri}concepts/unknown/']}, self.collection.created_by)
         head = self.get_head()
-        before = head.last_child_update
+        stale_key = head.version_export_path
 
         with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
             head.delete_references([f'{self.source.uri}concepts/unknown/'])
 
         self.assertEqual(self.get_head().last_child_update, self.later)
-        self.assertGreater(self.later, before)
+        self.assertNotEqual(self.get_head().version_export_path, stale_key)
+
+    def test_the_instance_that_removed_references_gives_the_new_key(self):
+        head = self.get_head()
+        stale_key = head.version_export_path
+
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([self.older.uri])
+
+        self.assertEqual(head.last_child_update, self.later)
+        self.assertEqual(head.version_export_path, self.get_head().version_export_path)
+        self.assertNotEqual(head.version_export_path, stale_key)
+
+    def test_deleting_another_repo_s_source_moves_the_key_of_the_collection_listing_its_concepts(self):
+        with self.later_clock():
+            self.source.delete(force=True)
+        self.assertEqual(self.get_head().last_child_update, self.later)
 
     def test_removing_members_from_the_expansion_moves_the_key(self):
         member = self.get_older_member()

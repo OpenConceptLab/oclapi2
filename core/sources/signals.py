@@ -50,15 +50,13 @@ def mark_expansion_member_removal(sender, instance, action, reverse, pk_set, **k
 @receiver(pre_delete, sender=Mapping)
 def mark_hard_delete(sender, instance, origin=None, **kwargs):  # pylint: disable=unused-argument
     """
-    A hard-deleted concept or mapping moves the last_child_update of its source and of the collection versions that
-    list it. Only when the delete started at a concept or mapping: a deleted repo or owner takes its members with it.
-    Each repo is marked once per delete.
+    A hard-deleted concept or mapping moves the last_child_update of the collection versions that list it, and of its
+    source when the delete started at a concept or mapping (not a deleted repo or owner, which takes its members with
+    it). Each repo is marked once per delete.
     """
     origin_model = origin.model if isinstance(origin, QuerySet) else type(origin)
-    if origin_model not in (Concept, Mapping):
-        return
     marked = origin.__dict__.setdefault('_child_removal_marked', set())
-    if instance.parent_id and ('source', instance.parent_id) not in marked:
+    if origin_model in (Concept, Mapping) and instance.parent_id and ('source', instance.parent_id) not in marked:
         marked.add(('source', instance.parent_id))
         Source.mark_child_removal([instance.parent_id])
     collection_ids = set(
