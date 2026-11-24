@@ -286,9 +286,9 @@ REQUEST_MARKER = 'request-body-marker'
 RESPONSE_MARKER = 'response-body-marker'
 
 
-@override_settings(ENV='production')
+@override_settings(LOG_REQUEST_BODIES=False)
 class CustomLoggerMiddlewareTest(SimpleTestCase):
-    """Outside development, request logging writes each request's lines but no request or response body."""
+    """Request logging writes each request's lines but, unless LOG_REQUEST_BODIES, no request or response body."""
 
     def setUp(self):
         self.factory = RequestFactory()
@@ -322,13 +322,14 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
 
         self.assert_no_marker(lines)
 
-    def test_masks_credential_headers_in_every_environment(self):
-        for env in ('production', 'development'):
-            with self.subTest(env=env), override_settings(ENV=env):
+    @override_settings(REQUEST_LOGGING_SENSITIVE_HEADERS=['X-Deployment-Token'])
+    def test_masks_credential_headers_whether_or_not_bodies_are_logged(self):
+        for log_bodies in (False, True):
+            with self.subTest(log_bodies=log_bodies), override_settings(LOG_REQUEST_BODIES=log_bodies):
                 request = self.factory.get(
                     '/orgs/', HTTP_AUTHORIZATION=f'Token {REQUEST_MARKER}', HTTP_X_API_KEY=REQUEST_MARKER,
                     HTTP_COOKIE=f'sessionid={REQUEST_MARKER}', HTTP_X_CSRFTOKEN=REQUEST_MARKER,
-                    HTTP_X_AUTH_TOKEN=REQUEST_MARKER)
+                    HTTP_X_AUTH_TOKEN=REQUEST_MARKER, HTTP_X_DEPLOYMENT_TOKEN=REQUEST_MARKER)
                 lines = self.log_lines(request, response=self.json_response_with_cookies())
 
                 self.assert_no_marker(lines)
@@ -340,11 +341,12 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
         response = JsonResponse({}, status=400)
         response.set_cookie('sessionid', RESPONSE_MARKER)
         response['Set-Cookie'] = f'token={RESPONSE_MARKER}'
+        response['X-Deployment-Token'] = RESPONSE_MARKER
         return response
 
-    @override_settings(ENV='development')
-    def test_development_still_logs_bodies(self):
-        """Shows the capture above would see a body: in development both bodies are logged."""
+    @override_settings(LOG_REQUEST_BODIES=True)
+    def test_logs_bodies_with_log_request_bodies(self):
+        """Shows the capture above would see a body: with LOG_REQUEST_BODIES both bodies are logged."""
         lines = self.log_lines(self.json_post(), 400)
 
         self.assertTrue(any(REQUEST_MARKER in line for line in lines))
