@@ -17,6 +17,7 @@ from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import set_rollback
 
+from core.capabilities.exceptions import UsageRefused
 from core.common import ERRBIT_LOGGER
 
 logger = logging.getLogger('oclapi')
@@ -139,6 +140,23 @@ def detail_issues(detail, code='invalid', field=None):
     return [issue(code, str(detail), expression=field)]
 
 
+def is_message(value):
+    """A string, number or null, or a list of them: what an error body says, as an object it carries isn't."""
+    if isinstance(value, (list, tuple)):
+        return all(is_message(item) for item in value)
+    return not isinstance(value, dict)
+
+
+def refusal_messages(body):
+    """
+    A capability refusal's body without the objects it carries for OCL's apps to show in place of its `detail`: as
+    issues, every value in them would be an error of its own.
+    """
+    if not isinstance(body, dict):
+        return body
+    return {key: value for key, value in body.items() if is_message(value)}
+
+
 def with_tx_issue_types(outcome):
     """An OperationOutcome built elsewhere, with a tx-issue-type coding and a code on every issue."""
     outcome = to_plain(outcome)
@@ -249,7 +267,9 @@ def outcome_for_exception(exc):
         if getattr(exc, 'wait', None):
             headers['Retry-After'] = str(int(exc.wait))
         status_code = exc.status_code
-        outcome = operation_outcome(*detail_issues(exc.detail, status_issue_code(exc.status_code)))
+        code = status_issue_code(status_code)
+        detail = refusal_messages(exc.detail) if isinstance(exc, UsageRefused) else exc.detail
+        outcome = operation_outcome(*(detail_issues(detail, code) or [issue(code, status_text(status_code))]))
         if status_code >= 500:
             report_server_error(status_code, exc)
     else:

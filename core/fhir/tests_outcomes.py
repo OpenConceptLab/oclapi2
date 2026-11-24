@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 from fhir.resources.R4B.operationoutcome import OperationOutcome
 from rest_framework import exceptions
 
+from core.capabilities.exceptions import WriteRefused
 from core.common.exceptions import Http400
 from core.fhir import outcomes
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
@@ -180,6 +181,27 @@ class ExceptionHandlerTest(SimpleTestCase):
         response = self.handle(DjangoValidationError('Bad parameters'))
         self.assertEqual(issue_summary(response.data), ['error|invalid|invalid-data|'])
         self.assertEqual(response.data['issue'][0]['details']['text'], 'Bad parameters')
+
+    def test_a_refusal_body_makes_issues_only_of_its_messages(self):
+        # a capability policy's 403 body can carry objects for client apps to render; they aren't messages
+        body = {
+            'detail': 'Content is read-only.', 'error_code': 'content_read_only', 'limit': 0, 'used': 3,
+            'notice': {'title': 'Example notice', 'actions': [{'label': 'Example action', 'url': 'https://x'}]},
+            'links': {'docs': 'https://x'},
+        }
+        response = self.handle(WriteRefused(body))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            [(item['details']['text'], item.get('expression')) for item in response.data['issue']],
+            [('Content is read-only.', ['detail']), ('content_read_only', ['error_code']), ('0', ['limit']),
+             ('3', ['used'])])
+
+    def test_a_refusal_body_of_objects_only_is_answered_with_its_status(self):
+        response = self.handle(WriteRefused({'notice': {'title': 'Example notice'}}))
+
+        self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'])
+        self.assertEqual(response.data['issue'][0]['details']['text'], 'Forbidden')
 
     def test_server_side_api_exceptions_never_return_a_5xx(self):
         class Unavailable(exceptions.APIException):
