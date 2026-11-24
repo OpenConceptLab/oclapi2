@@ -4,6 +4,7 @@ import itertools
 import uuid
 import zipfile
 
+from elasticsearch.helpers import streaming_bulk
 from mock import patch, Mock
 
 from django.contrib.auth.models import Group, AnonymousUser
@@ -15,6 +16,7 @@ from core.collections.models import Collection, CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
+from core.common.tasks import batch_index_resources
 from core.common.tests import OCLAPITestCase, OCLTestCase, PREVIEW_GROUP_NAME
 from core.common.views import BaseAPIView
 from core.concepts.documents import ConceptDocument
@@ -2248,6 +2250,37 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         for query in [f'collection_url={p_v1_uri}', f'collection={self.tag}P', f'collection={self.tag}P*']:
             for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
                 self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
+
+    def delete_and_reindex(self, url):
+        """Deletes `url` as staff, then runs the reindex it queued once it committed, for real."""
+        with patch('core.common.models.batch_index_resources') as queued, self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.request('delete', url, self.staff).status_code, 204)
+        self.assertTrue(queued.called)
+        # batch_index does nothing in TEST_MODE; parallel_bulk's pool threads can't see this test's rows
+        with override_settings(TEST_MODE=False), patch('core.common.models.parallel_bulk', streaming_bulk):
+            for call_args in queued.call_args_list:
+                batch_index_resources(*call_args[0])
+        ConceptDocument._index.refresh()  # pylint: disable=protected-access
+        MappingDocument._index.refresh()  # pylint: disable=protected-access
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_deleting_a_collection_indexes_its_members_again(self):
+        """
+        OpenConceptLab/ocl_online#740: staff read the index as it is, and a public collection made under a deleted
+        private one's name would match its former members through its URL.
+        """
+        p_v1_uri = self.p_v1.uri
+        self.assert_lists(f'collection_url={p_v1_uri}', [], ['inP'])
+        self.delete_and_reindex(p_v1_uri)
+        self.assert_lists(f'collection_url={p_v1_uri}', [], [])
+        self.delete_and_reindex(self.p_head.uri)
+        recreated = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.p_head.mnemonic, public_access=ACCESS_TYPE_VIEW)
+        recreated.expansion_uri = ExpansionFactory(collection_version=recreated).uri
+        recreated.save()
+        self.assertEqual(recreated.uri, self.p_head.uri)
+        self.assert_lists(f'collection={self.tag}P', [], [])
+        self.assert_lists(f'collection_url={recreated.uri}', [], [])
 
     def test_inactive_versions_match_nothing(self):
         """A version keeps its access when its HEAD is made private; deactivating its owner leaves both inactive."""

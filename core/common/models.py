@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from urllib.parse import quote
 
 from celery.result import AsyncResult
+from celery.states import FAILURE
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
@@ -28,12 +29,12 @@ from pydash import get
 from core.capabilities.writes import check_make_private
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
-    delete_s3_objects
+    delete_s3_objects, batch_index_resources
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
-from core.common.utils import to_owner_uri
+from core.common.utils import to_owner_uri, chunks
 from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
@@ -1014,6 +1015,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
         self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
+
+    def queue_children_reindex(self, concept_ids, mapping_ids, user=None):
+        """
+        Indexes again these concepts and mappings, whose documents name what they belonged to: a deleted version's
+        former members, whose links are gone, or the rows a seed superseded. DROPPED_CHILDREN_CHUNK_SIZE a Task on the
+        indexing queue, with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed
+        Task. user: who the Tasks belong to (and can cancel them), by default this repository's last editor.
+        """
+        from core.sources.constants import DROPPED_CHILDREN_CHUNK_SIZE
+        from core.tasks.models import Task
+        user = user or self.updated_by
+        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
+            for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):
+                args = [resource, {'id__in': chunk}]
+                if get(settings, 'TEST_MODE', False):
+                    batch_index_resources(*args)
+                    continue
+                task = Task.new(queue='indexing', user=user, name=batch_index_resources.name, args=args)
+                try:
+                    batch_index_resources.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+                except Exception as ex:  # pylint: disable=broad-except
+                    task.state = FAILURE
+                    task.finished_at = timezone.now()
+                    task.record_exception(ex)
 
     def unlink_url_registry_entries(self, repo_ids):
         """

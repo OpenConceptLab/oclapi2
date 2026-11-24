@@ -324,6 +324,20 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def expansions_count(self):
         return self.expansions.count()
 
+    def delete(self, using=None, keep_parents=False, force=False, sync=False):
+        """
+        The concepts and mappings in a deleted version's expansions (every version's, when HEAD is deleted) keep its
+        name and URLs in their search documents until they're indexed again (OpenConceptLab/ocl_online#740). Once the
+        delete commits, they are.
+        """
+        version_ids = list(self.versions.values_list('id', flat=True)) if self.is_head else [self.id]
+        concept_ids, mapping_ids = (set(
+            relation.through.objects.filter(expansion__collection_version_id__in=version_ids).values_list(
+                field, flat=True)) for relation, field in ((Expansion.concepts, 'concept_id'),
+                                                          (Expansion.mappings, 'mapping_id')))
+        super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        transaction.on_commit(lambda: self.queue_children_reindex(concept_ids, mapping_ids))
+
     def delete_references(self, expressions):
         if expressions == ALL:  # Deprecated: Old way
             # one transaction, so no one sees the expansion emptied while the references remain

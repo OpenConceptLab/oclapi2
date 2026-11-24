@@ -587,7 +587,7 @@ class SourceTest(OCLTestCase):
 
     @patch('core.common.models.delete_s3_objects', Mock())
     @patch.object(Source, 'index_children_async', autospec=True)
-    @patch('core.sources.models.batch_index_resources')
+    @patch('core.common.models.batch_index_resources')
     def test_deleting_a_version_indexes_its_former_members_again(
             self, batch_index_resources_mock, index_children_async_mock):
         """OpenConceptLab/ocl_online#744: their documents would keep the deleted version's name."""
@@ -624,7 +624,7 @@ class SourceTest(OCLTestCase):
         index_children_async_mock.assert_not_called()  # v0 wasn't the latest release, so no flag changes
 
     @patch('core.common.models.delete_s3_objects', Mock())
-    @patch('core.sources.models.batch_index_resources')
+    @patch('core.common.models.batch_index_resources')
     def test_deleted_version_reindex_tasks_keep_their_arguments(self, batch_index_resources_mock):
         """The version and its links are gone, so a failed chunk can only be rerun from its saved arguments."""
         batch_index_resources_mock.name = 'core.common.tasks.batch_index_resources'
