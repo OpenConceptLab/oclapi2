@@ -19,9 +19,7 @@ class ExpansionHealthBackfillTest(OCLTestCase):
     def setUp(self):
         super().setUp()
         self.collection = OrganizationCollectionFactory()
-        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
-        self.collection.expansion_uri = self.expansion.uri
-        self.collection.save()
+        self.expansion = self.default_expansion(self.collection)
         self.clear(self.expansion)
 
     @staticmethod
@@ -32,12 +30,14 @@ class ExpansionHealthBackfillTest(OCLTestCase):
     def stored(expansion):
         return Expansion.objects.values_list('health', 'health_is_current').get(id=expansion.id)
 
+    @staticmethod
+    def default_expansion(collection):
+        # the default before it seeds, as a version's own build makes it, so the seed stores current health
+        return Expansion.persist(
+            index=False, collection_version=collection, mnemonic='autoexpand-HEAD', claim_default=True)
+
     def another_expansion(self):
-        collection = OrganizationCollectionFactory()
-        expansion = Expansion.persist(index=False, collection_version=collection, mnemonic='autoexpand-HEAD')
-        collection.expansion_uri = expansion.uri
-        collection.save()
-        return expansion
+        return self.default_expansion(OrganizationCollectionFactory())
 
     def run_command(self, *args, fails=False, **kwargs):
         out = StringIO()
