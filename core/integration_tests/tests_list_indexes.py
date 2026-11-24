@@ -14,6 +14,8 @@ MIGRATIONS = (
     'core.concepts.migrations.0092_concept_names_concept_id_incl_name',
     'core.concepts.migrations.0093_concept_names_long_concept_id',
     'core.concepts.migrations.0094_concepts_id_incl_expand_cols',
+    'core.mappings.migrations.0063_mappings_head_parent_to_source',
+    'core.mappings.migrations.0064_mappings_id_incl_to_source',
 )
 
 
@@ -46,6 +48,16 @@ class ListCoveringIndexTest(TestCase):
                      f'(concept_id) WHERE (octet_length(name) > {INDEXED_NAME_BYTES})'),
                     ('concepts_id_incl_expand_cols',
                      '(id) INCLUDE (is_active, retired, parent_id, mnemonic, versioned_object_id)'),
+            ):
+                cursor.execute('select indexdef from pg_indexes where indexname = %s', [index])
+                self.assertTrue(cursor.fetchone()[0].endswith(f'USING btree {columns}'))
+
+    def test_mapped_sources_indexes_cover_the_target_source(self):
+        with connection.cursor() as cursor:
+            for index, columns in (
+                    ('mappings_head_parent_to_source',
+                     '(parent_id, to_source_id) WHERE (is_active AND (id = versioned_object_id))'),
+                    ('mappings_id_incl_to_source', '(id) INCLUDE (to_source_id)'),
             ):
                 cursor.execute('select indexdef from pg_indexes where indexname = %s', [index])
                 self.assertTrue(cursor.fetchone()[0].endswith(f'USING btree {columns}'))

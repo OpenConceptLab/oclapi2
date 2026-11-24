@@ -22,3 +22,5 @@ def propagate_parent_attributes(sender, instance=None, created=False, **kwargs):
 
             if updated_concepts or updated_mappings:
                 instance._public_access_task = instance.index_public_access_async()  # pylint: disable=protected-access
+            if not instance.is_head:
+                instance.index_release_rows_mapped_codes_async()

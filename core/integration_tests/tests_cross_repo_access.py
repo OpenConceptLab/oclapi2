@@ -1,12 +1,14 @@
 import factory
 from django.db.models import F
+from django.test import tag
 from mock import patch
 
 from core.bundles.models import Bundle
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tests import OCLAPITestCase
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -487,14 +489,15 @@ class OmitIfExistsInAccessTest(CrossRepoAccessBaseTest):
 
 
 class CascadeRepoAccessTest(CrossRepoAccessBaseTest):
-    def test_cascade_and_clone_over_a_repo_the_requester_cannot_view_are_not_found(self):
+    def test_cascade_and_clone_over_a_repo_the_requester_cannot_view_are_refused(self):
         MappingFactory(parent=self.private_source, from_concept=self.private_concept, to_concept=self.public_concept)
         # the root concept comes from the query params, the repo to cascade over from the URL
         url = (f'{self.private_concept.uri}$cascade/?org={self.public_source.organization.mnemonic}'
                f'&source={self.public_source.mnemonic}&concept={self.public_concept.mnemonic}&reverse=true')
 
-        self.assertEqual(self.client.get(url).status_code, 404)
-        self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.outsider_token).status_code, 404)
+        # a read under the repo answers as the repo's own lists do
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.outsider_token).status_code, 403)
         response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + self.member.get_token())
         self.assertEqual(response.status_code, 200)
         self.assertIn(self.private_concept.uri, str(response.data))
@@ -524,3 +527,181 @@ class CollectionConceptMappingsTest(CrossRepoAccessBaseTest):
 
                 self.assertEqual(response.status_code, 200, (url, param))
                 self.assertEqual({data['url'] for data in response.data['mappings']}, {mapping.url}, (url, param))
+
+
+class PrivateReleaseOfPublicHeadMixin:
+    """A public HEAD in the private org with a private release v1, whose released revisions HEAD has moved past."""
+
+    def build_release(self):
+        self.head = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='PubHead', public_access=ACCESS_TYPE_VIEW)
+        self.release = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='PubHead', version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+
+    def add_to_release(self, resource):
+        resource.get_latest_version().sources.add(self.release)  # as a release is seeded: latest revisions only
+
+    def move_head_on(self, resource, **changes):
+        """A new latest revision in HEAD; the released one is left only in the release."""
+        released = resource.get_latest_version()
+        revision = resource.clone()
+        for attr, value in changes.items():
+            setattr(revision, attr, value)
+        revision.save()
+        revision.version = str(revision.id)
+        revision.is_latest_version = True
+        revision.save()
+        revision.sources.add(self.head)
+        released.is_latest_version = False
+        released.save()
+        released.sources.remove(self.head)
+        return released, revision
+
+
+@tag('es')
+class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.build_release()
+        concept = ConceptFactory(
+            parent=self.head, mnemonic='bird', names=[ConceptNameFactory.build(name='zebrafinch')])
+        self.add_to_release(concept)
+        self.released_revision, self.head_revision = self.move_head_on(concept, concept_class='Misc')
+        ConceptNameFactory(concept=self.head_revision, name='zebrastripe')
+        OrganizationSourceFactory(
+            organization=self.public_source.organization, mnemonic=self.public_source.mnemonic, version='p1',
+            released=True, public_access=ACCESS_TYPE_VIEW)
+        ConceptDocument().update(Concept.objects.all(), refresh=True)
+
+    def search(self, url, user=None, query='zebrafinch'):
+        headers = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        response = self.client.get(url + 'concepts/?fuzzy=true&q=' + query, **headers)
+        return response.status_code, sorted(row['version'] for row in response.data) if (
+            response.status_code == 200) else None
+
+    def test_fuzzy_search_stays_within_the_urls_repository_version(self):
+        public_release_url = self.public_source.uri + 'p1/'
+        for user in [None, self.outsider, self.member]:
+            self.assertEqual(self.search(public_release_url, user), (200, []), user)
+            self.assertEqual(self.search(self.public_source.uri + 'latest/', user), (200, []), user)
+            self.assertEqual(self.search(self.head.uri, user), (200, []), user)
+            self.assertEqual(
+                self.search(self.head.uri, user, 'zebrastripe'), (200, [self.head_revision.version]), user)
+            self.assertEqual(self.search(public_release_url, user, 'zebrastripe'), (200, []), user)
+
+        no_release = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        self.assertEqual(self.search(no_release.uri + 'latest/'), (200, []))
+        response = self.client.get(no_release.uri + 'latest/concepts/?q=zebrafinch')
+        self.assertEqual((response.status_code, response.data), (200, []))
+
+        for fuzzy in ['true', 'false']:
+            response = self.client.get(
+                f'{public_release_url}concepts/?fuzzy={fuzzy}&q=zebrafinch&searchStatsOnly=true')
+            self.assertEqual((response.status_code, response.data), (200, []), fuzzy)
+
+        self.assertEqual(self.search(self.head.uri + 'v1/')[0], 401)
+        self.assertEqual(self.search(self.head.uri + 'v1/', self.outsider)[0], 403)
+        self.assertEqual(
+            self.search(self.head.uri + 'v1/', self.member), (200, [self.released_revision.version]))
+
+    def test_search_on_the_user_shortcut_scopes_to_the_requesters_repositories(self):
+        source = UserSourceFactory(user=self.outsider, mnemonic='Mine', public_access=ACCESS_TYPE_NONE)
+        release = UserSourceFactory(
+            user=self.outsider, mnemonic='Mine', version='r1', released=True, public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, mnemonic='mine', names=[ConceptNameFactory.build(name='kestrel')])
+        revision = concept.get_latest_version()
+        revision.sources.add(release)
+        collection = UserCollectionFactory(user=self.outsider, mnemonic='MyColl')
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        shared = ConceptFactory(
+            parent=self.public_source, mnemonic='shared', names=[ConceptNameFactory.build(name='kestrel')])
+        expansion.concepts.add(shared.get_latest_version())
+        ConceptDocument().update(Concept.objects.all(), refresh=True)
+
+        self.assertEqual(self.search('/user/sources/Mine/latest/', self.outsider, 'kestrel'), (200, [revision.version]))
+        response = self.client.get('/user/sources/Mine/latest/concepts/?q=kestrel',
+                                   HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+        self.assertEqual([row['version'] for row in response.data], [revision.version])
+        for url in [f'/user/collections/{collection.mnemonic}/', collection.uri]:
+            response = self.client.get(url + 'concepts/?q=kestrel', HTTP_AUTHORIZATION='Token ' + self.outsider_token)
+            self.assertEqual(
+                (response.status_code, [row['version'] for row in response.data]),
+                (200, [shared.get_latest_version().version]), url)
+
+
+class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
+    def setUp(self):
+        super().setUp()
+        self.build_release()
+        self.root = ConceptFactory(parent=self.head, mnemonic='root')
+        target = ConceptFactory(parent=self.head, mnemonic='target')
+        mapping = MappingFactory(
+            parent=self.head, from_concept=self.root, to_concept=target, mnemonic='link', map_type='SAME-AS')
+        for resource in [self.root, target, mapping]:
+            self.add_to_release(resource)
+        self.released_target, _ = self.move_head_on(target, concept_class='Misc')
+        self.released_mapping, _ = self.move_head_on(mapping, map_type='NARROWER-THAN')
+
+    @staticmethod
+    def new_collection(user, concepts=()):
+        collection = UserCollectionFactory(user=user)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(*concepts)
+        return collection, expansion
+
+    def reference(self, method, **expression):
+        root = self.root.get_latest_version()
+        return {'system': self.head.uri, 'version': 'HEAD',
+                'cascade': {'method': method, 'cascade_levels': '*', 'source_version': 'v1'}, **expression,
+                'concept': [{'code': 'root', 'resource_version': root.version}]}
+
+    def add_reference(self, user, method, **expression):
+        collection, expansion = self.new_collection(user)
+        response = self.client.put(
+            collection.uri + 'references/', {'data': [self.reference(method, **expression)]},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(), format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        expansion.refresh_from_db()
+        return (sorted(expansion.concepts.values_list('id', flat=True)),
+                sorted(expansion.mappings.values_list('id', flat=True)))
+
+    def test_cascade_over_a_release_its_creator_cannot_view_adds_only_the_concept(self):
+        root = self.root.get_latest_version()
+        collection, expansion = self.new_collection(self.outsider)
+        response = self.client.put(
+            collection.uri + 'references/', {'data': [self.reference('sourcetoconcepts')]}, format='json')
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(expansion.concepts.exists() or expansion.mappings.exists())
+
+        for method in ['sourcetoconcepts', 'sourcemappings']:
+            self.assertEqual(self.add_reference(self.outsider, method), ([root.id], []), method)
+
+        self.assertEqual(
+            self.add_reference(self.member, 'sourcetoconcepts'),
+            (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))
+        self.assertEqual(
+            self.add_reference(self.admin, 'sourcemappings'), ([root.id], [self.released_mapping.id]))
+
+    def test_cascade_checks_the_release_it_walks_after_the_source_is_renamed(self):
+        Source.objects.filter(id=self.head.id).update(mnemonic='Renamed')  # its releases and URIs keep the old name
+        root = self.root.get_latest_version()
+
+        self.assertEqual(self.add_reference(self.outsider, 'sourcetoconcepts'), ([root.id], []))
+        self.assertEqual(
+            self.add_reference(self.member, 'sourcetoconcepts'),
+            (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))
+
+    def test_cascade_over_a_system_version_its_creator_cannot_view_adds_only_the_concept(self):
+        root = self.root.get_latest_version()
+        value_set, _ = self.new_collection(self.admin, [root])
+        expression = {'version': 'v1', 'valueset': [value_set.uri], 'cascade': 'sourcetoconcepts'}
+
+        self.assertEqual(self.add_reference(self.outsider, None, **expression), ([root.id], []))
+        self.assertEqual(
+            self.add_reference(self.member, None, **expression),
+            (sorted([root.id, self.released_target.id]), [self.released_mapping.id]))

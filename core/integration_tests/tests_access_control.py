@@ -1,18 +1,22 @@
 import csv
 import io
 import itertools
+import uuid
 import zipfile
 
 from mock import patch, Mock
 
-from django.test import tag
+from django.contrib.auth.models import Group, AnonymousUser
+from django.core.cache import cache
+from django.test import tag, override_settings
 from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
-from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.tests import OCLAPITestCase, OCLTestCase, PREVIEW_GROUP_NAME
+from core.common.views import BaseAPIView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory, ConceptDescriptionFactory
@@ -1632,6 +1636,722 @@ class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', url, self.outsider).status_code, 403, url)
             self.assertEqual(self.request('get', url).status_code, 401, url)
             self.assertEqual(self.request('get', url, self.member).status_code, 200, url)
+
+
+class SourceVersionReadAccessMixin(AccessTestMixin):
+    """
+    The org's public source has a private released v1 holding two concepts and a mapping between them; HEAD has
+    since moved one of the concepts on to a newer revision. The org's private source has a released v1 too.
+    """
+    def setUp(self):
+        super().setUp()
+        self.name = f'zebra{uuid.uuid4().hex}'  # what searches look for: only this test's concepts have it
+        self.source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        self.release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.concept = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(name=self.name)])
+        other_concept = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(name='Other')])
+        self.mapping = MappingFactory(
+            parent=self.source, from_concept=self.concept, to_concept=other_concept, mnemonic=f'{self.name}map')
+        self.private_source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
+        self.private_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.private_source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.private_concept = ConceptFactory(
+            parent=self.private_source, public_access=ACCESS_TYPE_NONE,
+            names=[ConceptNameFactory.build(name=self.name)])
+        for resource, version in [(self.concept, self.release), (other_concept, self.release),
+                                  (self.mapping, self.release), (self.private_concept, self.private_release)]:
+            self.add_to_version(resource, version)
+        self.released_revision = self.concept.get_latest_version()
+        response = self.request('put', self.concept.uri, self.member, {
+            'datatype': 'Numeric', 'update_comment': 'Moved on',
+            'names': [{'locale': 'en', 'locale_preferred': True, 'name': self.name, 'name_type': 'Fully Specified'}]})
+        self.assertEqual(response.status_code, 200, response.data)
+
+    @staticmethod
+    def add_to_version(resource, version):
+        resource.sources.add(version)
+        resource.get_latest_version().sources.add(version)
+
+    def assert_answers(self, url, anonymous, outsider, member, method='get'):
+        for user, status_code in [(None, anonymous), (self.outsider, outsider), (self.member, member)]:
+            kwargs = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+            response = getattr(self.client, method)(url, **kwargs)
+            self.assertEqual(response.status_code, status_code, (method, url, user))
+
+    def version_urls(self):
+        """The release, by name and as `latest`."""
+        return [self.release.uri, self.source.uri + 'latest/']
+
+
+class SourceVersionReadAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
+    def read_suffixes(self):
+        concept, mapping = f'concepts/{self.concept.mnemonic}/', f'mappings/{self.mapping.mnemonic}/'
+        revision = f'{concept}{self.released_revision.version}/'
+        return [
+            concept, revision, f'{revision}extras/', f'{concept}versions/', f'{concept}mappings/',
+            f'{concept}children/', f'{concept}parents/', f'{concept}summary/', f'{concept}names/',
+            f'{concept}collection-versions/', f'{concept}$cascade/', mapping,
+            f'{mapping}{self.mapping.get_latest_version().version}/', f'{mapping}versions/', f'{mapping}extras/',
+        ]
+
+    def test_reads_under_a_private_release_answer_as_its_lists(self):
+        for version_url in self.version_urls():
+            for suffix in ['concepts/', 'mappings/', *self.read_suffixes()]:
+                self.assert_answers(version_url + suffix, 401, 403, 200)
+                self.assert_answers(version_url + suffix, 401, 403, 200, method='head')
+                self.assertEqual(self.request('get', version_url + suffix, self.staff).status_code, 200)
+
+    def test_reads_under_a_public_head_stay_visible(self):
+        for suffix in ['concepts/', 'mappings/', *self.read_suffixes()]:
+            self.assert_answers(self.source.uri + suffix, 200, 200, 200)
+
+        response = self.request('get', f'{self.concept.uri}versions/')
+        self.assertEqual(
+            sorted(version['version'] for version in response.data),
+            sorted(version.version for version in self.concept.versions))
+
+    def test_reads_under_a_private_source_are_hidden(self):
+        for version_url in [self.private_source.uri, self.private_release.uri, self.private_source.uri + 'latest/']:
+            for suffix in ['', 'versions/', 'mappings/']:
+                self.assert_answers(f'{version_url}concepts/{self.private_concept.mnemonic}/{suffix}', 401, 403, 200)
+
+    def test_a_missing_source_or_version_is_not_found(self):
+        concept, mapping = self.concept.mnemonic, self.mapping.mnemonic
+        missing_version, with_missing = self.source.uri + 'v9/', self.source.uri[:-1] + ',NoSuchSource/'
+        urls = [
+            missing_version + 'concepts/', missing_version + 'mappings/', f'{missing_version}concepts/{concept}/',
+            f'{missing_version}mappings/{mapping}/versions/', self.private_source.uri + 'v9/concepts/',
+            with_missing + 'concepts/', with_missing + 'v1/concepts/', f'{with_missing}v1/concepts/{concept}/',
+            f'{self.org.uri}sources/,/concepts/', f'{self.org.uri}sources/NoSuchSource/concepts/',
+            f'{self.org.uri}sources/NoSuchSource/latest/concepts/',
+        ]
+
+        for url in urls:
+            self.assert_answers(url, 404, 404, 404)
+            self.assert_answers(url, 404, 404, 404, method='head')
+            self.assertEqual(self.request('get', url, self.staff).status_code, 404, url)
+
+    def test_sources_separated_by_commas_in_the_url_answer_as_each(self):
+        public = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        public_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=public.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        public_concept = ConceptFactory(parent=public)
+        self.add_to_version(public_concept, public_release)
+        concept, mapping = f'concepts/{self.concept.mnemonic}/', f'mappings/{self.mapping.mnemonic}/'
+
+        for sources in [f'{self.source.mnemonic},', f'{self.source.mnemonic},{public.mnemonic}']:
+            url = f'{self.org.uri}sources/{sources}/'
+            for suffix in ['v1/concepts/', 'v1/mappings/', f'v1/{concept}', 'latest/concepts/']:
+                self.assert_answers(url + suffix, 401, 403, 200)
+                self.assert_answers(url + suffix, 401, 403, 200, method='head')
+            self.assert_answers(url + 'concepts/', 200, 200, 200)
+            # the reads find no latest release of a list of sources, as before
+            self.assert_answers(f'{url}latest/{mapping}', 401, 403, 404)
+        response = self.request('get', f'{self.org.uri}sources/{self.source.mnemonic},{public.mnemonic}/v1/concepts/',
+                                self.member)
+        self.assertTrue(
+            {self.concept.mnemonic, public_concept.mnemonic} <= {item['id'] for item in response.data}, response.data)
+
+        url = f'{self.org.uri}sources/{public.mnemonic},/v1/concepts/'
+        self.assert_answers(url, 200, 200, 200)
+        self.assertEqual({item['id'] for item in self.request('get', url).data}, {public_concept.mnemonic})
+
+    def test_latest_of_a_source_without_a_release_answers_as_its_head(self):
+        source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        for user in [None, self.outsider]:
+            response = self.request('get', source.uri + 'latest/concepts/', user)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, [])
+
+        private_source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
+        self.assert_answers(private_source.uri + 'latest/concepts/', 401, 403, 200)
+
+    def test_user_owned_source_routes(self):
+        source = UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_VIEW)
+        release = UserSourceFactory(
+            user=self.owner, mnemonic=source.mnemonic, version='v1', released=True, public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source)
+        self.add_to_version(concept, release)
+        url = f'{release.uri}concepts/{concept.mnemonic}/'
+        own_url = f'/user/sources/{source.mnemonic}/v1/concepts/{concept.mnemonic}/'
+
+        self.assertEqual(self.request('get', url).status_code, 401)
+        self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
+        self.assertEqual(self.request('get', url, self.owner).status_code, 200)
+        self.assertEqual(self.request('get', own_url, self.owner).status_code, 200)
+        self.assertEqual(self.request('get', own_url, self.outsider).status_code, 404)
+        self.assertEqual(self.request('get', concept.uri, self.outsider).status_code, 200)
+
+    def test_a_version_named_in_the_query_string_answers_as_in_the_url(self):
+        concept, mapping = f'concepts/{self.concept.mnemonic}/', f'mappings/{self.mapping.mnemonic}/'
+        paths = [
+            concept, f'HEAD/{concept}', f'HEAD/{mapping}', f'{concept}names/', f'{concept}mappings/',
+            f'{concept}versions/', f'{concept}summary/', f'{concept}{self.released_revision.version}/', 'concepts/',
+            'HEAD/concepts/', 'mappings/']
+        for query in ['?version=v1', '?version=latest']:
+            for path in paths:
+                self.assert_answers(self.source.uri + path + query, 401, 403, 200)
+                self.assert_answers(self.source.uri + path + query, 401, 403, 200, method='head')
+
+        # the query string names the source and owner too
+        other = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        self.assert_answers(
+            f'{other.uri}HEAD/{concept}?org={self.org.mnemonic}&source={self.source.mnemonic}&version=v1',
+            401, 403, 200)
+        user_source = UserSourceFactory(user=self.owner, mnemonic=f'{self.name}u', public_access=ACCESS_TYPE_VIEW)
+        user_release = UserSourceFactory(
+            user=self.owner, mnemonic=user_source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        user_concept = ConceptFactory(parent=user_source)
+        self.add_to_version(user_concept, user_release)
+        url = (f'{other.uri}HEAD/concepts/{user_concept.mnemonic}/?org=&user={self.owner.username}'
+               f'&source={user_source.mnemonic}&version=v1')
+        self.assertEqual(self.request('get', url).status_code, 401)
+        self.assertEqual(self.request('get', url, self.outsider).status_code, 403)
+        self.assertEqual(self.request('get', url, self.owner).status_code, 200)
+
+        # the named owner's source doesn't have the version
+        renamed = f'{self.org.uri}sources/{self.name}r/HEAD/{concept}?version=v1'
+        for url in [f'{self.source.uri}{concept}?version=v9', renamed]:
+            if url == renamed:  # a renamed source's versions keep the old mnemonic
+                Source.objects.filter(id=self.source.id).update(mnemonic=f'{self.name}r')
+            self.assert_answers(url, 404, 404, 404)
+            self.assertEqual(self.request('get', url, self.staff).status_code, 404, url)
+
+    def test_a_version_named_without_an_owner_leaves_out_those_the_requester_cannot_view(self):
+        concept, mapping = f'concepts/{self.concept.mnemonic}/', f'mappings/{self.mapping.mnemonic}/'
+        other = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        query = f'?org=&source={self.source.mnemonic}&version=v1'
+        urls = [f'{other.uri}{concept}{query}', f'{other.uri}{concept}{self.released_revision.version}/{query}',
+                f'{other.uri}{mapping}{query}']  # lists go to the search, which reads no version from the query string
+
+        # only the org's source has v1, which only its members can view
+        for url in urls:
+            self.assert_answers(url, 404, 404, 200)
+            self.assert_answers(url, 404, 404, 200, method='head')
+            self.assertEqual(self.request('get', url, self.staff).status_code, 200, url)
+
+        # another owner's source of that name has a public v1: the reads answer from it alone
+        twin = OrganizationSourceFactory(mnemonic=self.source.mnemonic, public_access=ACCESS_TYPE_VIEW)
+        twin_release = OrganizationSourceFactory(
+            organization=twin.organization, mnemonic=twin.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        twin_concept = ConceptFactory(parent=twin, mnemonic=self.concept.mnemonic)
+        self.add_to_version(twin_concept, twin_release)
+        for user in [None, self.outsider]:
+            response = self.request('get', urls[0], user)
+            self.assertEqual(response.status_code, 200, user)
+            self.assertEqual(response.data['owner'], twin.organization.mnemonic, user)
+            self.assertEqual(self.request('get', urls[2], user).status_code, 404, user)  # only the org's has it
+        self.assertEqual(self.request('get', urls[0], self.member).status_code, 200)
+
+        # each source named answers so
+        twins = f'{other.uri}{concept}?org=&source={self.source.mnemonic},{self.private_source.mnemonic}&version=v1'
+        self.assert_answers(twins, 404, 404, 200)
+        # without an owner, `latest` resolves to no release, so there's nothing to read
+        self.assert_answers(f'{other.uri}{concept}?org=&source={self.source.mnemonic}&version=latest', 404, 404, 404)
+
+        # a renamed source's versions keep their old name, so another source given the new name can't reach them
+        Source.objects.filter(id=self.source.id).update(mnemonic=f'{self.name}r')
+        own = UserSourceFactory(user=self.outsider, mnemonic=f'{self.name}r', public_access=ACCESS_TYPE_VIEW)
+        UserSourceFactory(
+            user=self.outsider, mnemonic=own.mnemonic, version='v1', released=True, public_access=ACCESS_TYPE_VIEW)
+        for url in [f'{own.uri}v1/{concept}?user=', f'{own.uri}v1/{mapping}?user=']:
+            for user in [None, self.outsider]:
+                self.assertEqual(self.request('get', url, user).status_code, 404, (url, user))
+        response = self.client.head(f'{own.uri[:-1]},/v1/concepts/?user=')  # a list, read without a parent
+        self.assertEqual((response.status_code, response.headers['num_found']), (200, '0'))
+
+    def test_latest_in_the_query_string_is_the_newest_release_the_reads_use(self):
+        OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='latest', public_access=ACCESS_TYPE_NONE)
+        public_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v2', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(self.concept, public_release)
+
+        self.assert_answers(f'{self.source.uri}HEAD/concepts/{self.concept.mnemonic}/?version=latest', 200, 200, 200)
+
+    def test_a_collection_route_keeps_its_own_version(self):
+        collection = OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        collection_version = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=collection.mnemonic, version='v1', public_access=ACCESS_TYPE_VIEW)
+        expansion = ExpansionFactory(collection_version=collection_version)
+        expansion.concepts.add(self.released_revision)
+        collection_version.expansion_uri = expansion.uri
+        collection_version.save()
+
+        url = f'{collection_version.uri}concepts/{self.concept.mnemonic}/$cascade/'  # the one under a source's view
+        self.assert_answers(url, 200, 200, 200)
+        self.assert_answers(f'{url}?source={self.source.mnemonic}', 200, 200, 200)
+
+    def test_head_or_a_public_version_named_in_the_query_string_stays_visible(self):
+        concept = f'concepts/{self.concept.mnemonic}/'
+        public_version = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v0', public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(self.concept, public_version)
+
+        for path in [concept, f'HEAD/{concept}', 'concepts/', 'mappings/']:
+            for query in ['?version=HEAD', '?version=v0', '?version=']:
+                self.assert_answers(self.source.uri + path + query, 200, 200, 200)
+
+    def test_concept_feeds_answer_only_under_public_versions(self):
+        feed = f'concepts/{self.concept.mnemonic}/atom/'
+        public_version = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v0', public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(self.concept, public_version)
+
+        for url in [*(version_url + feed for version_url in self.version_urls()), self.source.uri + 'v9/' + feed,
+                    self.source.uri[:-1] + ',/v1/' + feed]:
+            self.assertEqual(self.request('get', url).status_code, 404, url)
+        for url in [self.source.uri + feed, public_version.uri + feed]:
+            self.assertEqual(self.request('get', url).status_code, 200, url)
+        # /sources/<source>/ names no owner, so no source of anyone's
+        for version in ['', 'v0/']:
+            self.assertEqual(self.request('get', f'/sources/{self.source.mnemonic}/{version}{feed}').status_code, 404)
+
+    def test_inactive_versions_leave_latest_release_searches_as_they_are(self):
+        def scoped():
+            return {scope[0] for scope in Source.get_latest_release_scopes_for(None)}
+
+        self.assertIn(self.source.mnemonic, scoped())
+        Source.objects.filter(id=self.release.id).update(is_active=False)
+        self.assertNotIn(self.source.mnemonic, scoped())
+
+        source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        OrganizationSourceFactory(
+            organization=self.org, mnemonic=source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.assertIn(source.mnemonic, scoped())
+        Source.objects.filter(id=source.id).update(is_active=False)
+        self.assertNotIn(source.mnemonic, scoped())
+
+    def test_concept_feeds_under_the_current_user_route_need_a_signed_in_user(self):
+        # feeds are read signed out, so /user/ names no source of anyone's
+        for version in ['', 'v1/', 'latest/']:
+            url = f'/user/sources/{self.source.mnemonic}/{version}concepts/{self.concept.mnemonic}/atom/'
+            self.assertEqual(self.client.get(url).status_code, 404, url)
+
+
+@tag('es')
+class SourceVersionSearchAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        self.index()
+
+    def index(self):
+        ConceptDocument().update(Concept.objects.filter(parent__organization=self.org), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent__organization=self.org), refresh=True)
+
+    def search(self, url, user=None, **headers):
+        if user:
+            headers['HTTP_AUTHORIZATION'] = 'Token ' + user.get_token()
+        response = self.client.get(url, **headers)
+        self.assertEqual(response.status_code, 200, url)
+        return response.data
+
+    def hits_from(self, source, url, user=None, **headers):
+        return [hit['id'] for hit in self.search(url, user, **headers)
+                if hit['source'] == source.mnemonic and hit['owner'] == source.parent.mnemonic]
+
+    @staticmethod
+    def facet_values(data, field='source'):
+        return [str(value[0]).lower() for value in data['facets']['fields'].get(field, [])]
+
+    def test_searched_version_histories_answer_as_their_version(self):
+        histories = [
+            (version_url, f'concepts/{self.concept.mnemonic}/versions/') for version_url in self.version_urls()] + [
+            (version_url, f'mappings/{self.mapping.mnemonic}/versions/') for version_url in self.version_urls()] + [
+            (version_url, f'concepts/{self.private_concept.mnemonic}/versions/') for version_url in [
+                self.private_source.uri, self.private_release.uri, self.private_source.uri + 'latest/']]
+
+        for version_url, suffix in histories:
+            url = version_url + suffix
+            for query in [f'?q={self.name}', '?facetsOnly=true', '?sortAsc=id']:
+                self.assert_answers(url + query, 401, 403, 200)
+            self.assert_answers(f'{url}?q={self.name}', 401, 403, 200, method='head')
+
+    def test_searches_naming_a_version_in_the_query_string_answer_as_in_the_url(self):
+        other = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        source = self.source.mnemonic
+        named = f'org={self.org.mnemonic}&source={source}&version=v1'
+        for url in [f'/concepts/?{named}', f'/mappings/?{named}', f'{other.uri}concepts/?{named}',
+                    f'{self.source.uri}concepts/?q={self.name}&version=v1']:
+            self.assert_answers(url, 401, 403, 200)
+            self.assert_answers(url, 401, 403, 200, method='head')
+        # no owner: only the org's source has v1, which only its members can view
+        for url in [f'/concepts/?source={source}&version=v1', f'/mappings/?source={source}&version=v1']:
+            self.assert_answers(url, 404, 404, 200)
+            self.assert_answers(url, 404, 404, 200, method='head')
+
+        for url in [f'/concepts/?source={source}', f'/concepts/?org={self.org.mnemonic}&source={source}',
+                    f'/concepts/?source={source}&version=HEAD', f'{self.source.uri}concepts/?q={self.name}']:
+            self.assert_answers(url, 200, 200, 200)
+            self.assert_answers(url, 200, 200, 200, method='head')
+
+    def test_a_source_facet_under_a_public_release_stays_a_search(self):
+        public_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v0', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(self.concept, public_release)
+        self.index()
+
+        for facet in [f'{self.source.mnemonic[:3]}*', 'NoSuchSource']:
+            self.assert_answers(f'{public_release.uri}concepts/?source={facet}', 200, 200, 200)
+            self.assert_answers(f'{public_release.uri}concepts/?source={facet}', 200, 200, 200, method='head')
+
+    def test_fuzzy_search_checks_the_source_versions_it_names(self):
+        public_source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        public_release = OrganizationSourceFactory(
+            organization=public_source.organization, mnemonic=public_source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        concept = ConceptFactory(parent=public_source, names=[ConceptNameFactory.build(name=self.name)])
+        self.add_to_version(concept, public_release)
+        ConceptDocument().update(Concept.objects.filter(parent=public_source), refresh=True)
+        url = f'{public_source.uri}concepts/?fuzzy=true&q={self.name}&source_version='
+
+        for version in [self.release, self.private_release]:
+            self.assert_answers(url + version.uri, 401, 403, 200)
+            self.assert_answers(url + version.uri, 401, 403, 200, method='head')
+        self.assert_answers(f'{url}{self.release.uri},{public_release.uri}', 401, 403, 200)
+        self.assertEqual(self.hits_from(public_source, url + public_release.uri, self.outsider), [concept.mnemonic])
+
+        # expressions that don't name a source version are skipped: a collection's version, or one that can't be read
+        release_member = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(name=self.name + 'c')])
+        self.add_to_version(release_member, self.release)
+        self.index()
+        OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, public_access=ACCESS_TYPE_VIEW)
+        collection_version = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', public_access=ACCESS_TYPE_VIEW)
+        for target in [collection_version.uri, 'http://example.org/cs|v1|v2']:
+            self.assertEqual(self.hits_from(self.source, f'{url}{target},{public_release.uri}', self.outsider), [])
+            self.assertEqual(
+                self.hits_from(public_source, f'{url}{target},{public_release.uri}', self.outsider), [concept.mnemonic])
+            self.assert_answers(url + target, 200, 200, 200, method='head')
+        response = self.client.head(
+            url + public_release.uri, HTTP_AUTHORIZATION='Token ' + self.outsider.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(int(response.headers['num_found']), 1)
+
+    def test_latest_release_search_leaves_out_releases_the_requester_cannot_view(self):
+        latest = {'HTTP_INCLUDESEARCHLATEST': 'true'}
+        source = self.source.mnemonic.lower()
+        searches = [(f'/concepts/?q={self.name}', self.concept.mnemonic),
+                    (f'/mappings/?q={self.mapping.mnemonic}', self.mapping.mnemonic)]
+
+        for url, mnemonic in searches:
+            for user in [None, self.outsider]:
+                self.assertEqual(self.hits_from(self.source, url, user, **latest), [], (url, user))
+                self.assertNotIn(source, self.facet_values(self.search(url + '&facetsOnly=true', user, **latest)))
+                self.assertIn(mnemonic, self.hits_from(self.source, url, user), (url, user))  # HEAD's, as before
+            for user in [self.member, self.staff]:
+                self.assertIn(mnemonic, self.hits_from(self.source, url, user, **latest), (url, user))
+                self.assertIn(source, self.facet_values(self.search(url + '&facetsOnly=true', user, **latest)))
+
+    def test_latest_release_search_reads_its_scopes_once(self):
+        with patch.object(
+                Source, 'get_latest_release_scopes_for', wraps=Source.get_latest_release_scopes_for) as scopes:
+            self.search(f'/concepts/?q={self.name}', self.outsider, HTTP_INCLUDESEARCHLATEST='true',
+                        HTTP_INCLUDEFACETS='true')
+        self.assertEqual(scopes.call_count, 1)
+
+    def test_latest_release_search_keeps_to_the_latest_release_while_the_index_catches_up(self):
+        url = f'/concepts/?q={self.name}'
+        other_concept = ConceptFactory(parent=self.source, names=[ConceptNameFactory.build(name=self.name + 'b')])
+        self.add_to_version(other_concept, self.release)
+        self.index()
+        public_release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v2', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        self.add_to_version(other_concept, public_release)
+
+        # the index still marks v1's members as the latest release's, and doesn't know v2's yet
+        for user in [None, self.outsider]:
+            self.assertEqual(self.hits_from(self.source, url, user, HTTP_INCLUDESEARCHLATEST='true'), [], user)
+
+        self.index()
+        for user in [None, self.outsider, self.member]:
+            self.assertEqual(
+                set(self.hits_from(self.source, url, user, HTTP_INCLUDESEARCHLATEST='true')),
+                {other_concept.mnemonic}, user)
+
+    def test_latest_release_search_keeps_public_releases(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_VIEW)
+        release = OrganizationSourceFactory(
+            organization=source.organization, mnemonic=source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        concept = ConceptFactory(parent=source, names=[ConceptNameFactory.build(name=self.name)])
+        self.add_to_version(concept, release)
+        ConceptDocument().update(Concept.objects.filter(parent=source), refresh=True)
+
+        for user in [None, self.outsider]:
+            hits = self.hits_from(source, f'/concepts/?q={self.name}', user, HTTP_INCLUDESEARCHLATEST='true')
+            self.assertTrue(hits, user)
+            self.assertEqual(set(hits), {concept.mnemonic}, user)
+
+
+@tag('es')
+class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
+    """
+    The org's public source holds the concepts and mappings. Its private collection P holds `inP` in HEAD and in v1;
+    its public collection Q holds `inQhead` in HEAD and `inQv1` in a private v1; its public collection R holds
+    `inRv1` in a public v1. A collection named in the query string counts only through versions the requester can
+    view.
+    """
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        self.tag = f'qc{uuid.uuid4().hex[:6]}'
+        self.source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        nowhere = ConceptFactory(parent=self.source, mnemonic=f'nowhere{self.tag}')
+        self.concepts, self.mappings = {}, {}
+        for key in ['inP', 'inQhead', 'inQv1', 'inRv1']:
+            self.concepts[key] = ConceptFactory(
+                parent=self.source, mnemonic=f'{key}{self.tag}', names=[ConceptNameFactory.build(name=self.tag)])
+            self.mappings[key] = MappingFactory(
+                parent=self.source, from_concept=self.concepts[key], to_concept=nowhere, mnemonic=f'm{key}{self.tag}')
+        self.p_head, self.p_v1 = self.collection('P', ACCESS_TYPE_NONE, ACCESS_TYPE_NONE, ['inP'], ['inP'])
+        self.q_head, self.q_v1 = self.collection('Q', ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, ['inQhead'], ['inQv1'])
+        self.r_head, self.r_v1 = self.collection('R', ACCESS_TYPE_VIEW, ACCESS_TYPE_VIEW, [], ['inRv1'])
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
+    def collection(self, name, head_access, version_access, head_keys, version_keys):
+        """A collection's HEAD holding head_keys' resources by reference, and its released v1 holding version_keys'."""
+        head = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=f'{self.tag}{name}', public_access=head_access)
+        head.expansion_uri = ExpansionFactory(collection_version=head).uri
+        head.save()
+        if head_keys:
+            head.add_expressions({'expressions': [self.concepts[key].uri for key in head_keys] + [
+                self.mappings[key].uri for key in head_keys]}, self.member)
+        version = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=head.mnemonic, version='v1', released=True, public_access=version_access)
+        expansion = ExpansionFactory(collection_version=version)
+        version.expansion_uri = expansion.uri
+        version.save()
+        for key in version_keys:
+            expansion.concepts.add(self.concepts[key], self.concepts[key].get_latest_version())
+            expansion.mappings.add(self.mappings[key], self.mappings[key].get_latest_version())
+        return head, version
+
+    def assert_answers(self, url, anonymous, outsider, member):
+        for user, status_code in [(None, anonymous), (self.outsider, outsider), (self.member, member)]:
+            self.assertEqual(self.request('get', url, user).status_code, status_code, (url, user))
+
+    def keys(self, rows, resource):
+        """The keys of this test's rows, as setUp names them."""
+        prefix = 'm' if resource == 'mappings' else ''
+        return sorted({row[0].removeprefix(prefix).removesuffix(self.tag) for row in rows if (
+            row[0].endswith(self.tag) and row[0].startswith(prefix) and 'nowhere' not in row[0])})
+
+    def listed(self, url, user, resource):
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, (url, user))
+        return self.keys([(row['id'],) for row in response.data], resource)
+
+    def exported(self, url, user, resource):
+        """The keys of this test's rows in the CSV export `url` answers."""
+        with patch('core.common.mixins.write_csv_to_s3', return_value='https://exports.test/export.csv') as export:
+            response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, (url, user))
+        return self.keys([(row['mnemonic'],) for row in export.call_args[0][0]], resource)
+
+    def assert_lists(self, query, outsiders, members, resources=('concepts', 'mappings')):
+        """Signed out and an outsider list `outsiders`; a member and staff list `members`."""
+        for resource in resources:
+            url = f'/{resource}/?{query}'
+            for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                   (self.staff, members)]:
+                self.assertEqual(self.listed(url, user, resource), sorted(expected), (url, user))
+
+    def test_collection_facets_count_only_versions_the_requester_can_view(self):
+        prefix, owner_url = self.tag, self.org.uri
+        self.assert_lists(f'collection={prefix}P', [], ['inP'])
+        self.assert_lists(f'collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1'])
+        self.assert_lists(f'collection={prefix}R', ['inRv1'], ['inRv1'])
+        self.assert_lists(f'collection={prefix}P,{prefix}R', ['inRv1'], ['inP', 'inRv1'])
+        self.assert_lists(f'q={prefix}&collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1'], ['concepts'])
+        self.assert_lists(f'collection={prefix}*', ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        # `*` alone: rewritten for outsiders; a member's matches every index entry, so narrowed to this test's
+        for user in [None, self.outsider]:
+            self.assertEqual(self.listed('/concepts/?collection=*', user, 'concepts'), ['inQhead', 'inRv1'], user)
+        self.assert_lists(f'collection=*&collection_url={owner_url}collections/{prefix}*',
+                          ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        self.assert_lists(f'collection={prefix}@*', [], [])  # a literal prefix: `@` isn't a wildcard
+        self.assert_lists(f'collection_url={self.q_v1.uri}', [], ['inQv1'])
+        self.assert_lists(f'collection_url={self.r_v1.uri}', ['inRv1'], ['inRv1'])
+        self.assert_lists(f'collection_url={owner_url}collections/{prefix}*&collection={prefix}*',
+                          ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        self.assert_lists(f'collection_owner_url={owner_url}&collection={prefix}*',
+                          ['inQhead', 'inRv1'], ['inP', 'inQhead', 'inQv1', 'inRv1'])
+        source = f'source={self.source.mnemonic}'
+        self.assert_lists(f'{source}&collection=!{prefix}P', ['inP', 'inQhead', 'inQv1', 'inRv1'],
+                          ['inQhead', 'inQv1', 'inRv1'])
+        # HEAD holds the concepts' first versions, so a search of latest versions finds inQhead in no collection
+        self.assert_lists(f'{source}&collection=!{prefix}Q', ['inP', 'inQhead', 'inQv1', 'inRv1'],
+                          ['inP', 'inQhead', 'inRv1'])
+
+    @patch('core.common.mixins.write_csv_to_s3', Mock(return_value='https://exports.test/export.csv'))
+    def test_a_collection_named_with_its_owner_answers_as_its_lists(self):
+        org, prefix = self.org.mnemonic, self.tag
+        for resource in ['concepts', 'mappings']:
+            for query in [f'collection={prefix}P', f'collection={prefix}P&version=v1',
+                          f'collection={prefix}Q&version=v1', f'collection={prefix}Q&version=latest',
+                          f'collection={prefix}R,{prefix}P']:
+                for url in [f'/{resource}/?org={org}&{query}', f'/{resource}/?org={org}&csv=true&{query}']:
+                    self.assert_answers(url, 401, 403, 200)
+            for query in [f'collection={prefix}Q', f'collection={prefix}R&version=v1', 'collection=NoSuchCollection',
+                          f'collection=!{prefix}P', f'collection={prefix}P*']:
+                self.assert_answers(f'/{resource}/?org={org}&{query}', 200, 200, 200)
+            self.assert_answers(f'/{resource}/?org={org}&collection={prefix}Q&version=v9', 404, 404, 404)
+            # quoted, or capitalised, as a search reads it
+            self.assert_answers(f'/{resource}/?org={org}&collection=%22{prefix}P%22', 401, 403, 200)
+            self.assert_answers(f'/{resource}/?org={org}&Collection={prefix}P', 401, 403, 200)
+            self.assert_answers(f'/{resource}/?org={org}&collection={prefix}R&Collection={prefix}P', 401, 403, 200)
+            # an empty source, which leaves the source check out, leaves this one in
+            self.assert_answers(f'/{resource}/?source=&org={org}&collection={prefix}P&version=v1', 401, 403, 200)
+            # the owner the URL names; the version in a repository's URL is that repository's
+            self.assert_answers(f'{self.source.uri}{resource}/?collection={prefix}P', 401, 403, 200)
+            item = f'{resource}/{"m" if resource == "mappings" else ""}inP{prefix}/'
+            self.assert_answers(f'{self.source.uri}{item}?collection={prefix}P', 401, 403, 200)
+            self.assert_answers(f'{self.r_v1.uri}{resource}/?collection={prefix}R', 200, 200, 200)
+
+    def test_csv_exports_count_only_versions_the_requester_can_view(self):
+        prefix = self.tag
+        cases = [(f'collection={prefix}P', [], ['inP']), (f'collection={prefix}Q', ['inQhead'], ['inQhead', 'inQv1']),
+                 (f'collection={prefix}Q&version=v1', [], ['inQv1']), (f'collection={prefix}R', ['inRv1'], ['inRv1'])]
+        for resource, (query, outsiders, members) in itertools.product(['concepts', 'mappings'], cases):
+            for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                   (self.staff, members)]:
+                url = f'/{resource}/?csv=true&{query}'
+                self.assertEqual(self.exported(url, user, resource), sorted(expected), (url, user))
+
+    def test_csv_exports_match_the_version_and_its_access_in_one_expansion(self):
+        both = ConceptFactory(parent=self.source, mnemonic=f'inQboth{self.tag}')
+        self.q_head.expansion.concepts.add(both)
+        self.q_v1.expansion.concepts.add(both)
+        url = f'/concepts/?csv=true&collection={self.tag}Q&version=v1'
+        for user, expected in [(None, []), (self.outsider, []), (self.member, ['inQboth', 'inQv1'])]:
+            self.assertEqual(self.exported(url, user, 'concepts'), expected, user)
+
+    def test_deleted_versions_match_nothing(self):
+        """The index keeps a deleted version's members until they're indexed again."""
+        p_v1_uri = self.p_v1.uri
+        Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).delete()
+        for query in [f'collection_url={p_v1_uri}', f'collection={self.tag}P', f'collection={self.tag}P*']:
+            for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
+                self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
+
+    def test_inactive_versions_match_nothing(self):
+        """A version keeps its access when its HEAD is made private; deactivating its owner leaves both inactive."""
+        Collection.objects.filter(id=self.p_v1.id).update(public_access=ACCESS_TYPE_VIEW)
+        self.assert_lists(f'collection={self.tag}P', [], ['inP'])
+        Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).update(is_active=False)
+        for query in [f'collection={self.tag}P', f'collection_url={self.p_v1.uri}']:
+            for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
+                self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
+
+    @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+    def test_collection_facets_on_a_cached_source_version_list_answer_each_requester(self):
+        release = OrganizationSourceFactory(
+            organization=self.org, mnemonic=self.source.mnemonic, version='v1', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        release.concepts.add(*[concept.get_latest_version() for concept in self.concepts.values()])
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        cache.clear()
+        for query in [f'collection_url={self.p_v1.uri}', f'collectionUrl={self.p_v1.uri}']:
+            url = f'{release.uri}concepts/?{query}'
+            self.assertEqual(self.listed(url, self.member, 'concepts'), ['inP'], url)
+            self.assertEqual(self.listed(url, self.outsider, 'concepts'), [], url)
+            self.assertEqual(self.listed(url, None, 'concepts'), [], url)
+
+    def test_a_prefix_matching_too_many_versions_answers_400(self):
+        url = f'/concepts/?collection={self.tag}*'
+        with patch.object(BaseAPIView, 'max_viewable_collection_urls', 2):
+            self.assert_answers(url, 400, 400, 200)
+            self.assertEqual(self.request('get', url, self.staff).status_code, 200)
+            self.assert_answers(f'/concepts/?collection={self.tag}R*', 200, 200, 200)
+            # a prefix longer than any owner URL matches no owner
+            self.assert_answers(f'/concepts/?collection_owner_url={self.org.uri}collections/*', 200, 200, 200)
+
+    def test_a_route_naming_a_version_refuses_another_in_the_query_string(self):
+        for resource in ['concepts', 'mappings']:
+            for query in ['', '?version=v1', f'?version=v1&q={self.tag}']:
+                url = f'{self.q_v1.uri}{resource}/{query}'
+                self.assert_answers(url, 401, 403, 200)
+                self.assertEqual(self.request('head', url).status_code, 401, url)
+            for query in ['?version=HEAD', '?version=HEAD&retired=false', f'?version=HEAD&q={self.tag}']:
+                url = f'{self.q_v1.uri}{resource}/{query}'
+                self.assert_answers(url, 400, 400, 400)
+                self.assertEqual(self.request('head', url).status_code, 400, url)
+            latest = f'{self.q_head.uri}latest/{resource}/?version=v1'
+            self.assertEqual(self.request('get', latest, self.member).status_code, 400, latest)
+        # a write acts on the version the URL names, never on the query string's
+        response = self.request('delete', f'{self.q_head.uri}HEAD/?version=v1', self.staff)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Collection.objects.filter(id__in=[self.q_head.id, self.q_v1.id], is_active=True).count(), 2)
+
+    def test_match_filters_count_only_versions_the_requester_can_view(self):
+        preview = Group.objects.get(name=PREVIEW_GROUP_NAME)
+        for user in [self.outsider, self.member]:
+            user.groups.add(preview)
+        data = {'rows': [{'name': self.tag}], 'target_repo_url': self.source.uri,
+                'filter': {'collection': f'{self.tag}Q'}}
+        for user, expected in [(self.outsider, ['inQhead']), (self.member, ['inQhead', 'inQv1']),
+                               (self.staff, ['inQhead', 'inQv1'])]:
+            response = self.request('post', '/concepts/$match/?limit=10', user, data)
+            self.assertEqual(response.status_code, 200, user)
+            self.assertEqual(
+                self.keys([(row['id'],) for row in response.data[0]['results']], 'concepts'), expected, user)
+
+
+class ViewableVersionsCriteriaTest(AccessTestMixin, OCLTestCase):
+    """Collection.get_viewable_versions_criteria matches has_view_access on every active version, for each requester."""
+    def setUp(self):
+        super().setUp()
+        self.other_org = OrganizationFactory()
+        self.versions = {}
+        for key, factory, owner, head_access, version_access in [
+                ('own', UserCollectionFactory, {'user': self.owner}, ACCESS_TYPE_NONE, ACCESS_TYPE_NONE),
+                ('ownPublic', UserCollectionFactory, {'user': self.owner}, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW),
+                ('org', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_NONE, ACCESS_TYPE_NONE),
+                ('orgPublic', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_NONE,
+                 ACCESS_TYPE_VIEW),
+                ('public', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_VIEW,
+                 ACCESS_TYPE_VIEW),
+                ('publicPrivate', OrganizationCollectionFactory, {'organization': self.org}, ACCESS_TYPE_VIEW,
+                 ACCESS_TYPE_NONE),
+                ('otherPublic', OrganizationCollectionFactory, {'organization': self.other_org}, ACCESS_TYPE_NONE,
+                 ACCESS_TYPE_VIEW)]:
+            mnemonic = f'vvc{key}'
+            self.versions[f'{key}.HEAD'] = factory(**owner, mnemonic=mnemonic, public_access=head_access)
+            self.versions[f'{key}.v1'] = factory(**owner, mnemonic=mnemonic, version='v1', public_access=version_access)
+
+    def viewable(self, user):
+        criteria = Collection.get_viewable_versions_criteria(user)
+        ids = [version.id for version in self.versions.values()]
+        return sorted(Collection.objects.filter(criteria, id__in=ids).values_list('mnemonic', 'version'))
+
+    def test_matches_has_view_access(self):
+        public = [('vvcpublic', 'HEAD'), ('vvcpublic', 'v1'), ('vvcpublicPrivate', 'HEAD')]
+        own = [('vvcown', 'HEAD'), ('vvcown', 'v1'), ('vvcownPublic', 'HEAD'), ('vvcownPublic', 'v1')]
+        org = [('vvcorg', 'HEAD'), ('vvcorg', 'v1'), ('vvcorgPublic', 'HEAD'), ('vvcorgPublic', 'v1'),
+               ('vvcpublicPrivate', 'v1')]
+        for user, expected in [(AnonymousUser(), public), (self.outsider, public), (self.owner, public + own),
+                               (self.member, public + org), (self.admin, public + org)]:
+            self.assertEqual(self.viewable(user), sorted(expected), user)
+            self.assertEqual(self.viewable(user), sorted(
+                (version.mnemonic, version.version) for version in self.versions.values()
+                if version.has_view_access(user)), user)
+        self.assertIsNone(Collection.get_viewable_versions_criteria(self.staff))
+        self.assertTrue(all(version.has_view_access(self.staff) for version in self.versions.values()))
 
 
 class CanViewAllContentTest(OCLTestCase):

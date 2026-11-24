@@ -10,7 +10,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction, models, connection, OperationalError
-from django.db.models import Q, F, QuerySet, prefetch_related_objects
+from django.db.models import Q, F, QuerySet, prefetch_related_objects, Exists, OuterRef
 from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
@@ -36,7 +36,7 @@ from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
 from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri
+    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri, to_snake_case
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -191,10 +191,13 @@ class ListWithHeadersMixin(ListModelMixin):
     def __can_cache(self):
         # facets/search-stats are header driven and change the response shape, but are not part of the cache key;
         # hierarchy concepts, URLs, paths and summary counts are filtered per requester, so they can't be shared
+        # so are collection facets, which match through the collection versions the requester can view
         params = self.request.query_params
+        collection_facets = get(self, 'collection_facets', ())
         return (self.is_repo_version_children_request_without_any_search() and
                 not self.should_include_facets() and not self.should_include_search_stats() and
                 all(params.get(param) not in TRUTHY for param in PER_REQUESTER_LIST_PARAMS) and
+                not any(to_snake_case(param) in collection_facets for param in params) and
                 get(self, 'parent_resource.is_latest_version', False))
 
     def list(self, request, *args, **kwargs):
@@ -944,14 +947,14 @@ class SourceChildMixin(ChecksumModel):
 
     @staticmethod
     def filter_by_viewable_collection_version(expansions, user, prefix=''):
-        """Expansions of collection versions the user can view: public ones, their own and their orgs' (staff: all)."""
-        if get(user, 'is_staff'):
+        """Expansions of collection versions the user can view, by has_view_access's rule: the version and its HEAD
+        both viewable, and the version active (staff: all). One pk lookup per expansion row"""
+        from core.collections.models import Collection
+        viewable = Collection.get_viewable_versions_criteria(user)
+        if viewable is None:
             return expansions
-        criteria = ~Q(**{f'{prefix}collection_version__public_access': ACCESS_TYPE_NONE})
-        if get(user, 'is_authenticated'):
-            criteria |= Q(**{f'{prefix}collection_version__user_id': user.id}) | Q(
-                **{f'{prefix}collection_version__organization__members__id': user.id})
-        return expansions.filter(criteria)
+        return expansions.filter(Exists(
+            Collection.objects.filter(viewable, id=OuterRef(f'{prefix}collection_version_id'))))
 
     @property
     def versions(self):
@@ -1391,6 +1394,8 @@ class ConceptContainerProcessingMixin:
     List this mixin before the base view in the class bases, or APIView.get_permissions takes precedence over this
     one. BaseAPIView.get_object loads the version and checks these permissions.
     """
+    writes_content = False  # clearing the flag changes no content, so CanEditConceptDictionary doesn't ask the policy
+
     def get_permissions(self):
         if self.request.method == 'POST':
             return [CanEditConceptDictionary(), ]
