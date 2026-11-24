@@ -71,7 +71,7 @@ from core.common.utils import (
     get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
     get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size,
-    write_csv_to_s3)
+    write_csv_to_s3, write_rows_to_csv, cd_temp)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.documents import MappingDocument
@@ -1380,6 +1380,21 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(os.getcwd(), cwd)
         self.assertEqual(len(export_dirs), 1)
         self.assertFalse(os.path.exists(export_dirs[0]))
+
+    def test_write_rows_to_csv(self):
+        """Rows are written under the headers with their serializers; None is blank and datetimes are ISO"""
+        cwd = cd_temp()
+        try:
+            csv_file = write_rows_to_csv(
+                [{'Name': 'a', 'Tags': ['x', 'y'], 'At': datetime.datetime(2026, 1, 2, 3, 4, 5), 'Note': None}],
+                ['Name', 'Tags', 'At', 'Note'], 'rows', {'Tags': ','.join})
+            with open(csv_file.name, encoding='utf-8-sig', newline='') as file:
+                content = file.read()
+        finally:
+            os.chdir(cwd)
+
+        self.assertEqual(csv_file.name, 'rows.csv')
+        self.assertEqual(content, 'Name,Tags,At,Note\r\na,"x,y",2026-01-02T03:04:05,\r\n')
 
     @patch('core.common.utils.get_export_service')
     @patch('core.common.utils.csv_file_for')

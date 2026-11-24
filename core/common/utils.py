@@ -12,7 +12,7 @@ import time
 import uuid
 import zipfile
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import local
 from urllib import parse
 
@@ -45,8 +45,17 @@ def cd_temp():
     return cwd
 
 
-def write_rows_to_csv(rows, headers, filename=None):
+def csv_cell(value, serializer=None):
+    if value is None:
+        return ''
+    if serializer:
+        return serializer(value)
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
+def write_rows_to_csv(rows, headers, filename=None, field_serializer_map=None):
     """Writes dict rows under `headers` to a CSV file in the current directory, with a BOM for Excel."""
+    field_serializer_map = field_serializer_map or {}
     filename = filename or 'export'
     if not filename.endswith('.csv'):
         filename += '.csv'
@@ -54,7 +63,8 @@ def write_rows_to_csv(rows, headers, filename=None):
         csv_file.write('\ufeff')
         writer = csv.DictWriter(csv_file, headers)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(
+            {key: csv_cell(value, field_serializer_map.get(key)) for key, value in row.items()} for row in rows)
     return csv_file
 
 
@@ -69,7 +79,7 @@ def write_csv_to_s3(data, requester, headers=None, **kwargs):
             csv_file = csv_file_for(data, **kwargs)
             csv_file.close()
         else:
-            csv_file = write_rows_to_csv(data, headers, kwargs.get('filename'))
+            csv_file = write_rows_to_csv(data, headers, kwargs.get('filename'), kwargs.get('field_serializer_map'))
         zip_file_name = csv_file.name + '.zip'
         with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.write(csv_file.name)

@@ -26,16 +26,17 @@ class RepoListCSVMixin:
         ]
 
     def get_csv_rows(self, queryset):
-        """Read again by id, as the list may be a union."""
-        model = self.get_queryset().model
-        repos = model.objects.filter(id__in=[repo.id for repo in queryset]).select_related(
-            'organization', 'user', 'updated_by').order_by('id')
+        """Read again by id, as the list may be a union, and kept in the list's order."""
+        headers = self.get_csv_headers()
+        ids = [repo.id for repo in queryset]
+        position = {repo_id: index for index, repo_id in enumerate(ids)}
+        repos = queryset.model.objects.filter(id__in=ids).select_related('organization', 'user', 'updated_by')
         return [
-            dict(zip(self.get_csv_headers(), [
+            dict(zip(headers, [
                 repo.parent.mnemonic, repo.mnemonic, repo.name, repo.full_name, getattr(repo, self.csv_type_field),
                 repo.description, repo.default_locale, ','.join(repo.supported_locales or []), repo.website,
                 repo.external_id, repo.updated_at, repo.updated_by.username, repo.uri
-            ])) for repo in repos
+            ])) for repo in sorted(repos, key=lambda repo: position[repo.id])
         ]
 
 
