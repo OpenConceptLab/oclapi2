@@ -92,12 +92,13 @@ class Command(BaseCommand):
         before = {'state': (expansion.health or {}).get('state'), 'is_current': expansion.health_is_current,
                   'rules_version': (expansion.health or {}).get('rules_version')}
         started = time.time()
+        revision = self.get_revision(expansion)
         try:
             health = expansion.update_health() if self.options['apply'] else ExpansionHealth(expansion).compute()
         except Exception as ex:  # pylint: disable=broad-except
             health, error = None, f'{type(ex).__name__}: {ex}'
         else:
-            error = None if health else self.get_apply_error(expansion)
+            error = None if health else self.get_apply_error(expansion, revision)
         report = {
             'expansion': expansion.uri,
             'id': expansion.id,
@@ -117,10 +118,13 @@ class Command(BaseCommand):
         self.write({**report, 'health': health})
 
     @staticmethod
-    def get_apply_error(expansion):
-        # changed while it computed: the result wasn't stored, and the run the change queued computes it
-        if Expansion.objects.filter(id=expansion.id, health_is_current=False).exists():
-            return 'changed while it computed; a recompute is queued'
+    def get_revision(expansion):
+        return Expansion.objects.filter(id=expansion.id).values_list('health_revision', flat=True).first()
+
+    def get_apply_error(self, expansion, revision):
+        # any mark or store moves the revision, whether it leaves the row False or None; a failed compute doesn't
+        if self.get_revision(expansion) != revision:
+            return 'changed while it computed, so it was not stored'
         return 'computing health failed; see the log'
 
     def get_skip_reason(self, expansion):

@@ -529,6 +529,65 @@ class ExpansionHealthTest(OCLTestCase):
 
         self.assertEqual(count_queries(2), count_queries(6))
 
+    def test_a_pinned_repositorys_versions_are_read_only_for_the_members_pinned_references_judge(self):
+        releases = [self.release(f'v{number}') for number in range(1, 5)]
+        self.expansion.evaluated_source_versions.add(releases[0])
+        unpinned = []
+        for _ in range(3):
+            concept = ConceptFactory(parent=self.source)
+            version = concept.get_latest_version()
+            version.sources.add(*releases)
+            self.reference(concept, version)
+            unpinned.append(version)
+        concept = ConceptFactory(parent=self.source)
+        pinned = concept.get_latest_version()
+        pinned.sources.add(*releases)
+        reference = CollectionReference(
+            expression=pinned.uri, collection=self.collection, system=self.source.uri, code=concept.mnemonic,
+            resource_version=pinned.version)
+        reference.save()
+        reference.concepts.add(pinned)
+        self.expansion.concepts.add(pinned)
+
+        health = ExpansionHealth(self.expansion)
+        members = health.get_member_rows('concepts')
+        member_rows = list(members.values_list('id', 'versioned_object_id'))
+        attributions = health.get_attributions('concepts', members)
+        pinned_member_ids = health.get_pinned_member_ids(member_rows, attributions)
+        containments = health.get_containments(
+            'concepts', members, sorted(set().union(*attributions.values())), pinned_member_ids)
+
+        self.assertEqual(pinned_member_ids, [pinned.id])
+        # rows grow with the pinned members times their repository's versions, not with every member
+        for version in unpinned:
+            self.assertEqual(containments[version.id], {('source', releases[0].id)})
+        self.assertEqual(len(containments[pinned.id]), 5)  # HEAD and the four releases
+        self.assertEqual(self.classify()[pinned.id], RELEASE)
+
+    def test_queries_do_not_grow_with_a_pinned_repositorys_versions(self):
+        other = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=other)
+        version = concept.get_latest_version()
+        reference = CollectionReference(
+            expression=version.uri, collection=self.collection, system=other.uri, code=concept.mnemonic,
+            resource_version=version.version)
+        reference.save()
+        reference.concepts.add(version)
+        self.expansion.concepts.add(version)
+
+        def count_queries(releases_count):
+            for number in range(releases_count):
+                version.sources.add(OrganizationSourceFactory(
+                    mnemonic=other.mnemonic, organization=other.organization, version=f'{releases_count}.{number}',
+                    released=True))
+            health = ExpansionHealth(Expansion.objects.get(id=self.expansion.id))
+            with CaptureQueriesContext(connection) as context:
+                self.assertEqual(health.classify('concepts')[version.id][0], RELEASE)
+            return len(context.captured_queries)
+
+        # another owner's public versions: their visibility is one query, not one per version
+        self.assertEqual(count_queries(2), count_queries(6))
+
 
 class ExpansionHealthStorageTest(OCLTestCase):
     def setUp(self):
@@ -739,10 +798,30 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
     def test_a_seed_that_ends_before_its_expansion_is_the_default_still_stores_health(self):
         collection = OrganizationCollectionFactory()
+        CollectionReference(
+            expression='/orgs/missing/sources/missing/concepts/c1/', collection=collection,
+            system='/orgs/missing/sources/missing/', code='c1').save()
         with patch.object(CollectionReference, 'is_expansion_locked_repo_version_on', return_value=False):
             collection.cascade_children_to_expansion(index=False)
 
-        self.assertTrue(collection.expansion.health_is_current)
+        expansion = collection.expansion
+        self.assertTrue(expansion.health_is_current)
+        # computed from what the seed saved, the reference it couldn't resolve among it
+        reasons = {reason['code']: reason['count'] for reason in expansion.health['reasons']}
+        self.assertEqual(reasons.get('unresolved_references'), 1)
+
+    def test_dropping_unseen_children_from_head_recomputes_the_expansions_holding_them(self):
+        concept = ConceptFactory()
+        member = concept.get_latest_version()
+        self.add(member)
+        self.assertEqual(self.stored()[0]['members']['concepts'][HEAD_MEMBER], 1)
+
+        with patch('core.sources.models.Source.queue_index_dropped_children'):
+            concept.parent.drop_unseen_children([], [])
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual(health['members']['concepts'][INTERIM], 1)
 
     def test_a_hard_deleted_member_leaves_the_expansions_holding_it_not_current(self):
         concept = ConceptFactory()
@@ -762,10 +841,42 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertTrue(self.stored()[1])
         self.assertEqual(Expansion.objects.values_list('health_is_current', flat=True).get(id=other.id), None)
 
-    def test_the_nightly_recheck_leaves_queued_ones_to_their_run(self):
+    def test_the_nightly_recheck_also_takes_ones_whose_queued_run_never_came(self):
         Expansion.objects.filter(id=self.expansion.id).update(health_is_current=False)
 
-        self.assertEqual(recheck_expansion_health(), 0)
+        self.assertEqual(recheck_expansion_health(), 1)
+        self.assertTrue(self.stored()[1])
+
+    def test_a_mark_bumps_the_revision_before_anything_else(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health_is_current=False)
+        expansion = Expansion.objects.get(id=self.expansion.id)
+
+        with CaptureQueriesContext(connection) as context:
+            expansion.mark_health_out_of_date()
+
+        # a run that read the old revision can't store its result between the mark's statements
+        updates = [query['sql'] for query in context.captured_queries if query['sql'].startswith('UPDATE')]
+        self.assertIn('"health_revision"', updates[0])
+        self.assertNotIn('"health_is_current"', updates[0].split(' WHERE ')[0])
+
+    def test_an_older_run_that_ends_after_a_newer_store_does_not_overwrite_it(self):
+        computed = []
+        real_compute = ExpansionHealth.compute
+
+        def compute(health):
+            computed.append(1)
+            if len(computed) == 1:
+                # a newer run (a rebuild's) stores while this one computes
+                Expansion.objects.get(id=self.expansion.id).update_health()
+                return {'state': HEALTHY, 'stale': True}
+            return real_compute(health)
+
+        with patch.object(ExpansionHealth, 'compute', autospec=True, side_effect=compute):
+            Expansion.objects.get(id=self.expansion.id).update_health()
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual(health['state'], EMPTY)
 
     def test_a_save_from_an_older_copy_keeps_the_health(self):
         older = Expansion.objects.get(id=self.expansion.id)

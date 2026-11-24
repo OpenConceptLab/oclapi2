@@ -4,6 +4,7 @@ import tempfile
 from io import StringIO
 
 from django.core.management import call_command, CommandError
+from django.db.models import F
 from mock import patch
 
 from core.collections.health import EMPTY, RULES_VERSION, ExpansionHealth, HEAD_MEMBER, MISMATCH
@@ -156,6 +157,23 @@ class ExpansionHealthBackfillTest(OCLTestCase):
 
         self.assertIn(f'FAILED {self.expansion.id} {self.expansion.uri}: computing health failed', out)
         self.assertEqual(self.stored(self.expansion), (None, None))
+
+    def test_a_change_while_applying_is_reported_as_one_whatever_it_left(self):
+        computed = []
+
+        def compute(_health):
+            if not computed:
+                # a repository mark while it computes leaves the row None, not False
+                Expansion.objects.filter(id=self.expansion.id).update(
+                    health_is_current=None, health_revision=F('health_revision') + 1)
+            computed.append(1)
+            return {'state': EMPTY, 'reasons': []}
+
+        with patch.object(ExpansionHealth, 'compute', autospec=True, side_effect=compute):
+            out = self.run_command(self.expansion.uri, apply=True, fails=True)
+
+        self.assertIn(
+            f'FAILED {self.expansion.id} {self.expansion.uri}: changed while it computed, so it was not stored', out)
 
     def test_output_has_a_line_per_expansion(self):
         with tempfile.TemporaryDirectory() as directory:
