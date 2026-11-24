@@ -12,9 +12,8 @@ from rest_framework.exceptions import AuthenticationFailed
 
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, \
     SSOUsernameCaseMismatchRefused
-from core.capacity import logs as capacity_logs
 from core.middlewares.middlewares import CustomLoggerMiddleware, RequireAuthenticationMiddleware, \
-    ResponseHeadersMiddleware
+    SlowRequestLogMiddleware
 
 
 @override_settings(
@@ -357,54 +356,73 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
         self.assertTrue(any(RESPONSE_MARKER in line for line in lines))
 
 
-class SlowRequestLogTest(SimpleTestCase):
-    """A request at or over SLOW_REQUEST_LOG_MS writes one JSON line to the API log, for CloudWatch metric filters."""
+
+class SlowRequestLogMiddlewareTest(SimpleTestCase):
+    """A request taking SLOW_REQUEST_LOG_MS or more writes one slow_request line, for CloudWatch metric filters."""
     path = '/orgs/CIEL/sources/CIEL/v2026-10-23/mapped-sources/'
 
-    def setUp(self):
-        capacity_logs._sink.update(sink=None, pid=None)  # pylint: disable=protected-access
-
-    def tearDown(self):
-        capacity_logs._sink.update(sink=None, pid=None)  # pylint: disable=protected-access
-
-    def lines(self, request, delay=0, status=200, resolved=True):
-        """Pass the request through the middleware to a view taking `delay` seconds; return the lines written."""
+    def records(self, request, delay=0, status=200, resolved=True):
+        """Pass the request through the middleware to a view taking `delay` seconds; return the records logged."""
         def view(req):
             if resolved:
                 req.resolver_match = resolve(req.path)
             time.sleep(delay)
             return HttpResponse(status=status)
 
-        written = []
-        with patch('core.capacity.logs.write', side_effect=written.append):
-            ResponseHeadersMiddleware(view)(request)
-            if capacity_logs._sink['sink']:  # pylint: disable=protected-access
-                self.assertTrue(capacity_logs.get_sink().drain(2))
-        return [json.loads(line) for line in written]
+        with patch('core.middlewares.middlewares.emit') as emit:
+            response = SlowRequestLogMiddleware(view)(request)
+
+        self.assertEqual(response.status_code, status)
+        return [logged.args[0] for logged in emit.call_args_list]
+
+    def test_wraps_every_middleware_but_fhir_errors_so_it_times_the_whole_request(self):
+        self.assertEqual(settings.MIDDLEWARE[:2], [
+            'core.middlewares.middlewares.FhirErrorMiddleware', 'core.middlewares.middlewares.SlowRequestLogMiddleware'])
 
     @override_settings(SLOW_REQUEST_LOG_MS=20)
-    def test_a_slow_request_writes_one_line_without_user_or_query(self):
+    def test_a_slow_request_logs_its_view_and_route(self):
         request = RequestFactory().get(self.path + '?excludeSelf=false&brief=true', HTTP_AUTHORIZATION='Token secret')
 
-        lines = self.lines(request, delay=0.03, status=503)
+        records = self.records(request, delay=0.03, status=503)
 
-        self.assertEqual(len(lines), 1)
-        line = lines[0]
-        self.assertGreaterEqual(line.pop('ms'), 20)
-        self.assertEqual(line, {
-            'event': 'slow_request', 'view': 'SourceVersionMappedSourcesListView', 'method': 'GET', 'status': 503,
-            'path': self.path})
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertGreaterEqual(record.pop('ms'), 20)
+        self.assertEqual(record, {
+            'event': 'slow_request', 'view': 'SourceVersionMappedSourcesListView',
+            'route': 'orgs/<str:org>/sources/<str:source>/<str:version>/mapped-sources/', 'method': 'GET',
+            'status': 503})
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_logs_no_value_from_the_path(self):
+        """A path can carry a user's name and a token, as email verification's does."""
+        records = self.records(RequestFactory().get('/users/someone/verify/a-secret-token/'), delay=0.01)
+
+        self.assertEqual(records[0]['route'], 'users/<str:user>/verify/<str:verification_token>/')
+        self.assertNotIn('someone', json.dumps(records))
+        self.assertNotIn('a-secret-token', json.dumps(records))
 
     @override_settings(SLOW_REQUEST_LOG_MS=60000)
-    def test_a_request_under_the_threshold_writes_nothing(self):
-        self.assertEqual(self.lines(RequestFactory().get(self.path)), [])
+    def test_a_request_under_the_threshold_logs_nothing(self):
+        self.assertEqual(self.records(RequestFactory().get(self.path)), [])
 
     @override_settings(SLOW_REQUEST_LOG_MS=0)
     def test_zero_turns_it_off(self):
-        self.assertEqual(self.lines(RequestFactory().get(self.path), delay=0.01), [])
+        self.assertEqual(self.records(RequestFactory().get(self.path), delay=0.01), [])
 
     @override_settings(SLOW_REQUEST_LOG_MS=1)
-    def test_an_unresolved_path_has_no_view(self):
-        lines = self.lines(RequestFactory().get('/no/such/path/'), delay=0.01, status=404, resolved=False)
+    def test_an_unresolved_path_has_no_view_or_route(self):
+        records = self.records(RequestFactory().get('/no/such/path/'), delay=0.01, status=404, resolved=False)
 
-        self.assertEqual([line.get('view') for line in lines], [None])
+        self.assertEqual([(record['view'], record['route']) for record in records], [(None, None)])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_a_log_that_fails_never_fails_the_request(self):
+        def view(_):
+            time.sleep(0.01)
+            return HttpResponse(status=201)
+
+        with patch('core.middlewares.middlewares.emit', side_effect=RuntimeError("can't start new thread")):
+            response = SlowRequestLogMiddleware(view)(RequestFactory().post('/orgs/'))
+
+        self.assertEqual(response.status_code, 201)

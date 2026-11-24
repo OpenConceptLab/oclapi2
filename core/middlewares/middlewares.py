@@ -92,40 +92,47 @@ class FixMalformedLimitParamMiddleware(BaseMiddleware):
         return self.get_response(request)
 
 
+class SlowRequestLogMiddleware(BaseMiddleware):
+    """
+    Next to the outermost middleware, so it times the whole request, authentication included. A request taking
+    SLOW_REQUEST_LOG_MS or more (0 turns this off) writes one JSON line to the API log, where CloudWatch metric filters
+    count slow requests by view. The line has the URL pattern, not the path: a path can carry a user's name or a token.
+    """
+    def __call__(self, request):
+        start = time.monotonic()
+        response = self.get_response(request)
+        ms = int((time.monotonic() - start) * 1000)
+        if settings.SLOW_REQUEST_LOG_MS and ms >= settings.SLOW_REQUEST_LOG_MS:
+            match = getattr(request, 'resolver_match', None)
+            view = getattr(match, 'func', None)
+            view = getattr(view, 'view_class', view)
+            try:
+                emit({
+                    'event': 'slow_request',
+                    'view': getattr(view, '__name__', type(view).__name__) if view else None,
+                    'route': getattr(match, 'route', None),
+                    'method': request.method,
+                    'status': response.status_code,
+                    'ms': ms,
+                })
+            except Exception:  # noqa: BLE001 - a log line never fails the request it describes
+                pass
+        return response
+
+
 class ResponseHeadersMiddleware(BaseMiddleware):
     def __call__(self, request):
         start_time = time.time()
         response = self.get_response(request)
-        seconds = time.time() - start_time
         response[VERSION_HEADER] = settings.VERSION
         try:
             response[REQUEST_USER_HEADER] = str(getattr(request, 'user', None))
         except Exception:  # noqa: BLE001 - skip user header when session unavailable (e.g., async context)
             response[REQUEST_USER_HEADER] = ''
-        response[RESPONSE_TIME_HEADER] = seconds
+        response[RESPONSE_TIME_HEADER] = time.time() - start_time
         response[REQUEST_URL_HEADER] = request.get_full_path() or request.path
         response[REQUEST_METHOD_HEADER] = request.method
-        self.log_if_slow(request, response, int(seconds * 1000))
         return response
-
-    @staticmethod
-    def log_if_slow(request, response, ms):
-        """
-        A request taking SLOW_REQUEST_LOG_MS or more (0 turns this off) writes one JSON line to the API log, where
-        CloudWatch metric filters can count slow requests by view. It names no user and leaves out the query string.
-        """
-        if not settings.SLOW_REQUEST_LOG_MS or ms < settings.SLOW_REQUEST_LOG_MS:
-            return
-        view = getattr(getattr(request, 'resolver_match', None), 'func', None)
-        view = getattr(view, 'view_class', view)
-        emit({
-            'event': 'slow_request',
-            'view': getattr(view, '__name__', type(view).__name__) if view else None,
-            'method': request.method,
-            'status': response.status_code,
-            'ms': ms,
-            'path': request.path,
-        })
 
 
 class CurrentUserMiddleware(BaseMiddleware):
