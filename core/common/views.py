@@ -878,8 +878,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         """
         field = {'mnemonic': F('mnemonic'), 'uri': F('uri'),
                  'owner': Coalesce('organization__mnemonic', 'user__username')}[kind]
-        exact_criteria = {'mnemonic': models.Q(mnemonic__in=names), 'uri': models.Q(uri__in=names),
-                          'owner': models.Q(organization__mnemonic__in=names) | models.Q(user__username__in=names)}[kind]
+        exact_criteria = {
+            'mnemonic': models.Q(mnemonic__in=names), 'uri': models.Q(uri__in=names),
+            'owner': models.Q(organization__mnemonic__in=names) | models.Q(user__username__in=names)}[kind]
         hidden, shown = set(), set()
         for model in repo_models:
             rows = model.objects.annotate(_name=field if exact else Lower(field))
