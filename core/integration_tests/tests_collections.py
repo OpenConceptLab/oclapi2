@@ -5046,6 +5046,25 @@ class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_delete_400_default_expansion(self):
+        response = self.client.delete(
+            self.expansion.url + 'resolved-repo-updates/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'errors': ['Cannot delete default expansion']})
+        self.expansion.refresh_from_db()
+        self.assertTrue(self.expansion.is_active)
+
+    def test_delete_204_other_expansion(self):
+        expansion = ExpansionFactory(collection_version=self.collection)
+
+        response = self.client.delete(
+            expansion.url + 'resolved-repo-updates/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 204)
+        expansion.refresh_from_db()
+        self.assertFalse(expansion.is_active)
+
 
 class CollectionVersionsComparisonViewTest(OCLAPITestCase):
     def test_post_200(self):  # pylint: disable=too-many-locals

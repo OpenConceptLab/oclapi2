@@ -1,4 +1,5 @@
 import base64
+import math
 import re
 from email.mime.image import MIMEImage
 from functools import cached_property
@@ -8,12 +9,14 @@ import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.db import models
+from django.db.models import F
+from django.db.models.functions import Coalesce, Lower
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
-from elasticsearch_dsl import Q
+from elasticsearch_dsl import Q, TermsFacet
 from pydash import get, compact
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
@@ -27,9 +30,9 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER, FACET_SIZE
 from core.common.exceptions import Http400
-from core.common.mixins import PathWalkerMixin
+from core.common.mixins import PathWalkerMixin, SourceChildMixin
 from core.common.permissions import CanViewConceptDictionary
 from core.common.search import CustomESSearch, EXACT_OWNER_FIELD
 from core.common.serializers import RootSerializer
@@ -54,6 +57,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     pk_field = 'mnemonic'
     user_is_self = False
     is_searchable = False
+    search_checks_access = False  # the search filtered its hits by access, so they load through get_viewable_hits
     is_page_size_capped = False  # concept, mapping and reference lists: `limit` is capped at settings.LIST_MAX_LIMIT
     limit = LIST_DEFAULT_LIMIT
     default_filters = {}
@@ -64,10 +68,17 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
     _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
+    # a fuzzy search's targets, which only the concept list sets: without them it keeps to the URL's scope
+    _source_versions = None
+    _extra_filters = None
     # the facets that keep a search of concepts or mappings to collection members (get_viewable_collection_urls)
     collection_facets = ('collection', 'collection_url', 'collection_owner_url')
     max_viewable_collection_urls = 1000
     _viewable_collection_urls = None  # get_viewable_collection_urls's, read once per request and facet value
+    max_collection_facet_names = 3 * FACET_SIZE  # keep_collection_facets_viewable's
+    # the facets that name collection versions or expansions, with the index field holding the URLs they come from
+    collection_url_facets = {'collection': 'collection_url', 'collection_version': 'collection_url',
+                             'expansion': 'expansion_url'}
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -714,9 +725,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion = criteria if criterion is None else criterion | criteria
         return results if criterion is None else results.exclude(criterion)
 
-    def get_facets(self):  # pylint: disable=too-many-branches
+    def get_facets(self, for_requester=True):  # pylint: disable=too-many-branches
+        """
+        The search's facets. Without for_requester, before get_requester_facets: the same for everyone who can run
+        the search, so they can be cached.
+        """
         facets = {}
         parent_repo = None
+        params = {}
 
         if self.facet_class:
             if self.is_user_document():
@@ -724,13 +740,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             params = {
                 'query': self.get_search_string(lower=False),
-                '_search': self.__get_search_results(
-                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
+                '_search': self.get_facets_search()
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
             if self.map_codes_release:
                 params['release'] = self.map_codes_release
+            if self.is_source_child_document_model():  # see keep_collection_facets_viewable
+                params['extra_facets'] = {
+                    '_collection_names': TermsFacet(field='collection', size=self.max_collection_facet_names)}
 
             faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
@@ -739,8 +757,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 facets = s.facets.to_dict()
             except TransportError as ex:  # pragma: no cover
                 raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
-        if not get(self.request.user, 'is_authenticated'):
-            facets.pop('updatedBy', None)
         if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
         is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
@@ -769,9 +785,134 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         facets.pop('is_latest_version', None)
 
         if parent_repo and self.is_concept_document():
-            return parent_repo.get_ordered_concept_facets_by_filter_order(facets)
+            facets = parent_repo.get_ordered_concept_facets_by_filter_order(facets)
 
+        return self.get_requester_facets(facets, get(params, '_search')) if for_requester else facets
+
+    def get_facets_search(self):
+        return self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True)
+
+    def get_requester_facets(self, facets, search=None):
+        """get_facets(for_requester=False)'s facets as this requester sees them; `search`: get_facets_search's."""
+        if not get(self.request.user, 'is_authenticated'):
+            facets.pop('updatedBy', None)
+        self.keep_collection_facets_viewable(facets, search)
+        self.keep_repo_facets_viewable(facets, search)
         return facets
+
+    def keep_collection_facets_viewable(self, facets, search=None):
+        """
+        The collection, collection_version and expansion facets name the collection versions and expansions a match
+        is in as the index lists them: those the requester can't view, and those since deleted, too. Here each name
+        counts only the matches in the ones they can view, as the collection filter matches them
+        (get_collection_facet_criterion), in one more request; a name with none is left out. Staff see them as they
+        are. The collections counted are those _collection_names lists: the top max_collection_facet_names among the
+        matches. One past them isn't counted, so its names can be missing, never wrong.
+        """
+        from core.collections.models import Collection
+        collections = [name for name, _, _ in facets.pop('_collection_names', [])]
+        present = {facet: {name for name, _, _ in facets[facet]} for facet in self.collection_url_facets
+                   if facets.get(facet)}
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if not present or viewable is None:
+            return
+        urls = self.get_viewable_collection_facet_urls(present, collections, viewable)
+        counts = {}
+        if urls:
+            search = (search or self.get_facets_search()).extra(size=0).params(request_timeout=ES_REQUEST_TIMEOUT)
+            search.aggs.bucket('viewable', 'filters', filters={
+                str(i): Q('terms', **{self.collection_url_facets[facet]: sorted(values)})
+                for i, ((facet, _), values) in enumerate(urls.items())})
+            try:
+                buckets = search.execute().aggregations.viewable.buckets
+            except TransportError as ex:  # pragma: no cover
+                raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
+            counts = {key: buckets[str(i)].doc_count for i, key in enumerate(urls)}
+        for facet in present:
+            facets[facet] = sorted(
+                [(name, count, False) for (_facet, name), count in counts.items() if _facet == facet and count],
+                key=lambda bucket: (-bucket[1], bucket[0]))[:FACET_SIZE]
+
+    # the facets that name repositories, by what they hold: their names, their owners' names or their URLs
+    repo_name_facets = {
+        'source': 'mnemonic', 'owner': 'owner', 'fromConceptSource': 'mnemonic', 'toConceptSource': 'mnemonic',
+        'fromConceptOwner': 'owner', 'toConceptOwner': 'owner', 'targetRepo': 'uri'}
+
+    def keep_repo_facets_viewable(self, facets, search=None):
+        """
+        The facets that name repositories, or their owners, name them as the index has them: one made private before
+        it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a source or
+        owner name stays only if it names a repository the requester can view; a name of a mapping's or concept's
+        target is left out only if the repositories it names exist and the requester can view none of them, so a
+        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. A hit kept as its
+        creator's can have its names missing, never wrong. `search`: get_facets_search's, which tells whether the
+        search filters by access.
+        """
+        user = self.request.user
+        named = [facet for facet in self.repo_name_facets if facets.get(facet)]
+        if not named or get(user, 'is_staff') or not (
+                self.search_checks_access if search is not None else self.get_search_visibility_criteria() is not None):
+            return
+        from core.collections.documents import CollectionDocument
+        from core.collections.models import Collection
+        from core.sources.models import Source
+        owners = [Collection] if self.document_model == CollectionDocument else (
+            [Source, Collection] if self.is_repo_document_model() else [Source])
+        for facet in named:
+            # a concept search's source and owner facets keep the names' case, as the others' facets do but those
+            exact = facet not in ('source', 'owner') or self.is_concept_document()
+            key = str if exact else lambda name: str(name).lower()
+            shown, hidden = self.get_repo_names_by_access(
+                user, self.repo_name_facets[facet], {key(name) for name, _, _ in facets[facet]}, exact,
+                owners if facet == 'owner' else [Source])
+            facets[facet] = [bucket for bucket in facets[facet] if (
+                key(bucket[0]) in shown if facet in ('source', 'owner') else key(bucket[0]) not in hidden)]
+
+    @staticmethod
+    def get_repo_names_by_access(user, kind, names, exact, repo_models):
+        """
+        Of these `names` of repositories of `repo_models` (`kind`: their mnemonics, their owners' or their URIs, any
+        version's), those of a repository `user` can view, and those whose existing repositories `user` can view none
+        of; a name of none is in neither. One query per model, by index when `exact`,
+        else names are lowercase and match any case (owners that differ only in case are one name then).
+        """
+        field = {'mnemonic': F('mnemonic'), 'uri': F('uri'),
+                 'owner': Coalesce('organization__mnemonic', 'user__username')}[kind]
+        exact_criteria = {
+            'mnemonic': models.Q(mnemonic__in=names), 'uri': models.Q(uri__in=names),
+            'owner': models.Q(organization__mnemonic__in=names) | models.Q(user__username__in=names)}[kind]
+        hidden, shown = set(), set()
+        for model in repo_models:
+            rows = model.objects.annotate(_name=field if exact else Lower(field))
+            rows = rows.filter(exact_criteria) if exact else rows.filter(_name__in=names)
+            viewable = models.ExpressionWrapper(
+                model.get_viewable_versions_criteria(user), output_field=models.BooleanField())
+            for name, is_viewable in rows.annotate(_viewable=viewable).values_list('_name', '_viewable').distinct():
+                (shown if is_viewable else hidden).add(name)
+        return shown, hidden - shown
+
+    @staticmethod
+    def get_viewable_collection_facet_urls(facets, collections, viewable):
+        """
+        {(facet, name): urls} for these collection facets ({facet: the names it lists}), from these collections'
+        versions the requester can view (`viewable`): their URLs by collection and version name, as the collection
+        filter matches them, and their expansions' URLs by expansion name. A version or expansion name counts only if
+        its facet lists it, so the request stays the facets' size. Names read as the documents read them from their
+        expansions' URIs (to_parent_kwargs_from_uri).
+        """
+        from core.collections.models import Collection, Expansion
+        versions = Collection.objects.filter(viewable, mnemonic__in=collections)
+        urls = {}
+        for uri in versions.values_list('uri', flat=True):
+            parts = uri.strip('/').split('/')
+            for facet, name in [('collection', parts[3]), ('collection_version', parts[4] if len(parts) > 4 else HEAD)]:
+                if facet in facets and (facet == 'collection' or name in facets[facet]):
+                    urls.setdefault((facet, name), set()).add(uri)
+        if 'expansion' in facets:
+            for uri, name in Expansion.objects.filter(
+                    collection_version__in=versions, mnemonic__in=facets['expansion']).values_list('uri', 'mnemonic'):
+                urls.setdefault(('expansion', name), set()).add(uri)
+        return urls
 
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()
@@ -912,6 +1053,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.is_members_view() and username and user.is_authenticated and username != user.username and
             not user.is_staff and not self.is_url_registry_document())
 
+    def get_search_visibility_criteria(self):
+        """The access filter a search applies to the documents it matches; None where it applies none."""
+        if self.is_other_user_members_view():
+            return self.get_other_members_view_criteria()
+        return self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria()
+
     def get_scope_owner_criteria(self):
         """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
         source filters match names in any case, and owner names that differ only in case are other owners: their
@@ -978,10 +1125,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not ignore_retired_filter and self._should_exclude_retired_from_search_results():
             results = results.filter('term', retired=False)
 
-        visibility_criteria = self.get_other_members_view_criteria() if self.is_other_user_members_view() else (
-            self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria())
+        visibility_criteria = self.get_search_visibility_criteria()
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
+        # an org search in the requester's own scope reads the index's members, so it's checked as well
+        self.search_checks_access = visibility_criteria is not None or self.is_org_document()
         faceted_criterion = self.get_faceted_criterion()
         if faceted_criterion:
             results = results.filter(faceted_criterion)
@@ -1064,7 +1212,13 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         min_score = self.request.query_params.get('min_score') or None
         if min_score:
-            results = results.extra(min_score=float(min_score))
+            try:
+                score = float(min_score)
+            except ValueError:
+                score = math.nan
+            if not math.isfinite(score):
+                raise Http400({'error': f"'min_score' must be a number, got '{min_score}'."})
+            results = results.extra(min_score=score)
 
         if sort:
             results = results.sort(*self._get_sort_attribute())
@@ -1236,7 +1390,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 brief=self.is_brief()
             )
             self.total_count = es_search.total - offset
-            return es_search.queryset, es_search.scores, es_search.max_score, es_search.highlights
+            queryset = self.get_viewable_hits(es_search.queryset) if self.search_checks_access else es_search.queryset
+            return queryset, es_search.scores, es_search.max_score, es_search.highlights
         except RequestError as ex:  # pragma: no cover
             reason = get(
                 ex, 'info.error.caused_by.reason', ''
@@ -1250,6 +1405,33 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             raise Http400(detail=reason or get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
         except TransportError as ex:  # pragma: no cover
             raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
+
+    def get_viewable_hits(self, hits):
+        """
+        The hits the requester can view, as the database has them now: a hit whose index document is stale, such as a
+        repository made private before it was reindexed, is left out, and so is a concept or mapping of a source the
+        requester can't view (a source made private commits before its save signal makes them private). One query for
+        the page (one per model for the repo search, whose hits are sources and collections). Like the search's access
+        filter, it keeps the repositories, concepts and mappings the requester created. The page can then hold fewer
+        hits than its limit, while num_found stays the index's count.
+        """
+        user = self.request.user
+        if not isinstance(hits, models.QuerySet):  # the repo search's sources and collections
+            viewable_ids = {
+                (model, _id) for model in {type(hit) for hit in hits}
+                for _id in self.get_viewable_hits(model.objects.filter(
+                    id__in=[hit.id for hit in hits if isinstance(hit, model)])).values_list('id', flat=True)
+            }
+            return [hit for hit in hits if (type(hit), hit.id) in viewable_ids]
+        viewable = hits.model.get_viewable(hits, user)
+        if issubclass(hits.model, SourceChildMixin):
+            from core.sources.models import Source
+            parents = Source.get_viewable(Source.objects.filter(id__in=hits.order_by().values('parent_id')), user)
+            viewable = viewable.filter(parent_id__in=parents.values('id'))
+        if user.is_authenticated and not user.is_staff and (
+                self.is_concept_container_document_model() or self.is_source_child_document_model()):
+            viewable = hits.filter(models.Q(id__in=viewable.values('id')) | models.Q(created_by_id=user.id))
+        return viewable
 
     def get_search_results_qs(self):
         return self.__get_queryset_from_search_results(self.__get_search_results())

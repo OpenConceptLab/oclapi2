@@ -224,7 +224,9 @@ class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSeria
         original_schema = instance.custom_validation_schema
         source = self.prepare_object(validated_data, instance)
         user = self.context['request'].user
-        errors = Source.persist_changes(source, user, original_schema)
+        # an edit that sends no access keeps the row's current access, not the one read before a concurrent change
+        errors = Source.persist_changes(
+            source, user, original_schema, keep_access='public_access' not in validated_data)
         self._errors.update(errors)
         return source
 

@@ -3954,6 +3954,18 @@ class RepoExportCollidingVersionsViewTest(OCLAPITestCase):
         self.assertEqual(self.public_source.get_export_path(), source_key)
         self.assertNotEqual(source_key, collection_key)
 
+    def test_legacy_export_of_a_lookalike_made_before_its_expansion_is_not_owned(self):
+        public = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a_b', public_access='View')
+        private = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a', public_access='None')
+        for version, expansion in ((private, 'b'), (public, 'c')):  # public's export from before 'c' is under a_b
+            version.expansion_uri = ExpansionFactory(collection_version=version, mnemonic=expansion).uri
+            version.save()
+
+        self.assertFalse(private.owns_legacy_export_path())
+        self.assertNotIn(
+            public.get_legacy_version_export_path(suffix=None, with_expansion=False),
+            [path for path, _ in private.get_export_paths_to_delete()])
+
     def test_legacy_export_of_version_and_expansion_lookalike_is_not_served(self):
         public = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a_b', public_access='View')
         private = UserCollectionFactory(user=self.owner, mnemonic='coll', version='a', public_access='None')

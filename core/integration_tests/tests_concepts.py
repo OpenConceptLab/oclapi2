@@ -26,6 +26,7 @@ from core.capacity.limiter import RedisLanes
 from core.sources.models import CloneLimitExceeded
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
+from core.common.mixins import FACETS_CACHE_SUFFIX
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import CONCEPT_HARD_DELETE_REQUIRES_HEAD_ONLY
 from core.concepts.documents import ConceptDocument
@@ -3432,13 +3433,15 @@ class ConceptListCacheTest(OCLAPITestCase):
 
     def test_repo_version_concepts_facets_are_cached(self):
         body_key, _ = self.source_v1.get_concepts_cache_keys()
-        facets_key = body_key + '?facetsOnly=true'
+        facets_key = body_key + '?facetsOnly=true' + FACETS_CACHE_SUFFIX
 
         response = self.client.get(f'/orgs/{self.org}/sources/MySource/v1/concepts/?facetsOnly=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('facets', response.data)
-        self.assertEqual(cache.get(facets_key), response.data)
+        # cached as anyone sees them; answered as this requester (signed out: no updatedBy) sees them
+        cached = cache.get(facets_key)['facets']['fields']
+        self.assertLessEqual(response.data['facets']['fields'].items(), cached.items())
         self.assertIsNone(cache.get(body_key))  # facets do not collide with the plain listing
 
     def test_repo_version_concepts_facets_are_served_from_cache(self):
@@ -3447,11 +3450,21 @@ class ConceptListCacheTest(OCLAPITestCase):
 
         self.assertEqual(self.client.get(url).status_code, 200)
 
-        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+        cache.set(body_key + '?facetsOnly=true' + FACETS_CACHE_SUFFIX, {'facets': {'fields': {'fromCache': []}}})
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, {'facets': {'fields': {'fromCache': []}}})
+
+    def test_repo_version_concepts_facets_ignore_answers_cached_before(self):
+        """An answer cached for one requester before facets were cached for anyone isn't read for another."""
+        body_key, _ = self.source_v1.get_concepts_cache_keys()
+        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MySource/v1/concepts/?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('fromCache', response.data['facets']['fields'])
 
     def test_head_version_concepts_facets_are_not_cached(self):
         body_key, _ = self.source.get_concepts_cache_keys()
@@ -3460,7 +3473,7 @@ class ConceptListCacheTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('facets', response.data)
-        self.assertIsNone(cache.get(body_key + '?facetsOnly=true'))
+        self.assertIsNone(cache.get(body_key + '?facetsOnly=true' + FACETS_CACHE_SUFFIX))
 
     def test_repo_version_concepts_with_search_are_not_cached(self):
         body_key, headers_key = self.source_v1.get_concepts_cache_keys()
@@ -4095,6 +4108,31 @@ class ConceptReactivateViewTest(OCLAPITestCase):
 
 
 class ConceptParentsViewTest(OCLAPITestCase):
+    def test_get_200_source_version_preserves_parent_before_move(self):
+        source = OrganizationSourceFactory()
+        old_parent = ConceptFactory(parent=source, mnemonic='old-parent')
+        new_parent = ConceptFactory(parent=source, mnemonic='new-parent')
+        child = Concept.persist_new({
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'child', 'parent': source,
+            'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+            'parent_concept_urls': [old_parent.uri]
+        })
+        version1 = OrganizationSourceFactory(version='v1', mnemonic=source.mnemonic, organization=source.organization)
+        version1.seed_concepts(index=False)
+        token = UserProfile.objects.filter(is_superuser=True).first().get_token()
+        updated = self.client.patch(
+            child.uri, {'parent_concept_urls': [new_parent.uri], 'update_comment': 'Move parent'},
+            HTTP_AUTHORIZATION='Token ' + token, format='json'
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+
+        version_parents = self.client.get(f'{version1.uri}concepts/{child.mnemonic}/parents/')
+        head_parents = self.client.get(f'{source.uri}concepts/{child.mnemonic}/parents/')
+        self.assertEqual(version_parents.status_code, 200)
+        self.assertEqual(head_parents.status_code, 200)
+        self.assertEqual([data['id'] for data in version_parents.data], ['old-parent'])
+        self.assertEqual([data['id'] for data in head_parents.data], ['new-parent'])
+
     def test_get_200(self):
         parent_concept1 = ConceptFactory()
         parent_concept2 = ConceptFactory()
@@ -4134,6 +4172,28 @@ class ConceptParentsViewTest(OCLAPITestCase):
 
 
 class ConceptChildrenViewTest(OCLAPITestCase):
+    def test_get_200_source_version_lists_only_its_own_children(self):
+        source = OrganizationSourceFactory()
+        parent_concept = ConceptFactory(parent=source)
+
+        def new_child(mnemonic):
+            return Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': mnemonic, 'parent': source,
+                'names': [ConceptNameFactory.build(locale='en', locale_preferred=True)],
+                'parent_concept_urls': [parent_concept.uri]
+            })
+
+        new_child('old-child')
+        version1 = OrganizationSourceFactory(version='v1', mnemonic=source.mnemonic, organization=source.organization)
+        version1.seed_concepts(index=False)
+        new_child('new-child')  # added after v1, under the unchanged parent that v1 shares with HEAD
+
+        version1_children = self.client.get(f'{version1.uri}concepts/{parent_concept.mnemonic}/children/')
+        head_children = self.client.get(f'{source.uri}concepts/{parent_concept.mnemonic}/children/')
+
+        self.assertEqual([data['id'] for data in version1_children.data], ['old-child'])
+        self.assertEqual(sorted(data['id'] for data in head_children.data), ['new-child', 'old-child'])
+
     def test_get_200(self):
         parent_concept = ConceptFactory()
         child_concept1 = ConceptFactory()
