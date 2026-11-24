@@ -1410,7 +1410,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         The tasks the save queues go once its transaction ends. keep_access=True keeps the stored row's access whatever
         it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
         with no lock. A blank access is stored as None instead, so that save writes it, under the lock. A source's
-        save, and the cascade of its access and activity to its concepts and mappings, run in one transaction.
+        save, and the cascade of its access and activity to its concepts and mappings, run in one transaction. Outside
+        a caller's transaction, a failed enqueue of the row's search index is raised once the save commits.
         """
         keep_private = kwargs.pop('keep_private', False)
         keep_access = kwargs.pop('keep_access', False)
@@ -1418,6 +1419,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         is_source = cls.__name__ == 'Source'
         # a source's concepts and mappings take its access in its save's transaction, so lists never show them apart
         cascade_atomically = is_source and not lock
+        # a REST edit gets a failed enqueue of its search index, as under autocommit; a FHIR update only logs it
+        reports_enqueue_error = not keep_private and not transaction.get_connection().in_atomic_block
+        obj._index_enqueue_error = None  # pylint: disable=protected-access
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
@@ -1461,14 +1465,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     kwargs['update_fields'] = [
                         field.name for field in cls._meta.concrete_fields
                         if not field.primary_key and field.name != 'public_access']
-                # a failed enqueue of its search index still reaches the write, as it does under autocommit
-                obj._index_enqueue_reaches_write = cascade_atomically  # pylint: disable=protected-access
+                obj._index_enqueue_reaches_write = reports_enqueue_error  # pylint: disable=protected-access
                 try:
                     obj.save(**kwargs)
                 finally:
                     obj._index_enqueue_reaches_write = False  # pylint: disable=protected-access
                 if keep_access and not lock:  # the access the row has now, which a concurrent write may have changed
                     obj.refresh_from_db(fields=['public_access'])
+
+            if obj._index_enqueue_error:  # pylint: disable=protected-access
+                raise obj._index_enqueue_error  # pylint: disable=protected-access
 
             if queue_schema_update_task:
                 from core.tasks.models import Task
@@ -2103,13 +2109,20 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             else:
                 # once committed, so the task reads the row as saved. Deferred in a transaction, it's robust, so a
                 # failed enqueue doesn't stop the transaction's other callbacks (a version's seed task); at once under
-                # autocommit, or in a REST source edit's transaction, its error reaches the write, as before
+                # autocommit, its error reaches the write, as before. persist_changes raises a REST edit's error itself
                 args = (instance.app_name, instance.model_name, instance.id)
+                reaches_write = getattr(instance, '_index_enqueue_reaches_write', False)
+
+                def enqueue():
+                    try:
+                        handle_save.apply_async(args, queue='indexing', permanent=False)
+                    except Exception as ex:  # pylint: disable=broad-exception-caught
+                        if not reaches_write:
+                            raise
+                        instance._index_enqueue_error = ex  # pylint: disable=protected-access
+
                 connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
-                connection.on_commit(
-                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False),
-                    robust=connection.in_atomic_block and not getattr(instance, '_index_enqueue_reaches_write', False),
-                )
+                connection.on_commit(enqueue, robust=connection.in_atomic_block)
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:

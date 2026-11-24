@@ -3494,14 +3494,13 @@ class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
             self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)
 
 
-
 class SourceAccessCascadeMixin:
     """A REST edit of a source's access, watched from another connection. One test per class, as a transaction test's
     flush removes the fixtures."""
     def setUp(self):
         super().setUp()
         patcher = patch('core.sources.models.index_source_public_access', Mock(__name__='index_source_public_access'))
-        patcher.start()
+        self.index_public_access = patcher.start()
         self.addCleanup(patcher.stop)
         self.user = UserProfileFactory()
         self.source = UserSourceFactory(user=self.user)
@@ -3576,3 +3575,5 @@ class SourceAccessCascadeIndexEnqueueTest(SourceAccessCascadeMixin, OCLAPITransa
 
         handle_save_task.apply_async.assert_called_once()
         self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
+        # the transaction's later callbacks still ran: the children's re-index went
+        self.index_public_access.apply_async.assert_called_once()
