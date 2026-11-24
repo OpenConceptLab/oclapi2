@@ -784,10 +784,12 @@ class SourceChildMixin(ChecksumModel):
     def load_source_versions(cls, instances, user):
         """Sets each row's _source_versions: the uris of the source versions holding it that the user can view."""
         key = f'{cls._meta.model_name}_id'
+        rows = cls.sources.through.objects.filter(
+            **{f'{key}__in': [instance.id for instance in instances]}).exclude(source__version=HEAD)
+        criteria = cls.get_viewable_source_version_criteria(user)
         uris = {}
-        for row_id, uri in cls.filter_by_viewable_source_version(cls.sources.through.objects.filter(
-                **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(source__version=HEAD), user).order_by('source__created_at').values_list(key, 'source__uri'):
+        for row_id, uri in (rows if criteria is None else rows.filter(criteria)).order_by(
+                'source__created_at').values_list(key, 'source__uri'):
             uris.setdefault(row_id, []).append(uri)
         for instance in instances:
             instance._source_versions = uris.get(instance.id, [])  # pylint: disable=protected-access
@@ -867,11 +869,6 @@ class SourceChildMixin(ChecksumModel):
         source_model = cls._meta.get_field('sources').related_model
         viewable = source_model.get_viewable_versions_criteria(user)
         return None if viewable is None else Q(source_id__in=source_model.objects.filter(viewable).values('id'))
-
-    @classmethod
-    def filter_by_viewable_source_version(cls, rows, user):
-        criteria = cls.get_viewable_source_version_criteria(user)
-        return rows if criteria is None else rows.filter(criteria)
 
     @classmethod
     def load_previous_version_uris(cls, instances):

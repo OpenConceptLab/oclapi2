@@ -299,6 +299,14 @@ def get_collection_in_scope(context):
     return None
 
 
+def get_requester_context(context):
+    """
+    The context of a concept or mapping serialized inside another serializer: the requester, whose source versions it
+    names. A $cascade bundle passes its requester as `user`.
+    """
+    return {'user': get(context, 'request.user') or get(context, 'user')}
+
+
 class SourceVersionFieldMixin:
     """
     The source versions a concept or mapping is in, those the requester can view only. source_versions: their URIs.
@@ -306,12 +314,7 @@ class SourceVersionFieldMixin:
     references there resolved to (ocl_issues#2770).
     """
     def get_requester(self):
-        # a $cascade bundle passes its requester as `user`
-        return get(self, 'context.request.user') or get(self, 'context.user')
-
-    def get_nested_context(self):
-        """The context of a concept or mapping serialized inside this one: the requester, whose versions it names."""
-        return {'user': self.get_requester()}
+        return get_requester_context(self.context)['user']
 
     def get_source_versions(self, obj):
         return obj.get_source_versions(self.get_requester())
@@ -415,7 +418,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.concepts.serializers import ConceptListSerializer
             queryset = self._paginate(
                 Concept.apply_attribute_based_filters(obj.get_concepts_queryset(), self.query_params), '-id')
-            results = self._serialize(queryset, ConceptListSerializer, self.get_label_context())
+            results = self._serialize(queryset, ConceptListSerializer, get_requester_context(self.context))
         return results
 
     def get_mappings(self, obj):
@@ -425,7 +428,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.mappings.serializers import MappingListSerializer
             queryset = self._paginate(
                 Mapping.apply_attribute_based_filters(obj.get_mappings_queryset(), self.query_params), '-id')
-            results = self._serialize(queryset, MappingListSerializer, self.get_label_context())
+            results = self._serialize(queryset, MappingListSerializer, get_requester_context(self.context))
         return results
 
     def get_references(self, obj):
@@ -437,10 +440,6 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
 
     def _paginate(self, queryset, order_by='-updated_at'):
         return queryset.order_by(order_by)[self.offset:self.offset + self.limit]
-
-    def get_label_context(self):
-        """The embedded concepts' and mappings' context: the requester, whose source versions they name"""
-        return {'user': get(self, 'context.request.user')}
 
     @staticmethod
     def _serialize(queryset, klass, context=None):

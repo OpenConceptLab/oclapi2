@@ -13,7 +13,7 @@ from core.common.constants import INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_MAPPIN
     INCLUDE_RETIRED_PARAM, ACCESS_TYPE_NONE
 from core.common.fields import EncodedDecodedCharField
 from core.common.serializers import AbstractResourceSerializer, SourceChildPageSerializer, \
-    SourceVersionFieldMixin, CollectionVersionsMixin, get_collection_in_scope
+    SourceVersionFieldMixin, CollectionVersionsMixin, get_collection_in_scope, get_requester_context
 from core.common.utils import to_parent_uri_from_kwargs, get_truthy_values, chunks
 from core.concepts.models import Concept, ConceptName, HierarchicalConcepts
 
@@ -334,7 +334,8 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 ) if is_collection else obj.get_bidirectional_mappings()
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings.order_by('id'), many=True, context=self.get_nested_context()).data
+            return serializer_class(
+                mappings.order_by('id'), many=True, context=get_requester_context(self.context)).data
         if self.include_direct_mappings:
             if repo_version:
                 mappings = obj.get_version_mappings(repo_version)
@@ -347,7 +348,8 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 mappings = mappings.filter(to_source_url__in=target_repo_urls)
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings.order_by('id'), many=True, context=self.get_nested_context()).data
+            return serializer_class(
+                mappings.order_by('id'), many=True, context=get_requester_context(self.context)).data
 
         return []
 
@@ -355,14 +357,14 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
         if self.include_child_concepts:
             return ConceptDetailSerializer(get_viewable_concepts(
                 self.get_related_concepts(obj, 'child_concepts'), get(self, 'context.request')), many=True,
-                context=self.get_nested_context()).data
+                context=get_requester_context(self.context)).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
             return ConceptDetailSerializer(get_viewable_concepts(
                 self.get_related_concepts(obj, 'parent_concepts'), get(self, 'context.request')), many=True,
-                context=self.get_nested_context()).data
+                context=get_requester_context(self.context)).data
         return None
 
     def get_related_concepts(self, obj, relation):
@@ -828,14 +830,14 @@ class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionField
         if self.include_child_concepts:
             return ConceptDetailSerializer(
                 get_viewable_concepts(obj.child_concepts.all(), get(self, 'context.request')), many=True,
-                context=self.get_nested_context()).data
+                context=get_requester_context(self.context)).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
             return ConceptDetailSerializer(
                 get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True,
-                context=self.get_nested_context()).data
+                context=get_requester_context(self.context)).data
         return None
 
 

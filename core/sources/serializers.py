@@ -13,7 +13,7 @@ from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField, \
-    RepoVerificationSerializerMixin
+    RepoVerificationSerializerMixin, get_requester_context
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -493,8 +493,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     def get_hierarchy_root(self, obj):
         if self.include_hierarchy_root:
             from core.concepts.serializers import ConceptDetailSerializer
-            return ConceptDetailSerializer(  # the requester's, whose source versions it names
-                obj.hierarchy_root, context={'user': get(self, 'context.request.user')}).data
+            return ConceptDetailSerializer(obj.hierarchy_root, context=get_requester_context(self.context)).data
         return None
 
     def to_representation(self, instance):  # used to be to_native
