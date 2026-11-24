@@ -420,6 +420,14 @@ class SlowRequestLogMiddlewareTest(SimpleTestCase):
         self.assertEqual([(record['view'], record['route']) for record in records], [(
             'SourceVersionMappedSourcesListView', 'orgs/<str:org>/sources/<str:source>/<str:version>/mapped-sources/')])
 
+    @override_settings(SLOW_REQUEST_LOG_MS=1, FHIR_SUBDOMAIN='fhir', ALLOWED_HOSTS=['*'])
+    def test_a_request_the_fhir_host_answered_before_url_resolution_names_no_view(self):
+        """The FHIR host refuses API paths before resolution: such a request isn't a read of the API view."""
+        records = self.records(
+            RequestFactory().get(self.path, HTTP_HOST='fhir.example.org'), delay=0.01, status=404, resolved=False)
+
+        self.assertEqual([(record['view'], record['route']) for record in records], [(None, None)])
+
     @override_settings(SLOW_REQUEST_LOG_MS=1)
     def test_an_unresolved_path_has_no_view_or_route(self):
         records = self.records(RequestFactory().get('/no/such/path/'), delay=0.01, status=404, resolved=False)

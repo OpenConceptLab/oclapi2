@@ -113,7 +113,8 @@ class SlowRequestLogMiddleware(BaseMiddleware):
     @staticmethod
     def log(request, response, ms):
         match = getattr(request, 'resolver_match', None)
-        if match is None:  # answered before URL resolution, e.g. by a failure in authentication
+        # answered before URL resolution, e.g. by a failure in authentication; the FHIR host serves no API view
+        if match is None and not on_fhir_host(request):
             try:
                 match = resolve(request.path_info, getattr(request, 'urlconf', None))
             except Resolver404:
