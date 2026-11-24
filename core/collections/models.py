@@ -2164,7 +2164,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         self.evaluated_source_versions.add(*compact(evaluated_system_versions))
         if unresolved_repo_versions:
             self.unresolved_repo_versions = unresolved_repo_versions
-            self.save()
+            # only what this add found: a whole-row save from a copy loaded during a build would restore is_processing
+            self.save(update_fields=['unresolved_repo_versions', 'updated_at'])
         self.dedupe_resources()
         if index:
             member_concept_ids = set(self.concepts.values_list('id', flat=True))
@@ -2324,13 +2325,20 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         entries = self.unresolved_repo_versions or []
         if not entries:
             return
-        named = set()
-        for system, expression, valuesets in self.collection_version.references.values_list(
-                'system', 'expression', 'valueset'):
-            named.update(compact([system, expression, *(valuesets or [])]))
+        named, named_systems = set(), set()
+        for system, version, expression, valuesets in self.collection_version.references.values_list(
+                'system', 'version', 'expression', 'valueset'):
+            named.update(compact([expression, *(valuesets or [])]))
+            if system:
+                named_systems.add((system, version or None))
+
+        def is_named(entry):
+            # a system entry records the version it named, so two references to one system at two versions differ
+            if entry.get('type') == 'reference.system':
+                return (entry.get('url'), entry.get('version') or None) in named_systems
+            return entry.get('url') in named
         kept = [
-            entry for entry in entries
-            if not str(entry.get('type') or '').startswith('reference.') or entry.get('url') in named]
+            entry for entry in entries if not str(entry.get('type') or '').startswith('reference.') or is_named(entry)]
         if len(kept) != len(entries):
             Expansion.objects.filter(id=self.id).update(unresolved_repo_versions=kept)
             self.unresolved_repo_versions = kept
