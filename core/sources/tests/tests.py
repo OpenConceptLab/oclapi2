@@ -3,10 +3,12 @@ import json
 from types import SimpleNamespace
 
 import factory
+import psycopg2
 from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db import transaction, connection
+from django.db import transaction, connection, DatabaseError
+from django.db.models import QuerySet
 from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock, call
 from rest_framework import status
@@ -3490,3 +3492,87 @@ class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
                 plan = '\n'.join(row[0] for row in cursor.fetchall())
 
             self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)
+
+
+
+class SourceAccessCascadeMixin:
+    """A REST edit of a source's access, watched from another connection. One test per class, as a transaction test's
+    flush removes the fixtures."""
+    def setUp(self):
+        super().setUp()
+        patcher = patch('core.sources.models.index_source_public_access', Mock(__name__='index_source_public_access'))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.user = UserProfileFactory()
+        self.source = UserSourceFactory(user=self.user)
+        ConceptFactory(parent=self.source)
+        MappingFactory(parent=self.source)
+        self.observer = psycopg2.connect(**connection.get_connection_params())
+        self.observer.autocommit = True
+        self.addCleanup(self.observer.close)
+
+    def edit_access(self, public_access):
+        return self.client.patch(
+            self.source.uri, {'public_access': public_access}, HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
+            format='json')
+
+    def committed_access(self):
+        """The accesses another connection, such as a list's, reads for the source, its concepts and its mappings."""
+        with self.observer.cursor() as cursor:
+            cursor.execute('select public_access from sources where id = %s', [self.source.id])
+            accesses = [{cursor.fetchone()[0]}]
+            for table in ('concepts', 'mappings'):
+                sql = f'select distinct public_access from {table} where parent_id = %s'  # nosec
+                cursor.execute(sql, [self.source.id])
+                accesses.append({row[0] for row in cursor.fetchall()})
+        return accesses
+
+
+class SourceAccessCascadeVisibilityTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    def test_lists_never_see_children_with_an_access_their_source_no_longer_has(self):
+        update = QuerySet.update
+        snapshots = []
+
+        def observed_update(queryset, **kwargs):  # before each cascade update, and so after the source's save
+            snapshots.append(self.committed_access())
+            return update(queryset, **kwargs)
+
+        for public_access in (ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW):
+            with self.subTest(public_access=public_access):
+                snapshots.clear()
+                with patch.object(QuerySet, 'update', observed_update):
+                    response = self.edit_access(public_access)
+                snapshots.append(self.committed_access())
+
+                self.assertIn(response.status_code, (200, 202), response.data)
+                self.assertGreaterEqual(len(snapshots), 3)
+                for source_access, concept_access, mapping_access in snapshots:
+                    self.assertEqual((concept_access, mapping_access), (source_access, source_access))
+                self.assertEqual(snapshots[-1][0], {public_access})
+
+
+class SourceAccessCascadeRollbackTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    def test_a_failed_cascade_leaves_the_source_s_access_as_it_was(self):
+        update = QuerySet.update
+
+        def failing_update(queryset, **kwargs):
+            if queryset.model is Mapping:
+                raise DatabaseError('cascade failed')
+            return update(queryset, **kwargs)
+
+        with patch.object(QuerySet, 'update', failing_update), self.assertRaises(DatabaseError):
+            self.edit_access(ACCESS_TYPE_NONE)
+
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_VIEW}] * 3)
+
+
+class SourceAccessCascadeIndexEnqueueTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    @patch('core.common.models.handle_save')
+    def test_a_failed_index_enqueue_still_reaches_the_edit_once_the_cascade_is_committed(self, handle_save_task):
+        handle_save_task.apply_async.side_effect = ConnectionError('broker down')
+
+        with override_settings(TEST_MODE=False, ES_SYNC=True), self.assertRaises(ConnectionError):
+            self.edit_access(ACCESS_TYPE_NONE)
+
+        handle_save_task.apply_async.assert_called_once()
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
