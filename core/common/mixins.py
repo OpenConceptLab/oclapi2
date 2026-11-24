@@ -206,32 +206,36 @@ class ListWithHeadersMixin(ListModelMixin):
                 not any(to_snake_case(param) in collection_facets for param in params) and
                 get(self, 'parent_resource.is_latest_version', False))
 
+    # where a list's concepts and mappings embed others: a concept its mappings and hierarchy, a mapping its concepts
+    EMBEDDED_RESOURCE_FIELDS = ('mappings', 'parent_concepts', 'child_concepts', 'from_concept', 'to_concept')
+
     def get_requester_labels(self, data):
         """
         A cached page as this requester sees it: the latest_source_version of each concept and mapping on it, embedded
-        ones too, names only a version the requester can view, so it's read again for them, in one query for each kind
-        of resource the page has. One whose kind or uuid isn't known names none.
+        ones too (EMBEDDED_RESOURCE_FIELDS), names only a version the requester can view, so it's read again for them,
+        in one query. One whose kind or uuid isn't known names none.
         """
         from core.concepts.models import Concept
         from core.mappings.models import Mapping
+        models_by_kind = {Concept.OBJECT_TYPE: Concept, Mapping.OBJECT_TYPE: Mapping}
         labelled = {}
 
-        def collect(value):
-            if isinstance(value, dict):
-                if 'latest_source_version' in value:
-                    labelled.setdefault(value.get('type'), []).append(value)
-                for child in value.values():
-                    collect(child)
-            elif isinstance(value, list):
-                for child in value:
-                    collect(child)
+        def collect(items):
+            for item in items if isinstance(items, list) else [items]:
+                if not isinstance(item, dict):
+                    continue
+                if 'latest_source_version' in item:
+                    kind = item.get('type') if item.get('type') in models_by_kind else None
+                    labelled.setdefault(kind, []).append(item)
+                for field in self.EMBEDDED_RESOURCE_FIELDS:
+                    collect(item.get(field))
         collect(data)
+        names = SourceChildMixin.get_latest_source_version_names({
+            models_by_kind[kind]: {to_int(item.get('uuid'), None) for item in items} - {None}
+            for kind, items in labelled.items() if kind}, self.request.user)
         for kind, items in labelled.items():
-            model = {Concept.OBJECT_TYPE: Concept, Mapping.OBJECT_TYPE: Mapping}.get(kind)
-            names = model.get_latest_source_version_names(
-                {to_int(item.get('uuid'), None) for item in items} - {None}, self.request.user) if model else {}
             for item in items:
-                item['latest_source_version'] = names.get(to_int(item.get('uuid'), None))
+                item['latest_source_version'] = names.get((kind, to_int(item.get('uuid'), None)))
         return data
 
     def list(self, request, *args, **kwargs):
@@ -817,30 +821,45 @@ class SourceChildMixin(ChecksumModel):
             instance._latest_source_version_name = name  # pylint: disable=protected-access
 
     @classmethod
-    def get_latest_source_version_names(cls, ids, user):
-        """{id: the name of the latest source version holding that row that the user can view} of these rows"""
-        return {row_id: name for row_id, (_, name) in cls.get_latest_source_versions(ids, user).items() if name}
-
-    @classmethod
     def get_latest_source_versions(cls, ids, user):
         """
         {id: (the latest source version holding that row, HEAD aside, the name of the latest the user can view)} of
-        these rows, in one query: for each row, the latest version the user can view and the latest they can't.
+        these rows, in one query (get_latest_source_versions_query).
         """
-        key = f'{cls._meta.model_name}_id'
-        criteria = cls.get_viewable_source_version_criteria(user)
-        is_viewable = models.Value(True) if criteria is None else models.ExpressionWrapper(
-            criteria, output_field=models.BooleanField())
         latest = {}
-        for row_id, is_viewed, source_id, version, created_at in cls.sources.through.objects.filter(
-                **{f'{key}__in': ids}).exclude(source__version=HEAD).annotate(_viewable=is_viewable).order_by(
-                key, '_viewable', '-source__created_at').distinct(key, '_viewable').values_list(
-                key, '_viewable', 'source_id', 'source__version', 'source__created_at'):
+        for _, row_id, is_viewed, source_id, version, created_at in cls.get_latest_source_versions_query(ids, user):
             latest_id, latest_at, name = latest.get(row_id, (None, None, None))
             if latest_at is None or created_at > latest_at:
                 latest_id, latest_at = source_id, created_at
             latest[row_id] = (latest_id, latest_at, version if is_viewed else name)
         return {row_id: (source_id, name) for row_id, (source_id, _, name) in latest.items()}
+
+    @staticmethod
+    def get_latest_source_version_names(ids_by_model, user):
+        """
+        {(kind, id): the name of the latest source version holding that row that the user can view}, of these rows by
+        model (Concept, Mapping), in one query.
+        """
+        queries = [model.get_latest_source_versions_query(ids, user) for model, ids in ids_by_model.items() if ids]
+        return {
+            (kind, row_id): version
+            for kind, row_id, is_viewed, _, version, _ in (queries[0].union(*queries[1:], all=True) if queries else [])
+            if is_viewed}
+
+    @classmethod
+    def get_latest_source_versions_query(cls, ids, user):
+        """
+        For each of these rows, the latest source version holding it, HEAD aside, that the user can view and the latest
+        they can't: (kind, row id, whether they can view it, source version id, its name, when it was created).
+        """
+        key = f'{cls._meta.model_name}_id'
+        criteria = cls.get_viewable_source_version_criteria(user)
+        return cls.sources.through.objects.filter(**{f'{key}__in': ids}).exclude(source__version=HEAD).annotate(
+            _kind=models.Value(cls.OBJECT_TYPE), _row=F(key), _viewable=models.Value(True) if criteria is None else (
+                models.ExpressionWrapper(criteria, output_field=models.BooleanField())),
+            _source=F('source_id'), _version=F('source__version'), _at=F('source__created_at')
+        ).order_by('_row', '_viewable', '-_at').distinct('_row', '_viewable').values_list(
+            '_kind', '_row', '_viewable', '_source', '_version', '_at')
 
     @classmethod
     def get_viewable_source_version_criteria(cls, user):

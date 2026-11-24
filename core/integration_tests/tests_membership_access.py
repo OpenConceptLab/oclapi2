@@ -2,6 +2,8 @@ import uuid
 from datetime import timedelta
 
 from django.core.cache import cache
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.test import tag, override_settings
 
 from core.collections.documents import CollectionDocument
@@ -245,6 +247,13 @@ class ReleaseLabelAccessTest(PublicReleaseMixin, OCLAPITestCase):
                 self.assertEqual('v1' in labels, can_view, labels)
                 self.assertEqual('v0' in labels, not can_view, labels)
 
+    def test_a_source_s_hierarchy_root_names_the_requester_s_releases(self):
+        Source.objects.filter(id=self.source.id).update(hierarchy_root=self.concept)
+        for user, can_view in self.users():
+            with self.subTest(user=user):
+                labels = self.labels(f'{self.source.uri}?includeHierarchyRoot=true', user)
+                self.assertEqual(labels, {'v1' if can_view else 'v0'})
+
     def test_concepts_and_mappings_embedded_in_another_name_the_requester_s_releases(self):
         """A concept's mappings and parents. The parent here, the mapping's other concept, is held by v1 only."""
         self.concept.parent_concepts.add(self.mapping.to_concept)
@@ -297,3 +306,25 @@ class ReleaseLabelCacheTest(PublicReleaseMixin, OCLAPITestCase):
         self.assertIn('v1', self.labels(url))
         Source.objects.filter(id=self.release.id).update(public_access=ACCESS_TYPE_NONE)
         self.assertNotIn('v1', self.labels(url))
+
+    def test_a_cached_page_s_labels_are_read_again_in_one_query(self):
+        """Mappings and the concepts they embed alike."""
+        url = self.public_release.uri + 'mappings/?lookupConcepts=true'
+        self.labels(url)
+        with CaptureQueriesContext(connection) as queries:
+            self.assertIn('v1', self.labels(url, self.member))
+        label_queries = [query['sql'] for query in queries.captured_queries if '_sources' in query['sql']]
+        self.assertEqual(len(label_queries), 1, label_queries)
+        self.assertIn('concepts_sources', label_queries[0])
+        self.assertIn('mappings_sources', label_queries[0])
+
+    def test_a_cached_page_keeps_extras_as_they_are(self):
+        extras = {'latest_source_version': 'theirs', 'type': {'Concept': 1}, 'uuid': 'x'}
+        Mapping.objects.filter(versioned_object_id=self.mapping.id).update(extras=extras)
+        url = self.public_release.uri + 'mappings/?includeExtras=true'
+        for user in (self.member, None):
+            with self.subTest(user=user):
+                response = self.request('get', url, user)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.data)
+                self.assertEqual([item['extras'] for item in response.data], [extras] * len(response.data))

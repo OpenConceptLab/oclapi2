@@ -681,6 +681,7 @@ class CollectionReferencesPreview(CollectionBaseView):
 
         collection = self.get_object()
         data, cascade, transform = self.get_data()
+        label_context = {'user': self.request.user}  # whose source versions the concepts and mappings name
         results = []
         for reference in collection.parse_expressions(
                 data, self.request.user, cascade, transform, collection=collection):
@@ -696,9 +697,11 @@ class CollectionReferencesPreview(CollectionBaseView):
                     {
                         'reference': ref.expression,
                         'concepts': ConceptListSerializer(
-                            concepts.order_by('mnemonic')[:25], many=True).data if has_concepts else [],
+                            concepts.order_by('mnemonic')[:25], many=True, context=label_context
+                        ).data if has_concepts else [],
                         'mappings': MappingListSerializer(
-                            mappings.order_by('mnemonic')[:25], many=True).data if has_mappings else [],
+                            mappings.order_by('mnemonic')[:25], many=True, context=label_context
+                        ).data if has_mappings else [],
                         'concepts_count': concepts.count() if has_concepts else 0,
                         'mappings_count': mappings.count() if has_mappings else 0,
                         'exclude': not ref.include

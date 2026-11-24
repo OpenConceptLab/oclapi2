@@ -493,7 +493,8 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     def get_hierarchy_root(self, obj):
         if self.include_hierarchy_root:
             from core.concepts.serializers import ConceptDetailSerializer
-            return ConceptDetailSerializer(obj.hierarchy_root).data
+            return ConceptDetailSerializer(  # the requester's, whose source versions it names
+                obj.hierarchy_root, context={'user': get(self, 'context.request.user')}).data
         return None
 
     def to_representation(self, instance):  # used to be to_native
