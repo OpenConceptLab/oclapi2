@@ -369,7 +369,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
         return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().concepts
+        return self.filter_retired_members(super().get_queryset().concepts)
 
 
 class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
@@ -384,7 +384,7 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
         return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().mappings
+        return self.filter_retired_members(super().get_queryset().mappings)
 
 
 class CollectionReferencesMixin:

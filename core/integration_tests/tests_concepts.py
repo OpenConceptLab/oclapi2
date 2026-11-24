@@ -25,7 +25,7 @@ from core.capacity.constants import HEADER_DECISION
 from core.capacity.limiter import RedisLanes
 from core.sources.models import CloneLimitExceeded
 from core.collections.models import CollectionReference
-from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
 from core.common.mixins import FACETS_CACHE_SUFFIX
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
@@ -3881,6 +3881,42 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
             'OtherA', self.get_ids(self.collection.uri + f'references/{reference.id}/concepts/?conceptClass=classA'))
         versioned_url = self.collection.uri + f'HEAD/references/{reference.id}/concepts/?conceptClass=classA'
         self.assertNotIn('OtherA', self.get_ids(versioned_url))  # a version in the URL: its default expansion
+
+    def test_reference_members_follow_include_retired(self):
+        members = list(self.expansion.concepts.filter(mnemonic__in=['ActiveA', 'RetiredA']))
+        reference = CollectionReference(expression=members[0].uri, collection=self.collection)
+        reference.save()
+        reference.concepts.add(*members)
+        url = self.collection.uri + f'references/{reference.id}/concepts/'
+
+        self.assertEqual(self.get_ids(url), ['ActiveA', 'RetiredA'])  # the database list
+        self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveA'])
+
+    def test_global_facets(self):
+        url = f'/concepts/?facetsOnly=true&owner={self.source.organization.mnemonic}'
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(self.get_facet_counts(url), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=true'), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false&retired=true'), ({'classA': 1}, both))
+
+    def test_user_shortcut_collection_search_is_its_default_expansion(self):
+        user = UserProfileFactory()
+        collection = UserCollectionFactory(user=user, mnemonic='RetiredFacetsUserCollection')
+        expansion = ExpansionFactory(mnemonic='e1', collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(*self.expansion.concepts.all())
+        ExpansionFactory(mnemonic='e2', collection_version=collection).concepts.add(ConceptFactory(
+            mnemonic='OtherA', parent=self.source, concept_class='classA', retired=True).get_latest_version())
+        ConceptDocument().update(self.source.concepts_set.all())
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + user.get_token())
+        url = '/user/collections/RetiredFacetsUserCollection/concepts/'
+
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&includeRetired=false'), ['ActiveA'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true'), ({'classA': 2, 'classB': 1}, {'false': 2, 'true': 1}))
 
     def test_retired_filter_key_in_any_case(self):
         url = self.source.concepts_url

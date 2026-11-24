@@ -846,6 +846,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         counts = {}
         if urls:
             search = (search or self.get_facets_search()).extra(size=0).params(request_timeout=ES_REQUEST_TIMEOUT)
+            retired_criterion = self.get_retired_criterion()  # the facets count within it (get_facets)
+            if retired_criterion is not None:
+                search = search.filter(retired_criterion)
             search.aggs.bucket('viewable', 'filters', filters={
                 str(i): Q('terms', **{self.collection_url_facets[facet]: sorted(values)})
                 for i, ((facet, _), values) in enumerate(urls.items())})
