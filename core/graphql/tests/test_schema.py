@@ -43,6 +43,13 @@ class SchemaErrorLoggingTest(SimpleTestCase):
 
         self.assertIn("Variable '$limit'", result.errors[0].message)
 
+    def test_does_not_log_a_literal_it_cannot_convert(self):
+        """An Int literal too long for int() fails validation with a ValueError, which is the query's fault."""
+        with self.assertNoLogs('strawberry.execution'):
+            result = schema.execute_sync(f'{{ concepts(query: "q", limit: {"9" * 5000}) {{ page }} }}')
+
+        self.assertIsInstance(result.errors[0].original_error, ValueError)
+
     def test_does_not_log_a_graphql_error_a_resolver_raises(self):
         with self.assertNoLogs('strawberry.execution'):
             result = Schema(query=FailingQuery).execute_sync(f'{{ notFound(source: "{QUERY_MARKER}") }}')

@@ -13,13 +13,15 @@ class Schema(strawberry.Schema):
         Strawberry logs each error with the lines of the query it points at, and an error the client caused echoes
         the values it sent. Unless settings.LOG_REQUEST_BODIES, only an unexpected exception (in a resolver, or one
         strawberry caught around execution) is logged, with its traceback but not its path, which holds the client's
-        aliases. A rejected query, bad variables or a GraphQLError a resolver raises go to the client only.
+        aliases. A rejected query, bad variables or a GraphQLError a resolver raises go to the client only: an error
+        that points at the query (nodes) without a field path was raised while checking the query.
         """
         if settings.LOG_REQUEST_BODIES:
             super().process_errors(errors, execution_context)
             return
         for error in errors:
-            if error.original_error and not isinstance(error.original_error, GraphQLError):
+            rejected_query = error.nodes and not error.path
+            if error.original_error and not isinstance(error.original_error, GraphQLError) and not rejected_query:
                 StrawberryLogger.logger.error('GraphQL execution error', exc_info=error.original_error)
 
 
