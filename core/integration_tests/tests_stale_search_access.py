@@ -119,6 +119,23 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
         for user in (None, self.outsider):
             self.assertIn(self.org.mnemonic, self.search_ids(f'/orgs/?q={self.token}org', user))
 
+    def test_a_former_member_s_own_org_search_drops_a_private_org(self):
+        Organization.objects.filter(id=self.org.id).update(public_access=ACCESS_TYPE_NONE)
+        OrganizationDocument().update(Organization.objects.filter(id=self.org.id), refresh=True)
+        url = f'/user/orgs/?q={self.token}org'
+        self.assertIn(self.org.mnemonic, self.search_ids(url, self.member))
+
+        self.org.members.through.objects.filter(organization=self.org).delete()  # the index keeps its members
+
+        self.assertNotIn(self.org.mnemonic, self.search_ids(url, self.member))
+
+    def test_a_concept_s_collection_versions_search_loads_collections(self):
+        """Its hits are collections, though it searches as a concept view does."""
+        url = f'{self.source.uri}concepts/{self.concept.mnemonic}/collection-versions/?q={self.token}coll'
+        for user in (None, self.outsider, self.member):
+            with self.subTest(user=user):
+                self.search_ids(url, user)  # answers 200
+
     def test_another_user_s_org_list_drops_a_stale_document_of_an_org_not_shared(self):
         url = f'/users/{self.member.username}/orgs/sources/?q={self.token}src'
         self.assertIn(self.source.mnemonic, self.search_ids(url, self.outsider))
