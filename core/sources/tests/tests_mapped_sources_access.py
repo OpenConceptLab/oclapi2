@@ -1,8 +1,9 @@
-from core.common.constants import ACCESS_TYPE_NONE
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.models import Source
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -68,3 +69,37 @@ class MappedSourcesAccessTest(OCLAPITestCase):
         self.assert_lists(self.admin, [self.public_target.uri, self.private_target.uri])
         self.assert_lists(
             self.admin, [self.source.uri, self.public_target.uri, self.private_target.uri], '?excludeSelf=false')
+
+    def test_leaves_out_a_deleted_target_for_everyone(self):
+        Source.objects.filter(id=self.public_target.id).update(is_active=False)
+        self.assert_lists(self.outsider, [])
+        self.assert_lists(self.admin, [self.private_target.uri])
+
+    def test_hides_a_public_release_of_a_private_source_from_outsiders(self):
+        release = OrganizationSourceFactory(
+            mnemonic=self.private_target.mnemonic, organization=self.private_target.organization, version='v1')
+        Source.objects.filter(id=release.id).update(public_access=ACCESS_TYPE_VIEW)
+        concept = ConceptFactory(parent=self.source)
+        mapping = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=ConceptFactory(parent=self.private_target),
+            from_source=self.source, to_source=release)
+        self.version.mappings.add(mapping.get_latest_version())
+        self.assert_lists(self.outsider, [self.public_target.uri])
+        self.assert_lists(self.member, [self.public_target.uri, self.private_target.uri, release.uri])
+
+
+class UserSourceMappedSourcesExcludeSelfTest(OCLAPITestCase):
+    def test_exclude_self_leaves_out_a_user_source_on_its_version_route(self):
+        source = UserSourceFactory()
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(
+            parent=source, from_concept=concept, to_concept=concept, from_source=source, to_source=source)
+        version = UserSourceFactory(mnemonic=source.mnemonic, user=source.user, version='v1')
+        version.mappings.add(mapping.get_latest_version())
+        token = source.user.get_token()
+
+        response = self.client.get(f'{version.uri}mapped-sources/', HTTP_AUTHORIZATION=f'Token {token}')
+        self.assertEqual(response.data, [])
+        response = self.client.get(
+            f'{version.uri}mapped-sources/?excludeSelf=false', HTTP_AUTHORIZATION=f'Token {token}')
+        self.assertEqual([item['url'] for item in response.data], [source.uri])
