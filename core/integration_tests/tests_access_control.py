@@ -33,6 +33,7 @@ from core.pins.models import Pin
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.sources.views import SourceListView
 from core.tasks.models import Task
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
 from core.url_registry.models import URLRegistry
@@ -890,6 +891,60 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         # the export is the search's, not the whole list
         self.assertNotIn(unmatched_org.mnemonic, mnemonics)
 
+    def export_rows(self, url, user):
+        """The rows of the CSV export at `url` for `user`, in file order."""
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
+                as zip_file, zip_file.open(zip_file.namelist()[0]) as csv_file:
+            return list(csv.DictReader(io.TextIOWrapper(csv_file, 'utf-8-sig')))
+
+    def assert_repo_list_export(self, label, url, repos):
+        own_private, org_public, outsiders_private = repos
+        headers = [
+            'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
+            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
+        ]
+        self.assertEqual(self.export_columns(url, self.owner), headers)
+
+        uris = [row['URI'] for row in self.export_rows(url, self.owner)]
+        self.assertIn(org_public.uri, uris)
+        self.assertNotIn(outsiders_private.uri, uris)
+        self.assertEqual(uris.count(own_private.uri), 1)
+        rows = {row['URI']: row for row in self.export_rows(url, self.owner)}
+        row = rows[own_private.uri]
+        self.assertEqual(row['Owner'], self.owner.username)
+        self.assertEqual(row[f'{label} ID'], own_private.mnemonic)
+        self.assertEqual(row[f'{label} Name'], own_private.name)
+        self.assertEqual(row['Supported Locales'], 'en,fr')
+        self.assertEqual(row['Updated By'], own_private.updated_by.username)
+        self.assertEqual(rows[org_public.uri]['Owner'], self.org.mnemonic)
+
+        anonymous_uris = [row['URI'] for row in self.export_rows(url, None)]
+        self.assertIn(org_public.uri, anonymous_uris)
+        self.assertNotIn(own_private.uri, anonymous_uris)
+
+    def test_source_list(self):
+        self.assert_repo_list_export('Source', '/sources/?csv=true', (
+            UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserSourceFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
+    def test_repo_list_rows_keep_the_list_order(self):
+        first, second = UserSourceFactory(user=self.owner), UserSourceFactory(user=self.owner)
+        rows = SourceListView().get_csv_rows(Source.objects.filter(id__in=[first.id, second.id]).order_by('-id'))
+
+        self.assertEqual([row['URI'] for row in rows], [second.uri, first.uri])
+
+    def test_collection_list(self):
+        # a signed-in non-staff requester's list is a union of public and own private collections
+        self.assert_repo_list_export('Collection', '/collections/?csv=true', (
+            UserCollectionFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserCollectionFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
     def export_columns(self, url, user):
         response = self.request('get', url, user)
         with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
@@ -1404,6 +1459,22 @@ class CollectionReferenceAccessTest(AccessTestMixin, OCLAPITestCase):
             url = self.get_url(self.outsider_collection) + suffix
             self.assertEqual(self.request('get', url, self.outsider).status_code, 404, url)
 
+    def test_reference_with_an_invalid_id_answers_404(self):
+        reference_id = str(self.reference.id)
+        full_width = ''.join(chr(ord(digit) + 0xFEE0) for digit in reference_id)
+        versioned_url = self.collection.uri + 'HEAD/references/'
+        urls = [
+            *(f'{versioned_url}{spelling}/' for spelling in [
+                'abc', '9' * 30, '9' * 5000, f'+{reference_id}', f'0_{reference_id}', full_width]),
+            *(f'{self.collection.uri}references/{digits}/' for digits in ['9' * 30, '9' * 5000]),
+        ]
+
+        for url in urls:
+            for method in ('get', 'head', 'delete'):
+                self.assertEqual(self.request(method, url, self.member).status_code, 404, (method, url))
+        self.assertTrue(self.reference_exists())
+        self.assertEqual(self.request('get', f'{versioned_url}{reference_id}/', self.member).status_code, 200)
+
     def test_private_collection_references_are_visible_to_members_only(self):
         private = OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
         url = private.uri + 'HEAD/references/'
@@ -1638,6 +1709,44 @@ class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', url, self.outsider).status_code, 403, url)
             self.assertEqual(self.request('get', url).status_code, 401, url)
             self.assertEqual(self.request('get', url, self.member).status_code, 200, url)
+
+
+class DetailHeadAccessTest(AccessTestMixin, OCLAPITestCase):
+    """HEAD on a detail answers as its GET does, where GET is open and where it's refused."""
+    def setUp(self):
+        super().setUp()
+        self.urls = {}
+        for access in [ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE]:
+            source = OrganizationSourceFactory(organization=self.org, public_access=access)
+            concept = ConceptFactory(parent=source, public_access=access)
+            mapping = MappingFactory(
+                parent=source, from_concept=concept, to_concept=ConceptFactory(parent=source, public_access=access),
+                public_access=access)
+            source_version = OrganizationSourceFactory(
+                organization=self.org, mnemonic=source.mnemonic, version='v1', public_access=access)
+            collection = OrganizationCollectionFactory(organization=self.org, public_access=access)
+            collection_version = OrganizationCollectionFactory(
+                organization=self.org, mnemonic=collection.mnemonic, version='v1', public_access=access)
+            self.urls[access] = [
+                concept.uri, mapping.uri, source_version.uri, collection_version.uri,
+                collection_version.uri + 'expansions/']
+
+    def assert_head_answers_as_get(self, url, user, status_code):
+        for method in ('get', 'head'):
+            self.assertEqual(self.request(method, url, user).status_code, status_code, (method, url, user))
+
+    def test_head_on_a_public_detail_answers_as_get(self):
+        for url in self.urls[ACCESS_TYPE_VIEW]:
+            for user in [None, self.outsider, self.member]:
+                self.assert_head_answers_as_get(url, user, 200)
+
+    def test_head_on_a_private_detail_is_refused_as_get_is(self):
+        expansions_url = self.urls[ACCESS_TYPE_NONE][-1]
+        for url in [*self.urls[ACCESS_TYPE_NONE], expansions_url + '?q=%20&searchStatsOnly=true',
+                    expansions_url + '?q=x&searchStatsOnly=true']:
+            self.assert_head_answers_as_get(url, None, 401)
+            self.assert_head_answers_as_get(url, self.outsider, 403)
+            self.assert_head_answers_as_get(url, self.member, 200)
 
 
 class SourceVersionReadAccessMixin(AccessTestMixin):

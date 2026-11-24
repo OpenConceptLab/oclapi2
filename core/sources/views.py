@@ -30,7 +30,7 @@ from core.common.tasks import export_source, index_source_concepts, index_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
     get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
-from core.repos.mixins import RepoExternalExportMixin
+from core.repos.mixins import RepoExternalExportMixin, RepoListCSVMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -101,7 +101,9 @@ class SourceVersionBaseView(SourceBaseView):
         return super().get_filter_params(default_version_to_head)
 
 
-class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
+class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_label = 'Source'
+    csv_type_field = 'source_type'
     serializer_class = SourceListSerializer
     is_searchable = True
     es_fields = Source.es_fields
@@ -135,35 +137,6 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
-
-    def get_csv_rows(self, queryset=None):  # pragma: no cover
-        if not queryset:
-            queryset = self.get_queryset()
-
-        values = queryset.values('mnemonic', 'name', 'full_name', 'source_type', 'description', 'default_locale',
-                                 'supported_locales', 'website', 'external_id', 'updated_at', 'updated_by', 'uri')
-
-        for value in values:
-            value['Owner'] = Source.objects.get(uri=value['uri']).parent.mnemonic
-            value['Source ID'] = value.pop('mnemonic')
-            value['Source Name'] = value.pop('name')
-            value['Source Full Name'] = value.pop('full_name')
-            value['Source Type'] = value.pop('source_type')
-            value['Description'] = value.pop('description')
-            value['Default Locale'] = value.pop('default_locale')
-            value['Supported Locales'] = ",".join(value.pop('supported_locales'))
-            value['Website'] = value.pop('website')
-            value['External ID'] = value.pop('external_id')
-            value['Last Updated'] = value.pop('updated_at')
-            value['Updated By'] = value.pop('updated_by')
-            value['URI'] = value.pop('uri')
-
-        values.field_names.extend([
-            'Owner', 'Source ID', 'Source Name', 'Source Full Name', 'Source Type', 'Description', 'Default Locale',
-            'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
-        ])
-        del values.field_names[0:12]
-        return values
 
 
 class SourceLogoView(SourceBaseView, BaseLogoView):
@@ -482,7 +455,7 @@ class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIV
     writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         return [CanEditConceptDictionaryVersion()]
 

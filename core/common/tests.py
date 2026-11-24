@@ -2,6 +2,7 @@ import datetime
 import importlib
 import json
 import os
+import shutil
 import sys
 import time
 import unittest
@@ -73,7 +74,7 @@ from core.common.utils import (
     get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
     get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size,
-    write_csv_to_s3)
+    write_csv_to_s3, write_rows_to_csv, cd_temp)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.mappings.models import Mapping
@@ -1384,17 +1385,37 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(len(export_dirs), 1)
         self.assertFalse(os.path.exists(export_dirs[0]))
 
+    def test_write_rows_to_csv(self):
+        """Rows are written under the headers with their serializers; None is blank and datetimes are ISO"""
+        cwd = cd_temp()
+        temp_dir = os.getcwd()
+        try:
+            csv_file = write_rows_to_csv(
+                [{'Name': 'a', 'Tags': ['x', 'y'], 'At': datetime.datetime(2026, 1, 2, 3, 4, 5), 'Note': None}],
+                ['Name', 'Tags', 'At', 'Note'], 'rows', {'Tags': ','.join})
+            with open(csv_file.name, encoding='utf-8-sig', newline='') as file:
+                content = file.read()
+        finally:
+            os.chdir(cwd)
+            shutil.rmtree(temp_dir)
+
+        self.assertEqual(csv_file.name, 'rows.csv')
+        self.assertEqual(content, 'Name,Tags,At,Note\r\na,"x,y",2026-01-02T03:04:05,\r\n')
+
     @patch('core.common.utils.get_export_service')
     @patch('core.common.utils.csv_file_for')
     def test_write_csv_to_s3_restores_working_directory(self, csv_file_for_mock, get_export_service_mock):
-        """The zipped CSV is uploaded from a temp directory and the working directory is restored afterwards"""
-        csv_file_for_mock.side_effect = fake_csv_file_for
+        """The zipped CSV is uploaded from a temp directory, then the working directory is restored and the temp
+        directory removed"""
+        export_dirs = []
+        csv_file_for_mock.side_effect = lambda *args, **kwargs: export_dirs.append(os.getcwd()) or fake_csv_file_for()
         get_export_service_mock.return_value.url_for.return_value = 'https://csv-url'
         cwd = os.getcwd()
 
         self.assertEqual(write_csv_to_s3([], 'ocladmin'), 'https://csv-url')
 
         self.assertEqual(os.getcwd(), cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
         upload_kwargs = get_export_service_mock.return_value.upload_file.call_args.kwargs
         self.assertTrue(upload_kwargs['key'].startswith('downloads/reader/ocladmin/'))
 
@@ -1402,8 +1423,9 @@ class UtilsTest(OCLTestCase):
     @patch('core.common.utils.csv_file_for')
     def test_write_csv_to_s3_restores_working_directory_when_upload_raises(
             self, csv_file_for_mock, get_export_service_mock):
-        """A failed CSV upload reaches the caller and does not leave the process inside the temp directory"""
-        csv_file_for_mock.side_effect = fake_csv_file_for
+        """A failed CSV upload reaches the caller, restores the working directory and removes the temp directory"""
+        export_dirs = []
+        csv_file_for_mock.side_effect = lambda *args, **kwargs: export_dirs.append(os.getcwd()) or fake_csv_file_for()
         get_export_service_mock.return_value.upload_file.side_effect = ExportUploadFailure()
         cwd = os.getcwd()
 
@@ -1411,6 +1433,7 @@ class UtilsTest(OCLTestCase):
             write_csv_to_s3([], 'ocladmin')
 
         self.assertEqual(os.getcwd(), cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
 
     @patch('core.common.utils.settings')
     @patch('core.common.utils.requests.get')

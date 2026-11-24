@@ -1228,6 +1228,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             private_head = private_head.exclude(own)
         return Q(is_active=True) & criteria & ~Exists(private_head)
 
+    @classmethod
+    def get_viewable(cls, queryset, user):
+        """The repositories of `queryset` `user` can view (get_viewable_versions_criteria)."""
+        criteria = cls.get_viewable_versions_criteria(user)
+        return queryset if criteria is None else queryset.filter(criteria)
+
     @staticmethod
     def get_version_url_kwarg():
         return 'version'
@@ -1396,14 +1402,19 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         pass
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """
         Saves `obj` over its stored row. With keep_private=True the save never makes a private row viewable: it reads
         the stored row under a row lock held through the save, and keeps that row's access when it's private, so a
         concurrent write that makes it private isn't overwritten (a FHIR update, whose resource carries no access).
-        The tasks the save queues go once its transaction ends.
+        The tasks the save queues go once its transaction ends. keep_access=True keeps the stored row's access whatever
+        it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
+        with no lock, and the save runs under autocommit, as other REST writes do. A blank access is stored as None
+        instead, so that save writes it, under the lock.
         """
         keep_private = kwargs.pop('keep_private', False)
+        keep_access = kwargs.pop('keep_access', False)
+        lock = keep_private or (keep_access and cls.objects.filter(id=obj.id, public_access='').exists())
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
@@ -1411,11 +1422,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         queue_schema_update_task = obj.is_validation_necessary()
         try:
-            with transaction.atomic() if keep_private else nullcontext():
+            with transaction.atomic() if lock else nullcontext():
                 stored_rows = cls.objects.filter(id=obj.id)
                 # no key update, so a concurrent child write's foreign-key check on the row isn't blocked
-                original_repo = (stored_rows.select_for_update(no_key=True) if keep_private else stored_rows).first()
-                if keep_private and not original_repo.public_can_view:
+                original_repo = (stored_rows.select_for_update(no_key=True) if lock else stored_rows).first()
+                if keep_access or (keep_private and not original_repo.public_can_view):
                     obj.public_access = original_repo.public_access
                 obj.store_blank_access_as_none()
 
@@ -1444,7 +1455,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     target_schema = obj.custom_validation_schema
                     obj.custom_validation_schema = original_schema
 
+                if keep_access and not lock:
+                    kwargs['update_fields'] = [
+                        field.name for field in cls._meta.concrete_fields
+                        if not field.primary_key and field.name != 'public_access']
                 obj.save(**kwargs)
+                if keep_access and not lock:  # the access the row has now, which a concurrent write may have changed
+                    obj.refresh_from_db(fields=['public_access'])
 
             if queue_schema_update_task:
                 from core.tasks.models import Task

@@ -18,6 +18,7 @@ from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -295,12 +296,18 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertNotIn(repo.mnemonic, self.anonymous_list_ids(kind))
 
     @staticmethod
-    def made_private_first(model, method):
-        """`model`'s `method`, run after a concurrent write that makes its row (the first argument) private commits."""
+    def made_private_first(model, method, access=ACCESS_TYPE_NONE):
+        """
+        `model`'s `method`, run after a concurrent write that makes its row (the first argument) private commits, or
+        gives it `access`, with its concepts' and mappings' (as the save signal does).
+        """
         original = getattr(model, method)
 
         def call(row, *args, **kwargs):
-            model.objects.filter(id=row.id).update(public_access=ACCESS_TYPE_NONE)
+            model.objects.filter(id=row.id).update(public_access=access)
+            if model is Source:
+                row.concepts_set.update(public_access=access)
+                row.mappings_set.update(public_access=access)
             return original(row, *args, **kwargs)
         return call
 
@@ -356,8 +363,78 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 self.assertTrue(savepoint.startswith('SAVEPOINT '), savepoint)
                 self.assertGreater(sqls.index(f'RELEASE {savepoint}'), save)
 
+    def test_a_rest_edit_that_sends_no_access_keeps_the_access_a_concurrent_write_gave_the_row(self):
+        """
+        The edit saves the access its row has when it's saved, not the one the request read before: a row made private
+        meanwhile stays private, with its concepts and mappings, and a row made public stays public without the edit
+        being asked make_private.
+        """
+        repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
+        children = (ConceptFactory(parent=self.source), MappingFactory(parent=self.source))
+        changes = ((ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE), (ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW))  # (read, concurrent)
+        for repo, factory in repos:
+            model = type(repo)
+            version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
+            for row in (repo, version):
+                for method in ('put', 'patch'):
+                    for read, concurrent in changes:
+                        model.objects.filter(id=row.id).update(public_access=read)
+                        with self.subTest(uri=row.uri, method=method, concurrent=concurrent):
+                            with patch.object(model, 'persist_changes',
+                                              self.made_private_first(model, 'persist_changes', concurrent)):
+                                response = self.request(method, row.uri, {'name': 'Renamed'})
+
+                            self.assertEqual(response.status_code, 200, response.data)
+                            row.refresh_from_db()
+                            self.assertEqual((row.public_access, row.name), (concurrent, 'Renamed'))
+                            self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
+                            if row is self.source:
+                                for child in children:
+                                    child.refresh_from_db()
+                                    self.assertEqual(child.public_access, concurrent)
+
+    def test_a_rest_edit_that_sends_no_access_doesn_t_write_the_access_column(self):
+        """
+        So a concurrent write's access stays whenever it commits, with no row lock: the edit runs under autocommit, as
+        other REST writes do. An edit that sends access writes it.
+        """
+        for repo in (self.source, self.collection):
+            table = type(repo)._meta.db_table  # pylint: disable=protected-access
+            row = f'"{table}"."id" = {repo.id}'
+            for data, writes in (({'name': 'Renamed'}, False), ({'name': 'Renamed', 'public_access': 'View'}, True)):
+                with self.subTest(uri=repo.uri, data=data):
+                    with CaptureQueriesContext(connection) as queries:
+                        response = self.request('patch', repo.uri, data)
+
+                    self.assertEqual(response.status_code, 200, response.data)
+                    sqls = [query['sql'] for query in queries.captured_queries]
+                    saves = [sql for sql in sqls if sql.startswith(f'UPDATE "{table}" SET') and
+                             '"name" = ' in sql and sql.endswith(row)]
+                    self.assertEqual(len(saves), 1, saves)
+                    self.assertEqual('"public_access" = ' in saves[0], writes)
+                    self.assertEqual([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')], [])
+
+    def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
+        """Its save leaves the column out, and it answers with the access the row has after it."""
+        for repo in (self.source, self.collection):
+            model = type(repo)
+            model.objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_VIEW)
+            change = Mock(side_effect=lambda *args: model.objects.filter(id=repo.id).update(
+                public_access=ACCESS_TYPE_NONE))
+            with self.subTest(uri=repo.uri), patch('core.common.models.check_make_private', change):
+                response = self.request('patch', repo.uri, {'name': 'Renamed'})
+
+                self.assertEqual(response.status_code, 200, response.data)
+                change.assert_called_once()
+                self.assertEqual(response.data['public_access'], ACCESS_TYPE_NONE)
+                repo.refresh_from_db()
+                self.assertEqual((repo.public_access, repo.name), (ACCESS_TYPE_NONE, 'Renamed'))
+
     def test_an_edit_that_sends_no_access_keeps_a_blank_row_private(self):
-        """A blank access is private (public_can_view): an edit that sends none stores it as None, not View."""
+        """
+        A blank access is private (public_can_view): an edit that sends none stores it as None, not View, reading the
+        row for update first, so a concurrent access change isn't undone, nor passed on wrongly to a source's concepts.
+        """
         repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
         for repo, factory in repos:
             version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
@@ -365,9 +442,12 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 type(row).objects.filter(id=row.id).update(public_access='')
                 for method in ('put', 'patch'):
                     with self.subTest(uri=row.uri, method=method):
-                        response = self.request(method, row.uri, {'name': 'Renamed'})
+                        with CaptureQueriesContext(connection) as queries:
+                            response = self.request(method, row.uri, {'name': 'Renamed'})
 
                         self.assertEqual(response.status_code, 200, response.data)
+                        self.assertTrue([query for query in queries.captured_queries
+                                         if query['sql'].endswith('FOR NO KEY UPDATE')])
                         row.refresh_from_db()
                         self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
                         self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
@@ -413,6 +493,18 @@ class IndexEnqueueUnderAutocommitTest(OCLAPITransactionTestCase):
             CelerySignalProcessor.handle_save(None, Source, source)
 
         handle_save_task.apply_async.assert_called_once()
+
+
+class RestEditIndexEnqueueTest(MakePrivateTestMixin, OCLAPITransactionTestCase):
+    @patch('core.common.models.handle_save')
+    def test_a_failed_index_enqueue_reaches_a_rest_edit_that_sends_no_access(self, handle_save_task):
+        """The edit runs under autocommit, so the broker's error reaches it rather than being only logged."""
+        handle_save_task.apply_async.side_effect = ConnectionError('broker down')
+
+        for repo in (self.source, self.collection):
+            with self.subTest(uri=repo.uri), override_settings(TEST_MODE=False, ES_SYNC=True):
+                with self.assertRaises(ConnectionError):
+                    self.request('patch', repo.uri, {'name': 'Renamed'})
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)

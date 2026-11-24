@@ -1,3 +1,6 @@
+import itertools
+import uuid
+
 import factory
 from django.db.models import F
 from django.test import tag
@@ -6,12 +9,14 @@ from mock import patch
 from core.bundles.models import Bundle
 from core.collections.models import CollectionReference
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, INCLUDE_SEARCH_STATS
 from core.common.tests import OCLAPITestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
+from core.mappings.documents import MappingDocument
+from core.mappings.models import Mapping
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
@@ -630,6 +635,71 @@ class FuzzySearchScopeTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseT
             self.assertEqual(
                 (response.status_code, [row['version'] for row in response.data]),
                 (200, [shared.get_latest_version().version]), url)
+
+
+@tag('es')
+class FuzzySearchListsTest(CrossRepoAccessBaseTest):
+    """
+    A fuzzy search answers on the mapping lists and on a collection's concept list, as on a source's concept list,
+    and keeps to the list's own repository.
+    """
+    def setUp(self):
+        super().setUp()
+        self.name = f'kestrel{uuid.uuid4().hex}'  # what searches look for: only this test's concepts have it
+        member, other = [
+            ConceptFactory(
+                parent=self.public_source, mnemonic=mnemonic, names=[ConceptNameFactory.build(name=self.name)])
+            for mnemonic in ['member', 'other']
+        ]
+        self.mapping = MappingFactory(parent=self.public_source, from_concept=member, to_concept=other)
+        self.collection = OrganizationCollectionFactory(public_access=ACCESS_TYPE_VIEW)
+        expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = expansion.uri
+        self.collection.save()
+        expansion.concepts.add(member.get_latest_version())
+        expansion.mappings.add(self.mapping.get_latest_version())
+        ConceptDocument().update(Concept.objects.all(), refresh=True)
+        MappingDocument().update(Mapping.objects.all(), refresh=True)
+
+    def search(self, url, **headers):
+        response = self.client.get(f'{url}?fuzzy=true&q={self.name}', **headers)
+        self.assertEqual(response.status_code, 200, url)
+        return response.data
+
+    def test_fuzzy_search_on_a_collections_concepts_keeps_to_the_collection(self):
+        for url in [self.collection.uri + 'concepts/', self.collection.uri + 'HEAD/concepts/']:
+            self.assertEqual([row['id'] for row in self.search(url)], ['member'], url)
+            data = self.search(url, **{INCLUDE_SEARCH_STATS: 'true'})
+            self.assertEqual([row['id'] for row in data['results']], ['member'], url)
+            self.assertIn('search_stats', data, url)
+
+    def test_fuzzy_search_on_mapping_lists_answers(self):
+        for url in ['/mappings/', self.public_source.uri + 'mappings/', self.collection.uri + 'mappings/']:
+            self.assertEqual([row['id'] for row in self.search(url)], [str(self.mapping.mnemonic)], url)
+            self.assertEqual(self.client.get(url + '?fuzzy=true').status_code, 200, url)
+
+    def test_fuzzy_search_with_a_min_score_that_isnt_a_number_answers_400(self):
+        for url in ['/mappings/', self.collection.uri + 'concepts/']:
+            for min_score in ['high', 'nan', 'inf']:
+                response = self.client.get(f'{url}?fuzzy=true&q={self.name}&min_score={min_score}')
+                self.assertEqual(response.status_code, 400, (url, min_score))
+            response = self.client.get(f'{url}?fuzzy=true&q={self.name}&min_score=0.01')
+            self.assertEqual((response.status_code, len(response.data)), (200, 1), url)
+
+    def test_stats_only_search_for_nothing_answers_as_the_list(self):
+        for url in ['/mappings/', self.collection.uri + 'concepts/', self.public_source.uri + 'concepts/']:
+            for fuzzy, query in itertools.product(['true', 'false'], ['%22%22', '%20', "''"]):
+                params = f'?fuzzy={fuzzy}&q={query}'
+                response = self.client.get(url + params + '&searchStatsOnly=true')
+                self.assertEqual(response.status_code, 200, (url, params))
+                self.assertEqual(list(response.data), list(self.client.get(url + params).data), (url, params))
+
+    def test_stats_only_search_by_filter_with_a_blank_query_answers_stats(self):
+        response = self.client.get(
+            self.public_source.uri + 'concepts/?q=%20&extras.exact.foo=bar&searchStatsOnly=true&raw=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('score', response.data)
 
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
