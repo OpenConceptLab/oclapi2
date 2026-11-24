@@ -1402,14 +1402,17 @@ class UtilsTest(OCLTestCase):
     @patch('core.common.utils.get_export_service')
     @patch('core.common.utils.csv_file_for')
     def test_write_csv_to_s3_restores_working_directory(self, csv_file_for_mock, get_export_service_mock):
-        """The zipped CSV is uploaded from a temp directory and the working directory is restored afterwards"""
-        csv_file_for_mock.side_effect = fake_csv_file_for
+        """The zipped CSV is uploaded from a temp directory, then the working directory is restored and the temp
+        directory removed"""
+        export_dirs = []
+        csv_file_for_mock.side_effect = lambda *args, **kwargs: export_dirs.append(os.getcwd()) or fake_csv_file_for()
         get_export_service_mock.return_value.url_for.return_value = 'https://csv-url'
         cwd = os.getcwd()
 
         self.assertEqual(write_csv_to_s3([], 'ocladmin'), 'https://csv-url')
 
         self.assertEqual(os.getcwd(), cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
         upload_kwargs = get_export_service_mock.return_value.upload_file.call_args.kwargs
         self.assertTrue(upload_kwargs['key'].startswith('downloads/reader/ocladmin/'))
 
@@ -1417,8 +1420,9 @@ class UtilsTest(OCLTestCase):
     @patch('core.common.utils.csv_file_for')
     def test_write_csv_to_s3_restores_working_directory_when_upload_raises(
             self, csv_file_for_mock, get_export_service_mock):
-        """A failed CSV upload reaches the caller and does not leave the process inside the temp directory"""
-        csv_file_for_mock.side_effect = fake_csv_file_for
+        """A failed CSV upload reaches the caller, restores the working directory and removes the temp directory"""
+        export_dirs = []
+        csv_file_for_mock.side_effect = lambda *args, **kwargs: export_dirs.append(os.getcwd()) or fake_csv_file_for()
         get_export_service_mock.return_value.upload_file.side_effect = ExportUploadFailure()
         cwd = os.getcwd()
 
@@ -1426,6 +1430,7 @@ class UtilsTest(OCLTestCase):
             write_csv_to_s3([], 'ocladmin')
 
         self.assertEqual(os.getcwd(), cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
 
     @patch('core.common.utils.settings')
     @patch('core.common.utils.requests.get')

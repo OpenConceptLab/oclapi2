@@ -71,9 +71,10 @@ def write_rows_to_csv(rows, headers, filename=None, field_serializer_map=None):
 def write_csv_to_s3(data, requester, headers=None, **kwargs):
     """
     Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL. `data` is a values
-    queryset, or dict rows when `headers` is given.
+    queryset, or dict rows when `headers` is given. The temp files are removed even when the upload raises.
     """
     cwd = cd_temp()
+    tmp_dir_path = os.getcwd()
     try:
         if headers is None:
             csv_file = csv_file_for(data, **kwargs)
@@ -91,6 +92,7 @@ def write_csv_to_s3(data, requester, headers=None, **kwargs):
         )
     finally:
         os.chdir(cwd)  # an upload that raises must not leave the process inside the temp directory
+        shutil.rmtree(tmp_dir_path, ignore_errors=True)
     return get_export_service().url_for(key)
 
 
