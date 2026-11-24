@@ -8,7 +8,8 @@ import unittest
 import uuid
 from collections import OrderedDict
 from types import SimpleNamespace
-from unittest.mock import patch, Mock, MagicMock, ANY
+from unittest.mock import patch, Mock, MagicMock, ANY, PropertyMock
+from zipfile import ZipFile
 
 import django
 import factory
@@ -18,6 +19,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
 from django.core.management import call_command, CommandError
+from django.db import connection, transaction
 from django.http import HttpResponse
 from django.test import TestCase, override_settings, RequestFactory, tag
 from django.test.runner import DiscoverRunner
@@ -74,6 +76,7 @@ from core.common.utils import (
     write_csv_to_s3)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.mappings.models import Mapping
 from core.mappings.documents import MappingDocument
 from core.middlewares.middlewares import RequireAuthenticationMiddleware
 from core.orgs.models import Organization
@@ -1511,6 +1514,129 @@ class UtilsTest(OCLTestCase):
 
         sentence_transformer_mock.assert_called_once_with('some-model')
         sentence_transformer_mock.return_value.encode.assert_called_once_with(['a'], batch_size=64)
+
+
+class HeadExportSnapshotTest(OCLTestCase):
+    """
+    A HEAD export lists the repo as it was when the export started, however it's edited while the export runs:
+    each member exactly once, as the version it had then, and the export's key names that point in time.
+    The page size is patched down so the edits land between pages.
+    """
+    past = timezone.now().replace(microsecond=0) - datetime.timedelta(days=1)
+
+    @staticmethod
+    def export(version, on_log=None):
+        resource_type = version.resource_type.lower()
+        serializer = f'core.{resource_type}s.serializers.{version.resource_type}VersionExportSerializer'
+        export_service = Mock(upload_file=Mock(return_value=200), url_for=Mock(return_value='http://export.url'))
+        logger = Mock()
+        if on_log:
+            logger.info.side_effect = on_log
+        with patch('core.common.utils.get_export_service', return_value=export_service):
+            write_export_file(version, resource_type, serializer, logger, time.time())
+        upload = export_service.upload_file.call_args.kwargs
+        with ZipFile(upload['file_path']) as export:
+            return json.loads(export.read('export.json')), upload['key']
+
+    @staticmethod
+    def on_page(edits):
+        """A logger.info that runs edits[message] once, when the export logs that message (the start of a page)"""
+        def info(message, *_):
+            edit = edits.pop(message, None)
+            if edit:
+                edit()
+        return info
+
+    @staticmethod
+    def edit_concept(concept):
+        errors = Concept.create_new_version_for(
+            instance=concept.clone(), data={'names': [{'locale': 'en', 'name': f'edited {concept.mnemonic}'}]},
+            user=concept.created_by, create_parent_version=False)
+        assert not errors, errors
+
+    @staticmethod
+    def edit_mapping(mapping):
+        errors = Mapping.create_new_version_for(
+            mapping.clone(), {'map_type': mapping.map_type, 'extras': {'edited': True}}, mapping.created_by)
+        assert not errors, errors
+
+    @patch('core.common.utils.EXPORT_BATCH_SIZE', 2)
+    def test_source_head_edited_between_pages(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, names=1) for _ in range(5)]
+        mappings = [MappingFactory(parent=source) for _ in range(5)]
+        Concept.objects.filter(parent=source).update(updated_at=self.past)
+        Mapping.objects.filter(parent=source).update(updated_at=self.past)
+        before, before_key = self.export(source)
+
+        exported, key = self.export(source, self.on_page({
+            'Serializing concepts 1 - 2...': lambda: [
+                self.edit_concept(concepts[0]), self.edit_concept(concepts[3]), ConceptFactory(parent=source)],
+            'Serializing concepts 3 - 4...': lambda: self.edit_concept(concepts[1]),
+            'Serializing mappings 1 - 2...': lambda: [self.edit_mapping(mappings[0]), self.edit_mapping(mappings[3])],
+            'Serializing mappings 3 - 4...': lambda: self.edit_mapping(mappings[1]),
+        }))
+
+        self.assertEqual(len(before['concepts']), 5)
+        self.assertEqual(len(before['mappings']), 5)
+        self.assertEqual(exported['concepts'], before['concepts'])
+        self.assertEqual(exported['mappings'], before['mappings'])
+        self.assertEqual(key, before_key)
+        self.assertEqual(key, source.get_version_export_path(suffix=f"{self.past.strftime('%Y-%m-%d_%H%M%S')}.zip"))
+        self.assertGreater(source.last_child_update, self.past)
+        self.assertEqual(source.get_active_concepts().count(), 6)
+
+    @patch('core.common.utils.EXPORT_BATCH_SIZE', 2)
+    @patch('core.collections.models.batch_index_resources', Mock())
+    def test_collection_head_references_changed_between_pages(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, names=1) for _ in range(5)]
+        added = ConceptFactory(parent=source, names=1)
+        collection.add_expressions({'expressions': [concept.uri for concept in concepts]}, collection.created_by)
+        before, _ = self.export(collection)
+
+        exported, _ = self.export(collection, self.on_page({
+            'Serializing concepts 1 - 2...': lambda: collection.add_expressions(
+                {'expressions': [added.uri]}, collection.created_by),
+            'Serializing concepts 3 - 4...': lambda: collection.delete_references([concepts[4].uri]),
+            'Serializing references 1 - 2...': lambda: collection.delete_references([concepts[3].uri]),
+        }))
+
+        self.assertEqual(len(before['concepts']), 5)
+        self.assertEqual(len(before['references']), 5)
+        self.assertEqual(exported['concepts'], before['concepts'])
+        # a reference deleted before its page is read can't be exported; none is listed twice or added
+        deleted = {concepts[3].uri, concepts[4].uri}
+        self.assertEqual(
+            exported['references'], [ref for ref in before['references'] if ref['expression'] not in deleted])
+        self.assertEqual(collection.expansion.concepts.count(), 4)
+
+
+class HeadExportSnapshotTransactionTest(OCLAPITransactionTestCase):
+    def test_snapshot_reads_in_one_read_only_repeatable_read_transaction(self):
+        """Outside a transaction, as in the export task, the snapshot's reads share one REPEATABLE READ transaction"""
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source, names=1)
+        seen = []
+
+        def last_child_update():
+            with connection.cursor() as cursor:
+                cursor.execute('SHOW transaction_isolation')
+                isolation = cursor.fetchone()[0]
+                cursor.execute('SHOW transaction_read_only')
+                seen.append((isolation, cursor.fetchone()[0], connection.in_atomic_block))
+            return timezone.now()
+
+        with patch.object(Source, 'last_child_update', new_callable=PropertyMock, side_effect=last_child_update):
+            exported, _ = HeadExportSnapshotTest.export(source)
+
+        self.assertEqual(seen, [('repeatable read', 'on', True)])
+        self.assertEqual(len(exported['concepts']), 1)
+        self.assertTrue(transaction.get_autocommit())
 
 
 @tag('es')
