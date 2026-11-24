@@ -2279,6 +2279,9 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertNotIn(f'{self.tag}P', self.collection_facet(url, self.outsider))
         self.assertNotIn(f'{self.tag}P', self.collection_facet(url, None))
         self.assertIn(f'{self.tag}P', self.collection_facet(url, self.member))
+        # nor does it outlast the requester's access
+        self.member.organizations.remove(self.org)
+        self.assertNotIn(f'{self.tag}P', self.collection_facet(url, self.member))
 
     def facets(self, url, user):
         """The facets `url` answers (facetsOnly), each a {name: count}."""
@@ -2349,7 +2352,17 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         ExpansionFactory(collection_version=hidden, mnemonic=f'hidden{self.tag}').concepts.add(
             *[concept.get_latest_version() for concept in self.concepts.values()])
         self.add_latest_versions_to_heads()
+        spaced = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.r_head.mnemonic, version='v 2', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        ExpansionFactory(collection_version=spaced).concepts.add(self.concepts['inRv1'].get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
         url = f'{self.source.uri}concepts/'
+        # a version's name reads as its members' documents have it, for everyone
+        spaced_keys = {key for key in self.facets(url, self.staff)['collection_version'] if key.startswith('v')}
+        self.assertEqual(len(spaced_keys), 2, spaced_keys)
+        for user in [None, self.outsider, self.member]:
+            self.assertLessEqual(spaced_keys, set(self.facets(url, user)['collection_version']), user)
         for user in [None, self.outsider]:
             facets = self.facets(url, user)
             self.assertEqual(self.collection_facet(url, user), {f'{self.tag}Q': 1, f'{self.tag}R': 1}, user)

@@ -185,10 +185,6 @@ class ListWithHeadersMixin(ListModelMixin):
         if query_string:
             key_body += '?' + query_string
             key_headers += '?' + query_string
-        if self.only_facets():  # facets name only the collections the requester can view, so each gets their own
-            requester = f"#requester={get(request.user, 'id') if get(request.user, 'is_authenticated') else ''}"
-            key_body += requester
-            key_headers += requester
 
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
@@ -239,6 +235,8 @@ class ListWithHeadersMixin(ListModelMixin):
             cache_key_body, data, cache_key_headers, headers = self.__get_cached_data_if_any(request)
             if self.request.query_params.get('_force_cache_clear') in TRUTHY:
                 data = None
+            if data and self.only_facets():  # cached as anyone sees them, so as this requester sees them
+                return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
 
         if not data:
             search_string = query_params.get('type', None)
@@ -249,12 +247,12 @@ class ListWithHeadersMixin(ListModelMixin):
                 return self.get_csv(request)
 
             if self.only_facets():
-                data = {'facets': {'fields': self.get_facets()}}
+                data = {'facets': {'fields': self.get_facets(for_requester=False)}}  # the same for everyone
                 if cache_key_body is not None:
                     timeout = 60 * 60 * 24  # 1 day
                     cache.set(cache_key_body, data, timeout=timeout)
                     cache.set(cache_key_headers, headers, timeout=timeout)
-                return Response(data)
+                return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
             if self.only_search_stats() and search_term:
                 return Response(
                     self.get_search_stats(
