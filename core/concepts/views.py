@@ -423,7 +423,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptHierarchyMixin, ConceptBaseView, R
         return instance
 
     def get_permissions(self):
-        if self.request.method in ['GET']:
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewParentDictionary(), ]
 
         # async/db hard deletes are power operations reserved for repo admins (the dictionary's

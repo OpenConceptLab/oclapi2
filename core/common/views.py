@@ -64,6 +64,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
     _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
+    # a fuzzy search's targets, which only the concept list sets: without them it keeps to the URL's scope
+    _source_versions = None
+    _extra_filters = None
     # the facets that keep a search of concepts or mappings to collection members (get_viewable_collection_urls)
     collection_facets = ('collection', 'collection_url', 'collection_owner_url')
     max_viewable_collection_urls = 1000

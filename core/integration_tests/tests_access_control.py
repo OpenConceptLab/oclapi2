@@ -1404,6 +1404,22 @@ class CollectionReferenceAccessTest(AccessTestMixin, OCLAPITestCase):
             url = self.get_url(self.outsider_collection) + suffix
             self.assertEqual(self.request('get', url, self.outsider).status_code, 404, url)
 
+    def test_reference_with_an_invalid_id_answers_404(self):
+        reference_id = str(self.reference.id)
+        full_width = ''.join(chr(ord(digit) + 0xFEE0) for digit in reference_id)
+        versioned_url = self.collection.uri + 'HEAD/references/'
+        urls = [
+            *(f'{versioned_url}{spelling}/' for spelling in [
+                'abc', '9' * 30, '9' * 5000, f'+{reference_id}', f'0_{reference_id}', full_width]),
+            *(f'{self.collection.uri}references/{digits}/' for digits in ['9' * 30, '9' * 5000]),
+        ]
+
+        for url in urls:
+            for method in ('get', 'head', 'delete'):
+                self.assertEqual(self.request(method, url, self.member).status_code, 404, (method, url))
+        self.assertTrue(self.reference_exists())
+        self.assertEqual(self.request('get', f'{versioned_url}{reference_id}/', self.member).status_code, 200)
+
     def test_private_collection_references_are_visible_to_members_only(self):
         private = OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
         url = private.uri + 'HEAD/references/'
@@ -1638,6 +1654,42 @@ class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', url, self.outsider).status_code, 403, url)
             self.assertEqual(self.request('get', url).status_code, 401, url)
             self.assertEqual(self.request('get', url, self.member).status_code, 200, url)
+
+
+class DetailHeadAccessTest(AccessTestMixin, OCLAPITestCase):
+    """HEAD on a detail answers as its GET does, where GET is open and where it's refused."""
+    def setUp(self):
+        super().setUp()
+        self.urls = {}
+        for access in [ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE]:
+            source = OrganizationSourceFactory(organization=self.org, public_access=access)
+            concept = ConceptFactory(parent=source, public_access=access)
+            mapping = MappingFactory(
+                parent=source, from_concept=concept, to_concept=ConceptFactory(parent=source, public_access=access),
+                public_access=access)
+            source_version = OrganizationSourceFactory(
+                organization=self.org, mnemonic=source.mnemonic, version='v1', public_access=access)
+            collection = OrganizationCollectionFactory(organization=self.org, public_access=access)
+            collection_version = OrganizationCollectionFactory(
+                organization=self.org, mnemonic=collection.mnemonic, version='v1', public_access=access)
+            self.urls[access] = [
+                concept.uri, mapping.uri, source_version.uri, collection_version.uri,
+                collection_version.uri + 'expansions/']
+
+    def assert_head_answers_as_get(self, url, user, status_code):
+        for method in ('get', 'head'):
+            self.assertEqual(self.request(method, url, user).status_code, status_code, (method, url, user))
+
+    def test_head_on_a_public_detail_answers_as_get(self):
+        for url in self.urls[ACCESS_TYPE_VIEW]:
+            for user in [None, self.outsider, self.member]:
+                self.assert_head_answers_as_get(url, user, 200)
+
+    def test_head_on_a_private_detail_is_refused_as_get_is(self):
+        for url in self.urls[ACCESS_TYPE_NONE]:
+            self.assert_head_answers_as_get(url, None, 401)
+            self.assert_head_answers_as_get(url, self.outsider, 403)
+            self.assert_head_answers_as_get(url, self.member, 200)
 
 
 class SourceVersionReadAccessMixin(AccessTestMixin):
