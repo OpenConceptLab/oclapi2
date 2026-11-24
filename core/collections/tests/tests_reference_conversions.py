@@ -118,8 +118,8 @@ class ReferenceConversionsTest(OCLAPITestCase):
         item = response.data['results'][0]
         self.assertEqual(item['repo_versioned']['members'], [])
         self.assertFalse(item['repo_versioned']['keeps_members'])
-        # what's brought in is judged as the editor: nothing from a source they can't view
-        self.assertEqual((item['unversioned']['members'], item['unversioned']['added']), ([], []))
+        # judged as the editor: an unversioned target they can't view isn't offered
+        self.assertIsNone(item['unversioned'])
 
     def test_repo_versioned_conversion_prefers_a_version_the_expansion_records(self):
         self.old.sources.add(self.v2)
@@ -142,6 +142,68 @@ class ReferenceConversionsTest(OCLAPITestCase):
 
         self.assertEqual(item['repo_versioned']['repo_version'], self.v1.uri)
         self.assertEqual(item['repo_versioned']['chosen_by'], 'release')
+
+    def test_a_release_whose_head_is_private_is_not_a_candidate(self):
+        self.head().expansion.explicit_source_versions.clear()
+        type(self.source).objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
+
+        item = self.preview([self.reference.id])['results'][0]
+
+        # v1 and v2 are public, but not publicly viewable once their HEAD is private
+        self.assertIsNone(item['repo_versioned'])
+
+    def legacy_reference(self, **kwargs):
+        """A resource-versioned reference saved before system was filled in, as production still has"""
+        return CollectionReference.objects.create(
+            expression='/orgs/CIEL/sources/CIEL/concepts/1065/5512158/', collection=self.collection, code='1065',
+            resource_version='5512158', reference_type='concepts', **kwargs)
+
+    def test_a_reference_with_no_system_is_reported_and_the_others_go_ahead(self):
+        legacy = self.legacy_reference()
+
+        data = self.preview('*')
+        results = {item['id']: item for item in data['results']}
+        self.assertEqual(
+            (results[legacy.id]['supported'], results[legacy.id]['reason']), (False, 'it has no system'))
+        self.assertTrue(results[self.reference.id]['supported'])
+
+        statuses = {result['id']: (result['status'], result.get('reason')) for result in self.convert(
+            {'all': 'repo_versioned'})}
+        self.assertEqual(statuses, {
+            legacy.id: ('not_converted', 'it has no system'), self.reference.id: ('converted', None)})
+
+    def test_an_exclusion_is_not_supported_yet(self):
+        exclusion = CollectionReference.objects.create(
+            expression=self.old.uri, collection=self.collection, system=self.source.uri, code='c1',
+            resource_version=self.old.version, reference_type='concepts', include=False)
+
+        item = self.preview([exclusion.id])['results'][0]
+
+        self.assertEqual((item['supported'], item['reason'], item['exclude']), (False, 'it is an exclusion', True))
+
+    def test_a_conversion_the_collection_has_with_another_cascade_is_not_made(self):
+        self.collection.remove_references(self.collection.references.all())
+        added, _ = self.collection.add_expressions(
+            {'expressions': [self.old.uri]}, self.admin, cascade='sourcemappings')
+        cascading = next(reference for reference in added if reference.cascade)
+        self.add(f'{self.source.uri}concepts/c1/')
+
+        results = self.convert({'conversions': [{'id': cascading.id, 'to': 'unversioned'}]})
+
+        self.assertEqual(
+            (results[0]['status'], results[0]['reason']),
+            ('not_converted', 'the collection already has it with another cascade'))
+        self.assertTrue(self.head().references.filter(id=cascading.id).exists())
+
+    def test_a_conversion_checks_the_version_the_preview_showed(self):
+        changed = self.convert(
+            {'conversions': [{'id': self.reference.id, 'to': 'repo_versioned', 'repo_version': self.v2.uri}]})
+        self.assertEqual((changed[0]['status'], changed[0]['reason']), ('not_converted', 'changed since the preview'))
+        self.assertTrue(self.head().references.filter(id=self.reference.id).exists())
+
+        same = self.convert(
+            {'conversions': [{'id': self.reference.id, 'to': 'repo_versioned', 'repo_version': self.v1.uri}]})
+        self.assertEqual(same[0]['status'], 'converted')
 
     def test_a_reference_that_is_not_resource_versioned_is_not_supported(self):
         plain = self.add(f'{self.source.uri}concepts/c1/')

@@ -789,7 +789,8 @@ class CollectionReferenceConversionsView(CollectionReferenceConversionsBaseView,
         properties={
             'conversions': openapi.Schema(
                 type=openapi.TYPE_ARRAY, items=openapi.Items(type=openapi.TYPE_OBJECT),
-                description=f'[{{"id": reference id, "to": one of {", ".join(CONVERSIONS)}}}]'),
+                description=f'[{{"id": reference id, "to": one of {", ".join(CONVERSIONS)}, "repo_version": optional, '
+                            'the version the preview showed; a conversion that now resolves elsewhere isn\'t made}]'),
             'all': openapi.Schema(
                 type=openapi.TYPE_STRING, description='Instead of conversions: convert every resource-versioned '
                                                       f'reference to this, one of {", ".join(CONVERSIONS)}'),
@@ -823,10 +824,15 @@ class CollectionReferenceConversionsView(CollectionReferenceConversionsBaseView,
         if not isinstance(conversions, list) or not conversions:
             return None
         if not all(
-                isinstance(item, dict) and isinstance(item.get('id'), int) and item.get('to') in CONVERSIONS
+                isinstance(item, dict) and isinstance(item.get('id'), int) and item.get('to') in CONVERSIONS and
+                isinstance(item.get('repo_version') or '', str)
                 for item in conversions):
             return None
-        return [{'id': item['id'], 'to': item['to']} for item in conversions]
+        # repo_version, optional: the version the preview showed, so a change since then is refused
+        return [
+            {'id': item['id'], 'to': item['to'], **({'repo_version': item['repo_version']} if item.get(
+                'repo_version') else {})}
+            for item in conversions]
 
 
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin, CollectionReferencesMixin):

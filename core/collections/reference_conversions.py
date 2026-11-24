@@ -28,6 +28,7 @@ class ReferenceConversions:
         self.namespace = Expansion.get_system_version_namespace(collection.parent_url)
         self._holders = {}
         self._resolved = {}
+        self._visible = {}
 
     @staticmethod
     def get_candidates(collection):
@@ -38,7 +39,9 @@ class ReferenceConversions:
         reference.collection = self.collection
         if not reference.namespace:
             reference.__dict__['resolution_namespace'] = self.namespace
-        system_version = self.resolve(reference.system, reference.resolution_namespace, reference.version)
+        # a legacy reference with no system resolves to nothing, as resolve_expression_system_version does
+        system_version = self.resolve(
+            reference.system, reference.resolution_namespace, reference.version) if reference.system else None
         reference.__dict__['resolve_expression_system_version'] = system_version
         return reference
 
@@ -52,12 +55,17 @@ class ReferenceConversions:
 
     @staticmethod
     def get_unsupported_reason(reference):
+        if reference.code and reference.resource_version and not reference.system:
+            return 'it has no system'
         if not reference.is_resource_versioned:
             return 'not resource-versioned'
         if reference.valueset:
             return 'it also names a value set'
         if reference.filter:
             return 'it has a filter'
+        # unpinned, an exclusion removes every version of the concept, which the preview can't judge yet
+        if not reference.include:
+            return 'it is an exclusion'
         return None
 
     @staticmethod
@@ -113,13 +121,15 @@ class ReferenceConversions:
         return picked, self.get_chosen_by(picked, evaluated) if picked else None
 
     def is_visible(self, repo_version):
-        """Whether the collection's owner can view it: a public version or the owner's own"""
-        from core.common.models import BaseModel
-        if repo_version.public_access in BaseModel.PUBLIC_ACCESS_VALUES:
-            return True
-        if self.collection.organization_id:
-            return repo_version.organization_id == self.collection.organization_id
-        return repo_version.user_id == self.collection.user_id
+        """Whether the collection's owner can view it: a publicly viewable version (its HEAD public too) or the
+        owner's own. Once per version, as is_publicly_viewable reads the HEAD"""
+        if repo_version.id not in self._visible:
+            if self.collection.organization_id:
+                owned = repo_version.organization_id == self.collection.organization_id
+            else:
+                owned = repo_version.user_id == self.collection.user_id
+            self._visible[repo_version.id] = owned or repo_version.is_publicly_viewable
+        return self._visible[repo_version.id]
 
     @staticmethod
     def get_chosen_by(version, locked):
@@ -161,7 +171,8 @@ class ReferenceConversions:
         converted = self.build(reference)
         # as adding it resolves: under the collection's lock, else the latest release
         target = converted.resolve_system_version
-        if not target:
+        # default resolution doesn't check access: a version the requester can't view can't be offered
+        if not target or not target.has_view_access(self.user):
             return None
         return converted, target, self.get_chosen_by(target, self.get_recorded_versions(target)[1])
 
@@ -256,20 +267,36 @@ class ReferenceConversions:
             conversion = None if reason else self.get_conversion(reference, item['to'], all_references)
             if not reason and not conversion:
                 reason = 'no version holds its resource version' if item['to'] == REPO_VERSIONED else \
-                    'its system does not resolve'
+                    'its system does not resolve to a version you can view'
+            if not reason and item.get('repo_version') and item['repo_version'] != conversion[1].uri:  # pylint: disable=unsubscriptable-object
+                # the preview showed another version: a release was published, or a lock changed, since
+                reason = 'changed since the preview'
+            converted = None if reason else conversion[0]  # pylint: disable=unsubscriptable-object
+            status = None if reason else self.get_presence(converted, ids, new_references)
+            if status == 'different_cascade':
+                reason = 'the collection already has it with another cascade'
             if reason:
                 results.append({**result, 'status': 'not_converted', 'reason': reason})
                 continue
-            converted = conversion[0]  # pylint: disable=unsubscriptable-object
             old_ids.append(reference.id)
             result['expression'] = converted.expression
-            if converted.expression in new_references or self.collection.references.filter(
-                    expression=converted.expression, include=converted.include).exclude(id__in=ids).exists():
+            if status == 'already_present':
                 result['status'] = 'already_present'
             else:
-                new_references[converted.expression] = converted
+                new_references[(converted.expression, converted.include)] = converted
             results.append(result)
         return results, old_ids, new_references
+
+    def get_presence(self, converted, ids, new_references):
+        """'already_present' when the collection, or this batch, already has the converted reference with the same
+        cascade; 'different_cascade' when it has the expression with another one, which adding would refuse"""
+        same = new_references.get((converted.expression, converted.include))
+        cascades = [same.cascade] if same else list(self.collection.references.filter(
+            expression=converted.expression, include=converted.include).exclude(id__in=ids).values_list(
+                'cascade', flat=True))
+        if not cascades:
+            return None
+        return 'already_present' if converted.cascade in cascades else 'different_cascade'
 
     def convert(self, conversions, user):
         """Swaps each reference for its conversion, all in one transaction: the old ones and their members go, then

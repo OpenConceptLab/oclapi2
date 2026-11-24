@@ -222,6 +222,8 @@ def convert_references(self, user_id, collection_id, conversions):
     refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
     if refusal is not None:  # writable when queued, the collection may be read-only by now
         return {'refusal': refusal}
+    if not collection.has_edit_access(user):  # an editor when queued may not be one by now
+        return {'error': 'You no longer have edit access to this collection'}
     collection.add_processing(self.request.id)
     try:
         return {'results': ReferenceConversions(collection, user).convert(conversions, user)}
