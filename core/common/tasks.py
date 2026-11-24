@@ -515,15 +515,16 @@ def compute_expansion_health(expansion_id):
 
 @app.task(ignore_result=True)
 def recheck_expansion_health(limit=None):
-    """Nightly: recomputes, a batch at a time, the default expansions whose health isn't current and has no run
-    queued. A release, retire or delete leaves them so, and a frozen release never gets another change"""
+    """Nightly: recomputes, a batch at a time, the default expansions whose health isn't current. A release, retire
+    or delete leaves them so, and a frozen release never gets another change. One with a run queued (False) is taken
+    too, in case that run never came: a duplicate is harmless, as a store checks the revision"""
     from django.db.models import F
     from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT
     from core.collections.models import Expansion
     if not Expansion.is_health_on():
         return 0
-    expansion_ids = list(Expansion.objects.filter(
-        health_is_current__isnull=True, is_processing=False, is_active=True, collection_version__is_active=True,
+    expansion_ids = list(Expansion.objects.exclude(health_is_current=True).filter(
+        is_processing=False, is_active=True, collection_version__is_active=True,
         collection_version__expansion_uri=F('uri')
     ).order_by('id').values_list('id', flat=True)[:limit or EXPANSION_HEALTH_RECHECK_LIMIT])
     for expansion_id in expansion_ids:
