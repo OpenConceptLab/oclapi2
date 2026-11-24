@@ -1143,7 +1143,7 @@ def count_uncounted_resources():
 
     to_count = [
         (model, field, list(Source.objects.filter(
-            id__in=model.objects.filter(_counted__isnull=True).values('parent_id'))))
+            id__in=model.objects.filter(_counted__isnull=True).values('parent_id')).only('id')))
         for model, field in ((Concept, 'active_concepts'), (Mapping, 'active_mappings'))
     ]
     for model, field, sources in to_count:
