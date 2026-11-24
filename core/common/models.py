@@ -1374,12 +1374,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
                 def enqueue_seed_task():
                     """Queue snapshot seeding only after its repository version is committed."""
-                    seed_children_to_new_version.apply_async(
+                    obj.send_processing_task(task, lambda: seed_children_to_new_version.apply_async(
                         task_args,
                         task_id=task.id,
                         queue='default',
                         persist_args=True
-                    )
+                    ))
 
                 transaction.on_commit(enqueue_seed_task)
 
@@ -1579,6 +1579,17 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if self._background_process_ids is None:
                 self._background_process_ids = []
             self._background_process_ids.append(process_id)
+
+    def send_processing_task(self, task, send):
+        """Calls `send` to queue `task`, which marks this row processing. If it can't be queued, the mark goes and the
+        task is failed, so the row isn't left processing, and the error is raised."""
+        try:
+            send()
+        except Exception as ex:
+            from core.tasks.models import Task
+            self.remove_processing(task.id)
+            Task.on_failure(ex, task.id, None, None, None)
+            raise
 
     def remove_processing(self, process_id):
         if self.id:
@@ -2102,27 +2113,36 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return RepoExternalExport.upsert(self, key, file, user, description)
 
 
+def on_commit_reaching_write(instance, send):
+    """
+    Calls `send` once the transaction commits, at once under autocommit, where its error reaches the write. In a
+    transaction it's robust, so later callbacks (a version's seed task) still run. In persist_changes' own transaction,
+    the error is kept on the instance for persist_changes to raise once committed, as the write's.
+    """
+    reaches_write = getattr(instance, '_index_enqueue_reaches_write', False)
+
+    def call():
+        try:
+            send()
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            if not reaches_write:
+                raise
+            if not getattr(instance, '_index_enqueue_error', None):
+                instance._index_enqueue_error = ex  # pylint: disable=protected-access
+
+    connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
+    connection.on_commit(call, robust=connection.in_atomic_block)
+
+
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                # once committed. Robust in a transaction, so later callbacks (a version's seed task) still run; under
-                # autocommit the error reaches the write, and persist_changes raises a REST edit's error itself
-                args = (instance.app_name, instance.model_name, instance.id)
-                reaches_write = getattr(instance, '_index_enqueue_reaches_write', False)
-
-                def enqueue():
-                    try:
-                        handle_save.apply_async(args, queue='indexing', permanent=False)
-                    except Exception as ex:  # pylint: disable=broad-exception-caught
-                        if not reaches_write:
-                            raise
-                        instance._index_enqueue_error = ex  # pylint: disable=protected-access
-
-                connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
-                connection.on_commit(enqueue, robust=connection.in_atomic_block)
+                args = (instance.app_name, instance.model_name, instance.id)  # once committed: the row as saved
+                on_commit_reaching_write(
+                    instance, lambda: handle_save.apply_async(args, queue='indexing', permanent=False))
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:

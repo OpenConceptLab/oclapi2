@@ -16,7 +16,7 @@ from pydash import get, compact
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
-from core.common.models import ConceptContainerModel
+from core.common.models import ConceptContainerModel, on_commit_reaching_write
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, update_active_count
 from core.common.utils import split_canonical, to_camel_case, chunks
@@ -829,8 +829,10 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             return None
         task = Task.new(queue='indexing', user=user or self.updated_by, name=index_source_public_access.__name__)
         self.add_processing(task.id)
-        transaction.on_commit(lambda: index_source_public_access.apply_async(
-            (self.id, ), queue='indexing', persist_args=True, task_id=task.id))
+        # robust in a transaction, so the release's mapped-codes rebuild queued after it still goes
+        def send():
+            index_source_public_access.apply_async((self.id, ), queue='indexing', persist_args=True, task_id=task.id)
+        on_commit_reaching_write(self, lambda: self.send_processing_task(task, send))
         return task
 
     def flag_write_is_current(self, partial_doc=None, exclude_members_of=None):
