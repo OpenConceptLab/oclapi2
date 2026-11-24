@@ -1,14 +1,16 @@
 from django.db import connection
+from django.db.models import F
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from mock import patch, Mock
 
 from core.collections.health import (
-    ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, RESOURCE_VERSIONED, INTERIM, MISMATCH, AMBIGUOUS,
+    ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.common.tasks import seed_children_to_new_version
+from core.common.tasks import seed_children_to_new_version, recheck_expansion_health
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
@@ -95,10 +97,27 @@ class ExpansionHealthTest(OCLTestCase):
         self.release('v1', version)
         self.reference(concept, version, resource_version=version.version)
 
-        self.assertEqual(self.classify(), {version.id: RESOURCE_VERSIONED})
+        # judged by the versions of its repository that hold it, as any member is
+        self.assertEqual(self.classify(), {version.id: RELEASE})
         health = self.health()
         self.assertEqual(health['state'], UNHEALTHY)
         self.assertEqual(self.reason_codes(health), {'resource_versioned_references': 1})
+
+    def test_a_pinned_version_no_release_or_head_holds_is_interim(self):
+        concept, old, _ = self.concept_with_replaced_version()
+        self.reference(concept, old, resource_version=old.version)
+
+        self.assertEqual(self.classify(), {old.id: INTERIM})
+        self.assertEqual(
+            self.reason_codes(self.health()), {'resource_versioned_references': 1, 'interim_resource_versions': 1})
+
+    def test_a_head_carrying_the_legacy_released_flag_is_not_a_release(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        Source.objects.filter(id=self.source.id).update(released=True)
+        self.reference(concept, version)
+
+        self.assertEqual(self.classify(), {version.id: HEAD_MEMBER})
 
     def test_interim_resource_version_no_release_or_head_holds(self):
         concept, old, new = self.concept_with_replaced_version()
@@ -194,6 +213,60 @@ class ExpansionHealthTest(OCLTestCase):
         other_expansion.concepts.remove(version)
         self.assertEqual(self.classify(), {version.id: MISMATCH})
 
+    def value_set_release(self, value_set, version, *members):
+        release = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version=version, released=True)
+        expansion = ExpansionFactory(collection_version=release, mnemonic=f'e-{version}')
+        release.expansion_uri = expansion.uri
+        release.save()
+        expansion.concepts.add(*members)
+        return release
+
+    def value_set_reference(self, valueset, *members, include=True):
+        reference = CollectionReference(
+            expression=valueset, collection=self.collection, valueset=[valueset], include=include)
+        reference.save()
+        reference.concepts.add(*members)
+        if include:
+            self.expansion.concepts.add(*members)
+        return reference
+
+    def test_a_retired_named_value_set_version_stays_what_the_reference_resolved_to(self):
+        version = ConceptFactory(parent=self.source).get_latest_version()
+        value_set = OrganizationCollectionFactory(organization=self.source.organization)
+        release = self.value_set_release(value_set, 'v1', version)
+        self.expansion.explicit_collection_versions.add(release)
+        self.value_set_reference(release.uri, version)
+
+        self.assertEqual(self.classify(), {version.id: RELEASE})
+        type(release).objects.filter(id=release.id).update(retired=True)
+        self.expansion = Expansion.objects.get(id=self.expansion.id)
+        self.assertEqual(self.classify(), {version.id: RELEASE})
+
+    def test_two_named_value_set_versions_are_not_inconsistent(self):
+        first, second = (ConceptFactory(parent=self.source).get_latest_version() for _ in range(2))
+        value_set = OrganizationCollectionFactory(organization=self.source.organization)
+        v1, v2 = self.value_set_release(value_set, 'v1', first), self.value_set_release(value_set, 'v2', second)
+        self.expansion.explicit_collection_versions.add(v1, v2)
+        self.value_set_reference(v1.uri, first)
+        self.value_set_reference(v2.uri, second)
+
+        health = self.health()
+        self.assertNotIn('inconsistent_resolution', self.reason_codes(health))
+        self.assertEqual(health['multiple_named_versions'], [value_set.uri])
+
+    def test_an_exclude_against_a_value_set_with_no_expansion_is_counted(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        self.reference(concept, version)
+        value_set = OrganizationCollectionFactory(organization=self.source.organization)
+        unexpanded = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v1', released=True)
+        self.value_set_reference(unexpanded.uri, include=False)
+
+        self.assertEqual(self.reason_codes(self.health()), {'value_set_without_expansion': 1})
+
     def test_repository_recorded_at_two_versions_by_unversioned_references_is_a_duplicate(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()
@@ -228,7 +301,10 @@ class ExpansionHealthTest(OCLTestCase):
         self.reference(concept, version, version='draft')
 
         self.assertEqual(self.classify(), {version.id: UNRELEASED})
-        self.assertEqual(self.health()['state'], HEALTHY)
+        # references can't resolve to an unreleased version yet, so its owner needs to see it
+        health = self.health()
+        self.assertEqual(health['state'], UNHEALTHY)
+        self.assertEqual(self.reason_codes(health), {'unreleased_versions': 1})
 
     def mapping_reference(self, mapping, *members):
         reference = CollectionReference(
@@ -320,7 +396,11 @@ class ExpansionHealthTest(OCLTestCase):
 
         self.assertEqual(self.classify(), {old.id: INTERIM})
 
+        # a public release under a private HEAD is still private
         Source.objects.filter(id=hidden.id).update(public_access=ACCESS_TYPE_VIEW)
+        self.assertEqual(self.classify(), {old.id: INTERIM})
+
+        Source.objects.filter(id=other.id).update(public_access=ACCESS_TYPE_VIEW)
         self.assertEqual(self.classify(), {old.id: MISMATCH})
 
     def test_value_set_without_a_default_expansion_is_a_reason_and_judges_nothing(self):
@@ -394,8 +474,21 @@ class ExpansionHealthTest(OCLTestCase):
         self.reference(first, first.get_latest_version())
         self.reference(second, second.get_latest_version())
 
-        classes = ExpansionHealth(self.expansion).classify('concepts', [first.get_latest_version().id])
+        first_reference = self.collection.references.get(code=first.mnemonic)
+        health = ExpansionHealth(self.expansion)
+        classes = health.classify('concepts', [first.get_latest_version().id])
         self.assertEqual(list(classes), [first.get_latest_version().id])
+        # only the references the page's members are attributed to are resolved
+        self.assertEqual(list(health._resolved), [first_reference.id])  # pylint: disable=protected-access
+
+    def test_an_empty_page_is_classified_without_any_work(self):
+        concept = ConceptFactory(parent=self.source)
+        self.reference(concept, concept.get_latest_version())
+        health = ExpansionHealth(self.expansion)
+
+        with CaptureQueriesContext(connection) as context:
+            self.assertEqual(health.classify('concepts', []), {})
+        self.assertEqual(len(context.captured_queries), 0)
 
     def test_release_or_head_check_runs_only_for_members_their_versions_dont_hold(self):
         concept = ConceptFactory(parent=self.source)
@@ -489,21 +582,55 @@ class ExpansionHealthStorageTest(OCLTestCase):
         compute.assert_not_called()
         self.assertFalse(self.stored()[1])
 
-    def test_toggle_off_writes_no_health(self):
-        with patch.object(Expansion, 'is_health_on', return_value=False):
-            expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+    def test_toggle_off_marks_the_change_and_computes_nothing(self):
+        before = self.stored()[0]
+        with patch.object(Expansion, 'is_health_on', return_value=False), \
+                patch.object(ExpansionHealth, 'compute') as compute:
             self.add(ConceptFactory())
 
-        self.assertEqual(
-            Expansion.objects.values_list('health', 'health_is_current').get(id=expansion.id), (None, None))
+        # marked not current, so the backfill finds it once health is on again; the stored summary is untouched
+        self.assertEqual(self.stored(), (before, None))
+        compute.assert_not_called()
+
+    def test_health_is_kept_for_the_default_expansion_only(self):
+        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+
+        self.assertIsNone(other.update_health())
+        self.assertEqual(Expansion.objects.values_list('health', 'health_is_current').get(id=other.id), (None, None))
+        self.assertTrue(self.stored()[1])
+
+    def test_a_change_while_it_computes_is_not_stored_as_current(self):
+        computed = []
+
+        def compute(_health):
+            if not computed:  # the first run is overtaken by a change
+                Expansion.objects.filter(id=self.expansion.id).update(health_revision=F('health_revision') + 1)
+            computed.append(1)
+            return {'state': HEALTHY, 'run': len(computed)}
+
+        with patch.object(ExpansionHealth, 'compute', autospec=True, side_effect=compute):
+            Expansion.objects.get(id=self.expansion.id).update_health()
+
+        # the overtaken run stored nothing; the run it queued read the change and is current
+        self.assertEqual(self.stored(), ({'state': HEALTHY, 'run': 2}, True))
+
+    def test_a_failure_to_queue_leaves_health_not_current_so_the_next_change_queues(self):
+        with override_settings(TEST_MODE=False), \
+                patch('core.collections.models.compute_expansion_health.apply_async', side_effect=OSError('down')), \
+                self.captureOnCommitCallbacks(execute=True):
+            Expansion.objects.get(id=self.expansion.id).mark_health_out_of_date()
+
+        self.assertIsNone(self.stored()[1])
 
     def test_a_failure_leaves_health_out_of_date_and_the_build_done(self):
+        before = self.stored()[0]
         with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
-            expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+            self.expansion.seed_children(index=False)
+            self.expansion.update_health()
 
-        expansion.refresh_from_db()
+        expansion = Expansion.objects.get(id=self.expansion.id)
         self.assertFalse(expansion.is_processing)
-        self.assertEqual((expansion.health, expansion.health_is_current), (None, None))
+        self.assertEqual((expansion.health, expansion.health_is_current), (before, None))
 
     def test_a_change_after_a_failure_recomputes(self):
         with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
@@ -522,7 +649,12 @@ class ExpansionHealthStorageTest(OCLTestCase):
             mnemonic=source.mnemonic, organization=source.organization, version='v1', is_latest_version=False,
             **kwargs)
         self.expansion.evaluated_source_versions.add(source)
-        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        # the default expansion of a collection that records nothing of the source
+        other_collection = OrganizationCollectionFactory()
+        other = Expansion.persist(index=False, collection_version=other_collection, mnemonic='autoexpand-HEAD')
+        other_collection.expansion_uri = other.uri
+        other_collection.save()
+        other.update_health()
         return version, other
 
     def test_releasing_a_version_of_a_recorded_repository_leaves_health_not_current(self):
@@ -542,6 +674,14 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
         self.assertIsNone(self.stored()[1])
 
+    def test_making_a_recorded_repository_private_leaves_health_not_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        version.public_access = ACCESS_TYPE_NONE
+        version.save()
+
+        self.assertIsNone(self.stored()[1])
+
     def test_a_save_that_changes_no_health_field_keeps_health_current(self):
         version, _ = self.recorded_source_version(released=True)
 
@@ -557,6 +697,65 @@ class ExpansionHealthStorageTest(OCLTestCase):
         version.delete()
 
         self.assertIsNone(self.stored()[1])
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_a_recompute_that_ran_before_a_delete_committed_is_not_left_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            version.delete()
+            # a recompute stores its result before the delete commits
+            Expansion.objects.filter(id=self.expansion.id).update(health_is_current=True)
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_a_change_to_a_value_set_leaves_expansions_judged_against_it_not_current(self):
+        value_set = OrganizationCollectionFactory()
+        value_set_expansion = Expansion.persist(index=False, collection_version=value_set, mnemonic='autoexpand-HEAD')
+        value_set.expansion_uri = value_set_expansion.uri
+        value_set.save()
+        self.expansion.evaluated_collection_versions.add(value_set)
+        self.assertTrue(self.stored()[1])
+
+        value_set.add_expressions({'expressions': [ConceptFactory().uri]}, value_set.created_by)
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_editing_a_member_in_head_recomputes_the_expansions_holding_it(self):
+        concept = ConceptFactory()
+        self.add(concept)
+        self.assertEqual(self.stored()[0]['state'], HEAD_RESOLVED)
+        member = concept.get_latest_version()
+
+        # the edit takes the old version out of HEAD, so the member it was is now interim
+        member.unmark_latest_version()
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual(health['members']['concepts'][INTERIM], 1)
+
+    def test_a_hard_deleted_member_leaves_the_expansions_holding_it_not_current(self):
+        concept = ConceptFactory()
+        self.add(concept)
+        self.assertTrue(self.stored()[1])
+
+        concept.delete()
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_the_nightly_recheck_recomputes_default_expansions_that_are_not_current(self):
+        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id__in=[self.expansion.id, other.id]).update(health=None, health_is_current=None)
+
+        self.assertEqual(recheck_expansion_health(), 1)
+
+        self.assertTrue(self.stored()[1])
+        self.assertEqual(Expansion.objects.values_list('health_is_current', flat=True).get(id=other.id), None)
+
+    def test_the_nightly_recheck_leaves_queued_ones_to_their_run(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health_is_current=False)
+
+        self.assertEqual(recheck_expansion_health(), 0)
 
     def test_a_save_from_an_older_copy_keeps_the_health(self):
         older = Expansion.objects.get(id=self.expansion.id)

@@ -21,6 +21,11 @@ class UsageRefused(APIException):
         self.no_access = no_access
 
 
+class WriteRefused(UsageRefused):
+    """A capability policy refused a write to content it keeps read-only. `detail` is the body the policy returned."""
+    default_code = 'write_refused'
+
+
 class CapabilityExceeded(UsageRefused):
     """The refusal by limit: no limit or a blocked one, or not enough left."""
 

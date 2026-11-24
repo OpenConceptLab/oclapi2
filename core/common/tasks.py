@@ -1,5 +1,6 @@
 import json
 import time
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -15,7 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DatabaseError
+from django.db import DEFAULT_DB_ALIAS, connection, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -179,10 +180,15 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
 ):
     from core.users.models import UserProfile
     from core.collections.models import Collection
+    from core.capabilities.constants import WRITE_ACTION_EDIT
+    from core.capabilities.writes import get_write_refusal, get_write_target
     user = UserProfile.objects.get(id=user_id)
     collection = Collection.objects.filter(id=collection_id).first()
     if not collection:
         return [], {'error': 'Collection not found'}, []
+    refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
+    if refusal is not None:  # writable when queued, the collection may be read-only by now: the body, as a 4th item
+        return [], {}, [], refusal
     head = collection.get_head()
     head.add_processing(self.request.id)
 
@@ -438,8 +444,11 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
             if not seed_from_head:
                 instance.seed_references()
             if is_source:
-                instance.seed_concepts(index=False)
-                instance.seed_mappings(index=False)
+                # Together, so a doc rebuilt meanwhile never sees the release hold a concept without its mappings: it
+                # would get an entry with no codes for the release, which the append below keeps (MappedCodes)
+                with transaction.atomic():
+                    instance.seed_concepts(index=False)
+                    instance.seed_mappings(index=False)
                 instance.update_children_counts(sync)
                 # Recorded before released is read below, so a release request is read there, indexes the release
                 # itself on seeing this stage (persist_changes), or both. Both only repeats the same writes.
@@ -502,6 +511,24 @@ def compute_expansion_health(expansion_id):
     expansion = Expansion.objects.filter(id=expansion_id).first()
     if expansion:
         expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def recheck_expansion_health(limit=None):
+    """Nightly: recomputes, a batch at a time, the default expansions whose health isn't current and has no run
+    queued. A release, retire or delete leaves them so, and a frozen release never gets another change"""
+    from django.db.models import F
+    from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT
+    from core.collections.models import Expansion
+    if not Expansion.is_health_on():
+        return 0
+    expansion_ids = list(Expansion.objects.filter(
+        health_is_current__isnull=True, is_processing=False, is_active=True, collection_version__is_active=True,
+        collection_version__expansion_uri=F('uri')
+    ).order_by('id').values_list('id', flat=True)[:limit or EXPANSION_HEALTH_RECHECK_LIMIT])
+    for expansion_id in expansion_ids:
+        compute_expansion_health(expansion_id)
+    return len(expansion_ids)
 
 
 @app.task
@@ -999,48 +1026,50 @@ def index_source_public_access(self, source_id):
     source.remove_processing(task_id)
 
 
-@app.task(base=QueueOnceCustomTask)
+# A count task releases its QueueOnce lock as it starts, so a count queued while it runs is kept and reads what was
+# committed meanwhile (one queued before it starts is dropped, as that one reads it anyway). Counts of one repo version
+# and field then take turns on an advisory lock, so the last to run is the last to save.
+COUNT_TASK_ONCE = {'unlock_before_run': True}
+
+
+def update_active_count(model, instance_id, field):
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+                [f'{model.__name__}.{field}.{instance_id}']
+            )
+        instance = model.objects.filter(id=instance_id).first()
+        if instance:
+            before = getattr(instance, field)
+            getattr(instance, f'set_{field}')()
+            if before != getattr(instance, field):
+                # an update, not a save: search documents hold no counts, so there's nothing to index
+                model.objects.filter(id=instance_id).update(**{field: getattr(instance, field)})
+
+
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_concepts_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if source:
-        before_active_concepts = source.active_concepts
-        source.set_active_concepts()
-        if before_active_concepts != source.active_concepts:
-            source.save(update_fields=['active_concepts'])
+    update_active_count(Source, source_id, 'active_concepts')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_source_active_mappings_count(source_id):
     from core.sources.models import Source
-    source = Source.objects.filter(id=source_id).first()
-    if source:
-        before_active_mappings = source.active_mappings
-        source.set_active_mappings()
-        if before_active_mappings != source.active_mappings:
-            source.save(update_fields=['active_mappings'])
+    update_active_count(Source, source_id, 'active_mappings')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_concepts_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    if collection:
-        before_active_concepts = collection.active_concepts
-        collection.set_active_concepts()
-        if before_active_concepts != collection.active_concepts:
-            collection.save(update_fields=['active_concepts'])
+    update_active_count(Collection, collection_id, 'active_concepts')
 
 
-@app.task(base=QueueOnceCustomTask)
+@app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
 def update_collection_active_mappings_count(collection_id):
     from core.collections.models import Collection
-    collection = Collection.objects.filter(id=collection_id).first()
-    if collection:
-        before_active_mappings = collection.active_mappings
-        collection.set_active_mappings()
-        if before_active_mappings != collection.active_mappings:
-            collection.save(update_fields=['active_mappings'])
+    update_active_count(Collection, collection_id, 'active_mappings')
 
 
 @app.task
@@ -1091,31 +1120,77 @@ def vacuum_and_analyze_db():
     conn.set_isolation_level(old_isolation_level)
 
 
-@app.task(ignore_result=True)
+# Each finished parallel import asks for the post-import count job, and one copy runs at a time
+# (OpenConceptLab/ocl_online#635). As with the count tasks below, a copy releases its QueueOnce lock as it starts, so a
+# copy asked for while one runs is queued, and only one copy waits in the queue. A copy that starts while another runs
+# doesn't wait on a worker: it queues itself again, so the job holds at most one worker, and each import is followed by
+# a pass that starts after it ended. The queue lock expires after 10 minutes, so a copy lost after taking it (a failed
+# publish) blocks later requests no longer than that; an extra copy queued after a longer wait is harmless.
+POST_IMPORT_COUNTS_ONCE = {'unlock_before_run': True, 'graceful': True, 'timeout': 600}
+POST_IMPORT_COUNTS_LOCK = 'post_import_update_resource_counts'
+POST_IMPORT_COUNTS_REQUEUE_SECONDS = 60
+
+
+@contextmanager
+def try_job_lock(name):
+    """
+    Yields whether this process got the advisory lock `name`, which it holds until the block ends. The lock is taken
+    in a transaction on a connection of its own: pgbouncer's transaction pooling keeps a session lock on no one server
+    connection, and the open transaction pins it there. It's released when the connection closes, a dead worker's too.
+    """
+    from django.db import connections
+    lock_connection = connections.create_connection(DEFAULT_DB_ALIAS)
+    try:
+        lock_connection.set_autocommit(False)
+        with lock_connection.cursor() as cursor:
+            cursor.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))', [name])
+            yield cursor.fetchone()[0]
+    finally:
+        lock_connection.close()
+
+
+@app.task(base=QueueOnceCustomTask, once=POST_IMPORT_COUNTS_ONCE, ignore_result=True, reject_on_worker_lost=True)
 def post_import_update_resource_counts():
+    with try_job_lock(POST_IMPORT_COUNTS_LOCK) as acquired:
+        if acquired:
+            count_uncounted_resources()
+            return
+    # the copy that's counting may have read its sources before this copy's import ended
+    post_import_update_resource_counts.apply_async(queue='default', countdown=POST_IMPORT_COUNTS_REQUEUE_SECONDS)
+
+
+def count_uncounted_resources():
+    """
+    One pass of the post-import count job: recounts the concepts or mappings of each source with rows not yet counted,
+    and marks those rows counted. Both lists of sources are read as the pass starts.
+    """
     from core.sources.models import Source
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
 
-    uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
-    sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
-    for source in sources:
-        try:
-            source.update_concepts_count(sync=True)
-            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-        except DatabaseError as ex:  # source may have been deleted since the query
-            logger.warning('Skipping concepts count for source %s: %s', source.id, ex)
+    to_count = [
+        (model, field, list(Source.objects.filter(
+            id__in=model.objects.filter(_counted__isnull=True).values('parent_id')).only('id')))
+        for model, field in ((Concept, 'active_concepts'), (Mapping, 'active_mappings'))
+    ]
+    for model, field, sources in to_count:
+        for source in sources:
+            count_source_resources(source, model, field)
 
-    uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
-    sources = Source.objects.filter(
-        id__in=uncounted_mappings.values_list('parent_id', flat=True))
 
-    for source in sources:
-        try:
-            source.update_mappings_count(sync=True)
-            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
-        except DatabaseError as ex:  # source may have been deleted since the query
-            logger.warning('Skipping mappings count for source %s: %s', source.id, ex)
+def count_source_resources(source, model, field):
+    # The rows are marked, then counted with the count tasks' lock (update_active_count), so the total includes every
+    # marked row; a row added after the mark waits for the next pass. Marking and counting are separate steps, so no
+    # row lock is held while another is awaited: one transaction would deadlock with hard deletes (source, then rows)
+    # or organization deletes (rows, then source). If the count fails, a row is set uncounted again for the next pass.
+    try:
+        model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
+        update_active_count(source.__class__, source.id, field)
+    except Exception as ex:  # pylint: disable=broad-except
+        logger.warning('Skipping %s count for source %s: %s', field, source.id, ex)
+        with suppress(Exception):
+            one_row = model.objects.filter(parent_id=source.id).values('id')[:1]
+            model.objects.filter(id__in=one_row).update(_counted=None)
 
 
 @app.task(ignore_result=True)

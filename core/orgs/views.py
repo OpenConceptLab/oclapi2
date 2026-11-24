@@ -4,6 +4,7 @@ from django.http import Http404
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import mixins, status, generics
+from rest_framework.exceptions import MethodNotAllowed
 from rest_framework.generics import RetrieveAPIView, DestroyAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
 from rest_framework.response import Response
@@ -300,10 +301,19 @@ class OrganizationMemberView(generics.GenericAPIView):
 
 class OrganizationResourceAbstractListView:
     """
-    Resources owned by the orgs of the user in the URL, limited to those the requester can view.
+    Resources owned by the orgs of the user in the URL, limited to those the requester can view. List only: a
+    source, collection or map project is created under its owner's own route, not here
     """
     version = None
     permission_classes = (IsAuthenticated,)
+    http_method_names = ['get', 'head', 'options']
+
+    def initial(self, request, *args, **kwargs):
+        # 405 before the permission checks, so a refused POST answers the same whatever the requester may do
+        if request.method.lower() not in self.http_method_names:
+            self.format_kwarg = self.get_format_suffix(**kwargs)  # so the 405 is rendered as negotiated
+            raise MethodNotAllowed(request.method)
+        super().initial(request, *args, **kwargs)
 
     def get_queryset(self):
         username = self.kwargs.get('user', None)

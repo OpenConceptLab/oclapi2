@@ -1,9 +1,10 @@
 from pydash import get
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import BasePermission, SAFE_METHODS
 
-from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID
+from core.capabilities.constants import MAPPER_PROJECTS_CAPABILITY_ID, WRITE_ACTION_EDIT
 from core.capabilities.exceptions import MapProjectCapacityExceeded
 from core.capabilities.policy import get_capability_policy
+from core.capabilities.writes import check_write, get_own_write_action, get_write_target
 from core.users.constants import (
     MAPPER_CUSTOM_ALGORITHMS_PERMISSION, MAPPER_ORG_PROJECTS_PERMISSION, MAPPER_USE_PERMISSION,
 )
@@ -72,9 +73,51 @@ class CanViewConceptDictionary(HasPrivateAccess):
         return super().has_object_permission(request, view, obj)
 
 
-class CanEditConceptDictionary(HasPrivateAccess):
+class ChecksWrites(BasePermission):
     """
-    The user is staff, the repo's owner, or a member of the owning organization
+    Listed before the permission it extends: once that permission grants a write to a repository or a map project,
+    the capability policy is asked too (core.capabilities.writes), and may refuse it with a WriteRefused 403 that
+    carries its body. Reads aren't asked about, nor writes from a view with `writes_content = False`, whose writes
+    change no content (a processing flag, say).
+    """
+    def has_object_permission(self, request, view, obj):
+        if not super().has_object_permission(request, view, obj):
+            return False
+        if request.method not in SAFE_METHODS and getattr(view, 'writes_content', True):
+            content = get_write_target(self.get_written_object(request, view, obj))
+            if content is not None:
+                check_write(request.user, content, self.get_write_action(request, view, obj))
+        return True
+
+    @staticmethod
+    def get_written_object(request, view, obj):
+        """
+        `obj`, unless the view sets `updates_head = True` because its PUT and PATCH save onto the HEAD of the
+        repository row they resolve, whichever row that is (a FHIR update, which also adds a version).
+        """
+        if getattr(view, 'updates_head', False) and request.method in ('PUT', 'PATCH') and get(obj, 'head'):
+            return obj.head
+        return obj
+
+    def get_write_action(self, request, view, obj):
+        """
+        A view whose PUT, PATCH and DELETE act on the object they're checked against sets `writes_own_object = True`:
+        a DELETE of a repository's HEAD or of a map project deletes the whole of it, and a change can publish a
+        repository row (core.capabilities.writes.get_own_write_action), unless the view sets
+        `applies_public_access = False` because its writes never apply the `public_access` they're sent. Any other
+        write is an edit.
+        """
+        if getattr(view, 'writes_own_object', False):
+            # a DELETE's body is never read: it needn't parse
+            data = None if request.method == 'DELETE' else request.data
+            return get_own_write_action(obj, request.method, data, getattr(view, 'applies_public_access', True))
+        return WRITE_ACTION_EDIT
+
+
+class CanEditConceptDictionary(ChecksWrites, HasPrivateAccess):
+    """
+    The user is staff, the repo's owner, or a member of the owning organization, and the capability policy doesn't
+    refuse the write (ChecksWrites).
     """
 
 
@@ -97,6 +140,13 @@ class HasAccessToVersionedObject(BasePermission):
                 request.user.is_authenticated and bool(versioned_object.organization_id) and
                 request.user.organizations.filter(id=versioned_object.organization_id).exists()
         )
+
+
+class CanEditConceptDictionaryVersion(ChecksWrites, HasAccessToVersionedObject):
+    """
+    HasAccessToVersionedObject, and the capability policy doesn't refuse the write to the version (an edit, unless the
+    view writes its own object: ChecksWrites.get_write_action).
+    """
 
 
 class CanViewConceptDictionaryVersion(HasAccessToVersionedObject):
