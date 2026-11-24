@@ -1,4 +1,5 @@
 # pylint: disable=cyclic-import # only occurring in dev env
+import csv
 import hashlib
 import json
 import mimetypes
@@ -44,12 +45,31 @@ def cd_temp():
     return cwd
 
 
-def write_csv_to_s3(data, requester, **kwargs):
-    """Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL."""
+def write_rows_to_csv(rows, headers, filename=None):
+    """Writes dict rows under `headers` to a CSV file in the current directory, with a BOM for Excel."""
+    filename = filename or 'export'
+    if not filename.endswith('.csv'):
+        filename += '.csv'
+    with open(filename, 'w', encoding='utf-8', newline='') as csv_file:
+        csv_file.write('\ufeff')
+        writer = csv.DictWriter(csv_file, headers)
+        writer.writeheader()
+        writer.writerows(rows)
+    return csv_file
+
+
+def write_csv_to_s3(data, requester, headers=None, **kwargs):
+    """
+    Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL. `data` is a values
+    queryset, or dict rows when `headers` is given.
+    """
     cwd = cd_temp()
     try:
-        csv_file = csv_file_for(data, **kwargs)
-        csv_file.close()
+        if headers is None:
+            csv_file = csv_file_for(data, **kwargs)
+            csv_file.close()
+        else:
+            csv_file = write_rows_to_csv(data, headers, kwargs.get('filename'))
         zip_file_name = csv_file.name + '.zip'
         with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.write(csv_file.name)

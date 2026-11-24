@@ -11,6 +11,34 @@ from core.common.utils import get_export_service
 from core.repos.serializers import RepoExternalExportSerializer
 
 
+class RepoListCSVMixin:
+    """CSV export of a source or collection list: a row per listed repository, under display headers."""
+    csv_type_field = None  # 'source_type' or 'collection_type'
+
+    def get_csv_label(self):
+        return self.get_queryset().model.__name__
+
+    def get_csv_headers(self):
+        label = self.get_csv_label()
+        return [
+            'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
+            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
+        ]
+
+    def get_csv_rows(self, queryset):
+        """Read again by id, as the list may be a union."""
+        model = self.get_queryset().model
+        repos = model.objects.filter(id__in=[repo.id for repo in queryset]).select_related(
+            'organization', 'user', 'updated_by').order_by('id')
+        return [
+            dict(zip(self.get_csv_headers(), [
+                repo.parent.mnemonic, repo.mnemonic, repo.name, repo.full_name, getattr(repo, self.csv_type_field),
+                repo.description, repo.default_locale, ','.join(repo.supported_locales or []), repo.website,
+                repo.external_id, repo.updated_at, repo.updated_by.username, repo.uri
+            ])) for repo in repos
+        ]
+
+
 class RepoExternalExportMixin:
     permission_classes = (CanViewConceptDictionaryVersion, IsAuthenticated)
 

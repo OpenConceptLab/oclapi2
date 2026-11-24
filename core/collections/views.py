@@ -68,7 +68,7 @@ from core.concepts.views import ConceptCascadeView
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
-from core.repos.mixins import RepoExternalExportMixin
+from core.repos.mixins import RepoExternalExportMixin, RepoListCSVMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin, IndexingTaskMixin
@@ -161,7 +161,8 @@ class CollectionVersionBaseView(CollectionBaseView):
         return super().get_filter_params(default_version_to_head)
 
 
-class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
+class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_type_field = 'collection_type'
     serializer_class = CollectionListSerializer
     is_searchable = True
     es_fields = Collection.es_fields
@@ -205,35 +206,6 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
-
-    def get_csv_rows(self, queryset=None):  # pragma: no cover
-        if not queryset:
-            queryset = self.get_queryset()
-
-        values = queryset.values('mnemonic', 'name', 'full_name', 'collection_type', 'description', 'default_locale',
-                                 'supported_locales', 'website', 'external_id', 'updated_at', 'updated_by', 'uri')
-
-        for value in values:
-            value['Owner'] = Collection.objects.get(uri=value['uri']).parent.mnemonic
-            value['Collection ID'] = value.pop('mnemonic')
-            value['Collection Name'] = value.pop('name')
-            value['Collection Full Name'] = value.pop('full_name')
-            value['Collection Type'] = value.pop('collection_type')
-            value['Description'] = value.pop('description')
-            value['Default Locale'] = value.pop('default_locale')
-            value['Supported Locales'] = ",".join(value.pop('supported_locales'))
-            value['Website'] = value.pop('website')
-            value['External ID'] = value.pop('external_id')
-            value['Last Updated'] = value.pop('updated_at')
-            value['Updated By'] = value.pop('updated_by')
-            value['URI'] = value.pop('uri')
-
-        values.field_names.extend([
-            'Owner', 'Collection ID', 'Collection Name', 'Collection Full Name', 'Collection Type', 'Description',
-            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
-        ])
-        del values.field_names[0:12]
-        return values
 
 
 class CollectionLogoView(CollectionBaseView, BaseLogoView):

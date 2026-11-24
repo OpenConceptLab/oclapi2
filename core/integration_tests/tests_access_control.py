@@ -890,6 +890,53 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         # the export is the search's, not the whole list
         self.assertNotIn(unmatched_org.mnemonic, mnemonics)
 
+    def export_rows(self, url, user, key):
+        """The rows of the CSV export at `url` for `user`, by their `key` column."""
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
+                as zip_file, zip_file.open(zip_file.namelist()[0]) as csv_file:
+            return {row[key]: row for row in csv.DictReader(io.TextIOWrapper(csv_file, 'utf-8-sig'))}
+
+    def assert_repo_list_export(self, label, url, repos):
+        own_private, org_public, outsiders_private = repos
+        headers = [
+            'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
+            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
+        ]
+        self.assertEqual(self.export_columns(url, self.owner), headers)
+
+        rows = self.export_rows(url, self.owner, 'URI')
+        self.assertIn(org_public.uri, rows)
+        self.assertNotIn(outsiders_private.uri, rows)
+        self.assertEqual(len([uri for uri in rows if uri == own_private.uri]), 1)
+        row = rows[own_private.uri]
+        self.assertEqual(row['Owner'], self.owner.username)
+        self.assertEqual(row[f'{label} ID'], own_private.mnemonic)
+        self.assertEqual(row[f'{label} Name'], own_private.name)
+        self.assertEqual(row['Supported Locales'], 'en,fr')
+        self.assertEqual(row['Updated By'], own_private.updated_by.username)
+        self.assertEqual(rows[org_public.uri]['Owner'], self.org.mnemonic)
+
+        anonymous_rows = self.export_rows(url, None, 'URI')
+        self.assertIn(org_public.uri, anonymous_rows)
+        self.assertNotIn(own_private.uri, anonymous_rows)
+
+    def test_source_list(self):
+        self.assert_repo_list_export('Source', '/sources/?csv=true', (
+            UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserSourceFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
+    def test_collection_list(self):
+        # a signed-in non-staff requester's list is a union of public and own private collections
+        self.assert_repo_list_export('Collection', '/collections/?csv=true', (
+            UserCollectionFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserCollectionFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
     def export_columns(self, url, user):
         response = self.request('get', url, user)
         with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
