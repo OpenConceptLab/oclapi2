@@ -4518,7 +4518,7 @@ class CollectionReferenceViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
         response = self.client.get(
-            self.collection.url + 'references/123/')
+            self.collection.url + 'references/' + str(self.reference.id + 1) + '/')  # not one of its references
 
         self.assertEqual(response.status_code, 404)
 
