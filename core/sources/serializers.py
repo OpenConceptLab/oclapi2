@@ -163,9 +163,15 @@ class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSeria
 
     def prepare_object(self, validated_data, instance=None):
         source = instance if instance else Source()
+        was_head = instance is not None and instance.is_head
         source.version = validated_data.get('version', source.version) or HEAD
-        source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
-        source.public_access = validated_data.get('public_access', source.public_access or DEFAULT_ACCESS_TYPE)
+        # a stored row takes a new mnemonic only as a HEAD that stays one: a version, or a HEAD the body makes one,
+        # never moves to another repository
+        if instance is None or (was_head and source.is_head):
+            source.mnemonic = validated_data.get(self.Meta.lookup_field, source.mnemonic)
+        # a stored row keeps its own access when the write sends none, a blank (private) one included
+        source.public_access = validated_data.get(
+            'public_access', source.public_access if instance else DEFAULT_ACCESS_TYPE)
         source.default_locale = validated_data.get('default_locale', source.default_locale or DEFAULT_LOCALE)
 
         supported_locales = validated_data.get('supported_locales')

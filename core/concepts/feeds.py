@@ -15,15 +15,37 @@ class ConceptFeed(Feed, FeedFilterMixin):
     limit = 0
 
     def get_object(self, request, *args, **kwargs):
+        if kwargs.pop('user_is_self', False):  # /user/ routes: the signed-in user's own source
+            if not request.user.is_authenticated:
+                raise Http404()
+            kwargs['user'] = request.user.username
         concept = Concept.get_base_queryset(kwargs).first()
-        # feeds are served without authentication, so only concepts of public sources have one
-        if not concept or not concept.parent.public_can_view:
+        # feeds are served without authentication, so only concepts of public sources, under public versions, have one
+        if not concept or not concept.parent.public_can_view or not self.is_public_url_version(kwargs):
             raise Http404()
 
         self.source = concept.parent
         self.updated_since = request.GET.get('updated_since', None)
         self.limit = request.GET.get('limit', None)
         return concept
+
+    @staticmethod
+    def is_public_url_version(kwargs):
+        """
+        Whether the URL names the source's owner and, when it names a version, that version exists and is public
+        (for `latest`, each it reads).
+        """
+        from core.sources.models import Source
+        if 'org' in kwargs:
+            owner_filters = {'organization__mnemonic': kwargs['org']}
+        elif 'user' in kwargs:
+            owner_filters = {'user__username': kwargs['user']}
+        else:  # /sources/<source>/: no owner names the source
+            return False
+        if 'version' not in kwargs:
+            return True
+        versions = Source.get_url_versions(kwargs['source'], kwargs['version'], owner_filters)
+        return bool(versions) and all(version.is_publicly_viewable for version in versions)
 
     def title(self, obj):
         return f"Updates to {self.source.mnemonic}:{obj.mnemonic}"

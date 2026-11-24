@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.writes import check_write, get_write_target
 from core.common.permissions import CanViewConceptDictionaryVersion
 from core.common.utils import get_export_service
 from core.repos.serializers import RepoExternalExportSerializer
@@ -54,6 +56,7 @@ class RepoExternalExportMixin:
 
         if not self.is_permitted(user, version):
             return HttpResponseForbidden()
+        check_write(user, get_write_target(version), WRITE_ACTION_EDIT)
 
         uploaded_file = request.data.get('file')
         if not uploaded_file:
@@ -71,6 +74,7 @@ class RepoExternalExportMixin:
 
         if not self.is_permitted(user, version):
             return HttpResponseForbidden()
+        check_write(user, get_write_target(version), WRITE_ACTION_EDIT)
 
         instance = self.get_external_export(version)
         get_export_service().remove(instance.file_path)

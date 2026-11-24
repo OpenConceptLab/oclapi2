@@ -3,6 +3,7 @@ import json
 import os
 import random
 import tempfile
+import threading
 from io import StringIO
 
 from celery_once import AlreadyQueued
@@ -40,7 +41,9 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, A
 from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count, \
+    update_active_count
+from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
 from core.common.utils import to_owner_uri, get_falsy_values, drop_version
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, HierarchicalConcepts
@@ -2135,6 +2138,33 @@ class CollectionSerializersTest(OCLTestCase):
 
 
 class TasksTest(OCLTestCase):
+    def test_count_tasks_release_their_lock_as_they_start(self):
+        for task in [update_collection_active_concepts_count, update_collection_active_mappings_count,
+                     update_source_active_concepts_count, update_source_active_mappings_count]:
+            self.assertTrue(task.unlock_before_run(), task.name)
+
+    # not a user an earlier test's request left behind
+    @patch('core.common.models.get_current_authorized_user', Mock(return_value=None))
+    @patch('core.common.tasks.update_collection_active_mappings_count.apply_async')
+    @patch('core.common.tasks.update_collection_active_concepts_count.apply_async',
+           side_effect=ConnectionError('broker unreachable'))
+    def test_update_children_counts_a_failed_publish_stops_neither_the_caller_nor_the_other_count(
+            self, concepts_apply_async_mock, mappings_apply_async_mock):
+        collection = OrganizationCollectionFactory()
+
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
+            collection.update_children_counts()
+
+        concepts_apply_async_mock.assert_called_once_with((collection.id,), task_id=ANY, queue='concurrent')
+        mappings_apply_async_mock.assert_called_once_with((collection.id,), task_id=ANY, queue='concurrent')
+        # the one that wasn't queued leaves no task behind
+        self.assertFalse(Task.objects.filter(id=concepts_apply_async_mock.call_args.kwargs['task_id']).exists())
+        self.assertTrue(Task.objects.filter(id=mappings_apply_async_mock.call_args.kwargs['task_id']).exists())
+
+    def test_update_active_count_takes_its_turn_for_an_id_past_32_bits(self):
+        # raises if the lock can't take the id
+        self.assertIsNone(update_active_count(Collection, 2 ** 31 + 1, 'active_concepts'))
+
     def test_add_references_task(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
@@ -3156,7 +3186,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(collection.active_mappings, None)
 
-        update_collection_active_mappings_count(collection.id)
+        update_collection_active_mappings_count.run(collection.id)
 
         collection.refresh_from_db()
         self.assertEqual(collection.active_mappings, 1)
@@ -3173,10 +3203,53 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(collection.active_concepts, None)
 
-        update_collection_active_concepts_count(collection.id)
+        update_collection_active_concepts_count.run(collection.id)
 
         collection.refresh_from_db()
         self.assertEqual(collection.active_concepts, 1)
+
+
+class ActiveCountConcurrencyTest(OCLAPITransactionTestCase):
+    """Two counts of one collection at once, on separate connections. One test per class, as a transaction test's
+    flush removes the fixtures."""
+
+    def test_a_count_that_starts_after_a_write_saves_after_one_that_started_before(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(ConceptFactory())
+        concept2 = ConceptFactory()
+        set_active_concepts = Collection.set_active_concepts
+        first_counted, first_may_save = threading.Event(), threading.Event()
+
+        def paused_set_active_concepts(instance):
+            set_active_concepts(instance)
+            if threading.current_thread().name == 'first':
+                first_counted.set()
+                first_may_save.wait(30)
+
+        def count():
+            try:
+                update_collection_active_concepts_count.run(collection.id)
+            finally:
+                connection.close()
+
+        with patch.object(Collection, 'set_active_concepts', paused_set_active_concepts):
+            first = threading.Thread(target=count, name='first', daemon=True)
+            first.start()
+            self.assertTrue(first_counted.wait(30))
+            expansion.concepts.add(concept2)
+            second = threading.Thread(target=count, name='second', daemon=True)
+            second.start()
+            second.join(timeout=1)  # waits for the first count's turn, else it saves 2 here and the first then 1
+            first_may_save.set()
+            for thread in (first, second):
+                thread.join(timeout=30)
+            self.assertFalse(first.is_alive() or second.is_alive())
+
+        collection.refresh_from_db()
+        self.assertEqual(collection.active_concepts, 2)
 
 
 @tag('es')
@@ -4123,7 +4196,48 @@ class ExpansionTest(OCLTestCase):
             expression='/orgs/nobody/sources/nothing/concepts/c1/', collection=collection,
             system='/orgs/nobody/sources/nothing/', code='c1')
 
-        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion), ['/orgs/nobody/sources/nothing/'])
+        self.assertEqual(
+            reference.get_evaluated_repo_version_urls(expansion, None), ['/orgs/nobody/sources/nothing/'])
+
+    def test_evaluated_repo_version_urls_name_only_versions_the_user_can_view(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        member = UserProfileFactory()
+        source.organization.members.add(member)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/c1/', collection=collection, system=source.uri, code='c1')
+
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, member), [release.uri])
+        self.assertEqual(reference.get_evaluated_repo_version_urls(expansion, UserProfileFactory()), [source.uri])
+
+    def test_evaluated_repo_version_urls_treat_a_named_version_the_user_cannot_view_as_missing(self):
+        # an org named like a repository type, so only the segment's position tells a version
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='sources'))
+        recorded = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        private = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.evaluated_source_versions.add(recorded)
+        user = UserProfileFactory()
+
+        def evaluated_urls(system):
+            reference = CollectionReference(
+                expression=f"{system.rstrip('/')}/concepts/c1/", collection=collection, system=system, code='c1')
+            return reference.get_evaluated_repo_version_urls(expansion, user)
+
+        for suffix in ('', '?q=a/b/'):  # the resolver drops the query string
+            for system in (f'{source.uri}v3', f'{source.uri}v3/', private.uri.rstrip('/'), private.uri):
+                self.assertEqual(evaluated_urls(system + suffix), [system + suffix])
+            # versionless, it names the release the expansion recorded, whatever newer release it can't view exists
+            self.assertEqual(evaluated_urls(source.uri + suffix), [recorded.uri])
+        self.assertEqual(evaluated_urls('/orgs/acme//catalog/'), ['/orgs/acme//catalog/'])
 
     def test_rebuild_with_filter_reference_under_release_adds_its_resource_versions(self):
         source, release, _, concept_version = CollectionReferenceTest.released_source_with_concepts()
@@ -6391,7 +6505,7 @@ class CollectionViewsAPITest(OCLAPITestCase):
     def test_get_object_updates_active_counts_when_not_test_mode(
             self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(
                 collection.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
             )
@@ -6542,7 +6656,7 @@ class CollectionViewsAPITest(OCLAPITestCase):
             mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
             created_by=self.admin, updated_by=self.admin
         )
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(
                 version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}"
             )
@@ -6583,6 +6697,28 @@ class CollectionViewsAPITest(OCLAPITestCase):
             f'{collection.uri}expansions/?verbose=true', HTTP_AUTHORIZATION=f"Token {self.admin_token}"
         )
         self.assertEqual(response.status_code, 200)
+
+    def test_expansions_list_leaves_out_private_versions_the_requester_cannot_view(self):
+        collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
+        head_expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        private = OrganizationCollectionFactory(
+            mnemonic=collection.mnemonic, organization=collection.organization, version='v1',
+            public_access=ACCESS_TYPE_NONE, created_by=self.admin, updated_by=self.admin)
+        private_expansion = ExpansionFactory(collection_version=private, mnemonic='autoexpand-v1')
+        member = UserProfileFactory()
+        collection.organization.members.add(member)
+        url = f'{collection.uri}expansions/'
+
+        def listed(token=None):
+            response = self.client.get(url, **({'HTTP_AUTHORIZATION': f'Token {token}'} if token else {}))
+            self.assertEqual(response.status_code, 200)
+            return sorted(item['url'] for item in response.data)
+
+        both = sorted([head_expansion.uri, private_expansion.uri])
+        self.assertEqual(listed(), [head_expansion.uri])
+        self.assertEqual(listed(UserProfileFactory().get_token()), [head_expansion.uri])
+        self.assertEqual(listed(member.get_token()), both)
+        self.assertEqual(listed(self.admin_token), both)
 
     def test_version_expansion_not_found(self):
         collection = OrganizationCollectionFactory(created_by=self.admin, updated_by=self.admin)
