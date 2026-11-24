@@ -583,12 +583,15 @@ class IsolatedVersionCommit:
         self.hierarchy_map = hierarchy_map or {}
         self.seen_concept_ids = set(seen_concept_ids or [])
         self.seen_mapping_ids = set(seen_mapping_ids or [])
+        self.superseded_ids = {'concept': set(), 'mapping': set()}  # ImportIndexer.deferred_superseded_ids
         self.content_failures = content_failures
 
     def add_seen(self, seen):
         self.seen_concept_ids.update(get(seen, 'concepts') or [])
         self.seen_mapping_ids.update(get(seen, 'mappings') or [])
         self.hierarchy_map.update(get(seen, 'hierarchy') or {})
+        for resource, ids in (get(seen, 'superseded') or {}).items():
+            self.superseded_ids[resource].update(ids)
 
     def add_runner_result(self, result):
         """Folds in one BulkImportInline part's result, so the parts are read once and not kept."""
@@ -701,6 +704,9 @@ class IsolatedVersionCommit:
         except ValidationError as ex:
             self.dropped = None
             return get(ex, 'message_dict') or {'__all__': ex.messages}
+        # once the version is created: a rejected seed leaves them to the import's deferral, as their replacements
+        transaction.on_commit(lambda: head.queue_reindex(
+            self.superseded_ids['concept'], self.superseded_ids['mapping'], user=self.user))
         return CREATED
 
 
@@ -1241,25 +1247,30 @@ class ImportIndexer:
     whether or not they get indexed, so later saves index them again. Unless the import doesn't index, it then queues
     their batch indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of
     the concepts the imported mappings come from.
+
+    deferred_superseded_ids: the versions an import that doesn't index superseded. When it seeds a version, the seed's
+    commit indexes them once the version is created (IsolatedVersionCommit, Source.queue_reindex): their documents
+    would still say they're HEAD's latest versions, and keep the names of versions that held them, so searches of HEAD,
+    and of a later version of the same name, would find them next to the versions that replaced them
+    (OpenConceptLab/ocl_online#744). The new version indexes those.
     """
     CHUNK_SIZE = 5000
 
     def __init__(self, index=True):
         self.index = index
         self.ids = {'concept': set(), 'mapping': set()}
+        self.superseded_ids = {'concept': set(), 'mapping': set()}
         self.mapped_concept_ids = set()
 
     def add(self, instance):
         resource = {Concept: 'concept', Mapping: 'mapping'}.get(type(instance))
         if not resource or not instance.id or instance.should_index:
             return  # nothing saved, or saved with _index=True, which indexes it
+        superseded_ids = compact([
+            get(instance, 'prev_latest_version_id'), *(get(instance, 'stale_latest_version_ids') or [])])
+        self.superseded_ids[resource].update(superseded_ids)
         self.ids[resource].update(compact([
-            instance.versioned_object_id,
-            get(instance, 'prev_latest_version_id'),
-            *(get(instance, 'stale_latest_version_ids') or []),
-            get(instance, 'latest_version_id'),
-            instance.id,
-        ]))
+            instance.versioned_object_id, *superseded_ids, get(instance, 'latest_version_id'), instance.id]))
         if resource == 'mapping' and instance.from_concept_id and instance.from_source_id == instance.parent_id:
             self.mapped_concept_ids.add(instance.from_concept_id)
         if resource == 'mapping' and get(instance, 'replaced_from_concept_id'):
@@ -1277,6 +1288,10 @@ class ImportIndexer:
                         (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
             for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
                 index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+
+    @property
+    def deferred_superseded_ids(self):
+        return {} if self.index else {resource: sorted(ids) for resource, ids in self.superseded_ids.items() if ids}
 
     def get_mapped_concept_ids(self):
         """
@@ -1312,6 +1327,7 @@ class BulkImportInline(BaseImporter):
         self.seen_concept_ids = set()
         self.seen_mapping_ids = set()
         self.assigned_hierarchy = {}
+        self.indexer = None  # the run's ImportIndexer
         # Lookup cache shared across this run's items (see ConceptImporter/MappingImporter).
         # It caches misses too (None/False), so it's only safe because a chunk is single-resource-type
         # in the production parallel path (BulkImportParallelRunner.make_parts splits concepts and
@@ -1376,6 +1392,7 @@ class BulkImportInline(BaseImporter):
             seen_concept_ids=self.seen_concept_ids, seen_mapping_ids=self.seen_mapping_ids,
             content_failures=self.content_failures_count, import_task_id=self.self_task_id
         )
+        commit.add_seen({'superseded': self.indexer.deferred_superseded_ids})
         result = commit.run()
         self.dropped = commit.dropped
         return result
@@ -1446,7 +1463,7 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        indexer = ImportIndexer(self.index)
+        indexer = self.indexer = ImportIndexer(self.index)
         try:
             for original_item in self.input_list:
                 self.processed += 1
@@ -1578,7 +1595,7 @@ class BulkImportInline(BaseImporter):
         if self.isolated and not self.isolated_version:
             self.result['seen'] = {
                 'concepts': sorted(self.seen_concept_ids), 'mappings': sorted(self.seen_mapping_ids),
-                'hierarchy': self.assigned_hierarchy}
+                'hierarchy': self.assigned_hierarchy, 'superseded': self.indexer.deferred_superseded_ids}
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover

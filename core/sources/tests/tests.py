@@ -585,6 +585,64 @@ class SourceTest(OCLTestCase):
 
         clear_cache_mock.assert_called_once()
 
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch.object(Source, 'index_children_async', autospec=True)
+    @patch('core.sources.models.batch_index_resources')
+    def test_deleting_a_version_indexes_its_former_members_again(
+            self, batch_index_resources_mock, index_children_async_mock):
+        """OpenConceptLab/ocl_online#744: their documents would keep the deleted version's name."""
+        head = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=head)
+        mapping = MappingFactory(parent=head)
+        v1 = OrganizationSourceFactory(
+            mnemonic=head.mnemonic, organization=head.organization, version='v1', released=True)
+        v2 = OrganizationSourceFactory(
+            mnemonic=head.mnemonic, organization=head.organization, version='v2', released=True)
+        v2.concepts.add(concept.get_latest_version())
+        v2.mappings.add(mapping.get_latest_version())
+        self.assertTrue(v2.is_latest_released)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            v2.delete(force=True)
+            batch_index_resources_mock.assert_not_called()  # the rows still belong to v2 until the delete commits
+
+        self.assertEqual(batch_index_resources_mock.call_args_list, [
+            call('concept', {'id__in': [concept.get_latest_version().id]}),
+            call('mapping', {'id__in': [mapping.get_latest_version().id]}),
+        ])
+        index_children_async_mock.assert_called_once_with(ANY, head.updated_by, {'is_in_latest_source_version': True})
+        self.assertEqual(index_children_async_mock.call_args[0][0].id, v1.id)  # the new latest release's members
+
+        batch_index_resources_mock.reset_mock()
+        index_children_async_mock.reset_mock()
+        v0 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v0')
+        v0.concepts.add(concept.get_latest_version())
+        with self.captureOnCommitCallbacks(execute=True):
+            v0.delete(force=True)
+
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
+        index_children_async_mock.assert_not_called()  # v0 wasn't the latest release, so no flag changes
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.sources.models.batch_index_resources')
+    def test_deleted_version_reindex_tasks_keep_their_arguments(self, batch_index_resources_mock):
+        """The version and its links are gone, so a failed chunk can only be rerun from its saved arguments."""
+        batch_index_resources_mock.name = 'core.common.tasks.batch_index_resources'
+        head = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=head)
+        v1 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        v1.concepts.add(concept.get_latest_version())
+
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
+            v1.delete(force=True)
+
+        args = ['concept', {'id__in': [concept.get_latest_version().id]}]
+        batch_index_resources_mock.apply_async.assert_called_once_with(
+            args, task_id=ANY, queue='indexing', persist_args=True)
+        task = Task.objects.get(id=batch_index_resources_mock.apply_async.call_args[1]['task_id'])
+        self.assertEqual(
+            (task.name, task.queue, task.args), ('core.common.tasks.batch_index_resources', 'indexing', args))
+
     @patch('core.common.models.delete_s3_objects')
     def test_delete_clears_export_and_external_export_s3_objects(self, delete_s3_objects_mock):
         from core.repos.models import RepoExternalExport
