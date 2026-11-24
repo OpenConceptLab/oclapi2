@@ -414,8 +414,27 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                     self.assertEqual('"public_access" = ' in saves[0], writes)
                     self.assertEqual([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')], [])
 
+    def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
+        """Its save leaves the column out, and it answers with the access the row has after it."""
+        for repo in (self.source, self.collection):
+            model = type(repo)
+            model.objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_VIEW)
+            change = Mock(side_effect=lambda *args: model.objects.filter(id=repo.id).update(
+                public_access=ACCESS_TYPE_NONE))
+            with self.subTest(uri=repo.uri), patch('core.common.models.check_make_private', change):
+                response = self.request('patch', repo.uri, {'name': 'Renamed'})
+
+                self.assertEqual(response.status_code, 200, response.data)
+                change.assert_called_once()
+                self.assertEqual(response.data['public_access'], ACCESS_TYPE_NONE)
+                repo.refresh_from_db()
+                self.assertEqual((repo.public_access, repo.name), (ACCESS_TYPE_NONE, 'Renamed'))
+
     def test_an_edit_that_sends_no_access_keeps_a_blank_row_private(self):
-        """A blank access is private (public_can_view): an edit that sends none stores it as None, not View."""
+        """
+        A blank access is private (public_can_view): an edit that sends none stores it as None, not View, reading the
+        row for update first, so a concurrent access change isn't undone, nor passed on wrongly to a source's concepts.
+        """
         repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
         for repo, factory in repos:
             version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
@@ -423,9 +442,12 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 type(row).objects.filter(id=row.id).update(public_access='')
                 for method in ('put', 'patch'):
                     with self.subTest(uri=row.uri, method=method):
-                        response = self.request(method, row.uri, {'name': 'Renamed'})
+                        with CaptureQueriesContext(connection) as queries:
+                            response = self.request(method, row.uri, {'name': 'Renamed'})
 
                         self.assertEqual(response.status_code, 200, response.data)
+                        self.assertTrue([query for query in queries.captured_queries
+                                         if query['sql'].endswith('FOR NO KEY UPDATE')])
                         row.refresh_from_db()
                         self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
                         self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])

@@ -9,6 +9,7 @@ import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.db import models
+from django.db.models import F
 from django.db.models.functions import Coalesce, Lower
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -796,7 +797,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not get(self.request.user, 'is_authenticated'):
             facets.pop('updatedBy', None)
         self.keep_collection_facets_viewable(facets, search)
-        self.keep_repo_facets_viewable(facets)
+        self.keep_repo_facets_viewable(facets, search)
         return facets
 
     def keep_collection_facets_viewable(self, facets, search=None):
@@ -832,32 +833,59 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 [(name, count, False) for (_facet, name), count in counts.items() if _facet == facet and count],
                 key=lambda bucket: (-bucket[1], bucket[0]))[:FACET_SIZE]
 
-    def keep_repo_facets_viewable(self, facets):
+    # the facets that name repositories, by what they hold: their names, their owners' names or their URLs
+    repo_name_facets = {
+        'source': 'mnemonic', 'owner': 'owner', 'fromConceptSource': 'mnemonic', 'toConceptSource': 'mnemonic',
+        'fromConceptOwner': 'owner', 'toConceptOwner': 'owner', 'targetRepo': 'uri'}
+
+    def keep_repo_facets_viewable(self, facets, search=None):
         """
-        The source and owner facets name the repositories the matches are in, and their owners, as the index has
-        them: one made private before it was reindexed too, whose hits get_viewable_hits leaves out. Where the search
-        filters by access, a name stays only if a repository the requester can view has it, or is its owner's (a
-        source; for a collection search, a collection; for the repo search, either), in one query per facet and
-        model. Counts stay the index's. A hit kept as its creator's can have its names missing, never wrong.
+        The facets that name repositories, or their owners, name them as the index has them: one made private before
+        it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a name is
+        left out if the repositories it names exist and the requester can view none of them (get_hidden_repo_names);
+        a name of none stays, such as a mapping's target outside OCL. Counts stay the index's. A hit kept as its
+        creator's can have its names missing, never wrong. `search`: get_facets_search's, which tells whether the
+        search filters by access.
         """
         user = self.request.user
-        named = [facet for facet in ('source', 'owner') if facets.get(facet)]
-        if not named or get(user, 'is_staff') or self.get_search_visibility_criteria() is None:
+        named = [facet for facet in self.repo_name_facets if facets.get(facet)]
+        if not named or get(user, 'is_staff') or not (
+                self.search_checks_access if search is not None else self.get_search_visibility_criteria() is not None):
             return
         from core.collections.documents import CollectionDocument
         from core.collections.models import Collection
         from core.sources.models import Source
-        repo_models = [Collection] if self.document_model == CollectionDocument else (
+        owners = [Collection] if self.document_model == CollectionDocument else (
             [Source, Collection] if self.is_repo_document_model() else [Source])
         for facet in named:
-            names = {str(name).lower() for name, _, _ in facets[facet]}
-            name_field = Lower('mnemonic') if facet == 'source' else Lower(
-                Coalesce('organization__mnemonic', 'user__username'))
-            kept = set()
-            for model in repo_models:
-                kept.update(model.get_viewable(model.objects.filter(version=HEAD), user).annotate(
-                    _name=name_field).filter(_name__in=names).values_list('_name', flat=True))
-            facets[facet] = [bucket for bucket in facets[facet] if str(bucket[0]).lower() in kept]
+            # a concept search's source and owner facets keep the names' case, as the others' facets do but those
+            exact = facet not in ('source', 'owner') or self.is_concept_document()
+            key = str if exact else lambda name: str(name).lower()
+            hidden = self.get_hidden_repo_names(
+                user, self.repo_name_facets[facet], {key(name) for name, _, _ in facets[facet]}, exact,
+                owners if facet == 'owner' else [Source])
+            facets[facet] = [bucket for bucket in facets[facet] if key(bucket[0]) not in hidden]
+
+    @staticmethod
+    def get_hidden_repo_names(user, kind, names, exact, repo_models):
+        """
+        Of these `names` of repositories of `repo_models` (`kind`: their mnemonics, their owners' or their URIs, any
+        version's), those whose repositories `user` can view none of: one query per model, by index when `exact`,
+        else names are lowercase and match any case (owners that differ only in case are one name then).
+        """
+        field = {'mnemonic': F('mnemonic'), 'uri': F('uri'),
+                 'owner': Coalesce('organization__mnemonic', 'user__username')}[kind]
+        exact_criteria = {'mnemonic': models.Q(mnemonic__in=names), 'uri': models.Q(uri__in=names),
+                          'owner': models.Q(organization__mnemonic__in=names) | models.Q(user__username__in=names)}[kind]
+        hidden, shown = set(), set()
+        for model in repo_models:
+            rows = model.objects.annotate(_name=field if exact else Lower(field))
+            rows = rows.filter(exact_criteria) if exact else rows.filter(_name__in=names)
+            viewable = models.ExpressionWrapper(
+                model.get_viewable_versions_criteria(user), output_field=models.BooleanField())
+            for name, is_viewable in rows.annotate(_viewable=viewable).values_list('_name', '_viewable').distinct():
+                (shown if is_viewable else hidden).add(name)
+        return hidden - shown
 
     @staticmethod
     def get_viewable_collection_facet_urls(facets, collections, viewable):

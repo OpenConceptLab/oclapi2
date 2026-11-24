@@ -1,6 +1,6 @@
 import uuid
 
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import AnonymousUser, Group
 from django.test import tag
 
 from core.collections.documents import CollectionDocument
@@ -8,6 +8,7 @@ from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
+from core.common.views import BaseAPIView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -91,19 +92,21 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
         response = self.client.get(f'/sources/?q={self.token}src')
         self.assertEqual((response['num_found'], response['num_returned']), ('1', '0'))  # num_found: the index's
 
-    def facet_names(self, url, user=None):
-        """Each facet's names, lowercased, as `url` answers them (facetsOnly)."""
+    def facet_names(self, url, user=None, lower=True):
+        """Each facet's names, lowercased unless `lower` is False, as `url` answers them (facetsOnly)."""
         kwargs = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
         response = self.client.get(f'{url}&facetsOnly=true', **kwargs)
         self.assertEqual(response.status_code, 200, url)
-        return {facet: {str(bucket[0]).lower() for bucket in buckets}
+        return {facet: {str(bucket[0]).lower() if lower else str(bucket[0]) for bucket in buckets}
                 for facet, buckets in response.data['facets']['fields'].items()}
 
-    def test_a_stale_document_s_source_and_owner_are_no_facet_name_for_the_public_or_an_outsider(self):
-        names = {'source': self.source.mnemonic.lower(), 'owner': self.org.mnemonic.lower()}
+    def test_a_stale_document_s_repositories_are_no_facet_name_for_the_public_or_an_outsider(self):
+        source, owner = self.source.mnemonic.lower(), self.org.mnemonic.lower()
+        names = {'source': source, 'owner': owner, 'fromConceptSource': source, 'toConceptSource': source,
+                 'fromConceptOwner': owner, 'toConceptOwner': owner}
         token = self.token
         searches = [(f'/concepts/?q={token}concept', ('source', 'owner')),
-                    (f'/mappings/?q={token}map', ('source', 'owner')),
+                    (f'/mappings/?q={token}map', tuple(names)),
                     (f'/sources/?q={token}src', ('owner',)), (f'/collections/?q={token}coll', ('owner',)),
                     (f'/repos/?q={token}src', ('owner',))]
         for url, facets in searches:
@@ -117,6 +120,26 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
                 for facet in facets:
                     with self.subTest(url=url, user=user, facet=facet):
                         self.assertEqual(names[facet] in self.facet_names(url, user).get(facet, set()), named)
+
+    def test_a_public_case_twin_doesn_t_keep_a_concept_facet_s_private_source_or_owner(self):
+        """A concept search's source and owner facets keep the names' case, so they're matched as they are."""
+        twin = OrganizationFactory(mnemonic=self.org.mnemonic.upper())
+        OrganizationSourceFactory(organization=twin, mnemonic=self.source.mnemonic.upper())
+        self.make_private_without_reindex()
+
+        for user in (None, self.outsider):
+            facets = self.facet_names(f'/concepts/?q={self.token}concept', user, lower=False)
+            self.assertNotIn(self.source.mnemonic, facets.get('source', set()), user)
+            self.assertNotIn(self.org.mnemonic, facets.get('owner', set()), user)
+
+    def test_a_url_facet_hides_a_private_repository_s_url_and_keeps_one_outside_ocl(self):
+        """Such as targetRepo, the sources a concept's mappings point to."""
+        urls = {self.source.uri, '/orgs/NoSuchOrg/sources/NoSuchSource/'}
+        Source.objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
+
+        for user, hidden in ((AnonymousUser(), {self.source.uri}), (self.outsider, {self.source.uri}),
+                             (self.member, set())):
+            self.assertEqual(BaseAPIView.get_hidden_repo_names(user, 'uri', urls, True, [Source]), hidden, user)
 
     def test_a_concept_or_mapping_of_a_source_made_private_is_no_hit_before_its_own_row_follows(self):
         """A source made private commits before its save signal makes its concepts and mappings private."""
