@@ -18,4 +18,9 @@ class Migration(migrations.Migration):
             name='health_is_current',
             field=models.BooleanField(blank=True, null=True),
         ),
+        migrations.AddField(
+            model_name='expansion',
+            name='health_revision',
+            field=models.IntegerField(default=0),
+        ),
     ]

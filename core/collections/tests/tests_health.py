@@ -1,4 +1,6 @@
 from django.db import connection
+from django.db.models import F
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from mock import patch, Mock
 
@@ -8,7 +10,7 @@ from core.collections.health import (
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.common.tasks import seed_children_to_new_version
+from core.common.tasks import seed_children_to_new_version, recheck_expansion_health
 from core.common.tests import OCLTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
@@ -580,21 +582,55 @@ class ExpansionHealthStorageTest(OCLTestCase):
         compute.assert_not_called()
         self.assertFalse(self.stored()[1])
 
-    def test_toggle_off_writes_no_health(self):
-        with patch.object(Expansion, 'is_health_on', return_value=False):
-            expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+    def test_toggle_off_marks_the_change_and_computes_nothing(self):
+        before = self.stored()[0]
+        with patch.object(Expansion, 'is_health_on', return_value=False), \
+                patch.object(ExpansionHealth, 'compute') as compute:
             self.add(ConceptFactory())
 
-        self.assertEqual(
-            Expansion.objects.values_list('health', 'health_is_current').get(id=expansion.id), (None, None))
+        # marked not current, so the backfill finds it once health is on again; the stored summary is untouched
+        self.assertEqual(self.stored(), (before, None))
+        compute.assert_not_called()
+
+    def test_health_is_kept_for_the_default_expansion_only(self):
+        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+
+        self.assertIsNone(other.update_health())
+        self.assertEqual(Expansion.objects.values_list('health', 'health_is_current').get(id=other.id), (None, None))
+        self.assertTrue(self.stored()[1])
+
+    def test_a_change_while_it_computes_is_not_stored_as_current(self):
+        computed = []
+
+        def compute(_health):
+            if not computed:  # the first run is overtaken by a change
+                Expansion.objects.filter(id=self.expansion.id).update(health_revision=F('health_revision') + 1)
+            computed.append(1)
+            return {'state': HEALTHY, 'run': len(computed)}
+
+        with patch.object(ExpansionHealth, 'compute', autospec=True, side_effect=compute):
+            Expansion.objects.get(id=self.expansion.id).update_health()
+
+        # the overtaken run stored nothing; the run it queued read the change and is current
+        self.assertEqual(self.stored(), ({'state': HEALTHY, 'run': 2}, True))
+
+    def test_a_failure_to_queue_leaves_health_not_current_so_the_next_change_queues(self):
+        with override_settings(TEST_MODE=False), \
+                patch('core.collections.models.compute_expansion_health.apply_async', side_effect=OSError('down')), \
+                self.captureOnCommitCallbacks(execute=True):
+            Expansion.objects.get(id=self.expansion.id).mark_health_out_of_date()
+
+        self.assertIsNone(self.stored()[1])
 
     def test_a_failure_leaves_health_out_of_date_and_the_build_done(self):
+        before = self.stored()[0]
         with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
-            expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+            self.expansion.seed_children(index=False)
+            self.expansion.update_health()
 
-        expansion.refresh_from_db()
+        expansion = Expansion.objects.get(id=self.expansion.id)
         self.assertFalse(expansion.is_processing)
-        self.assertEqual((expansion.health, expansion.health_is_current), (None, None))
+        self.assertEqual((expansion.health, expansion.health_is_current), (before, None))
 
     def test_a_change_after_a_failure_recomputes(self):
         with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
@@ -613,7 +649,12 @@ class ExpansionHealthStorageTest(OCLTestCase):
             mnemonic=source.mnemonic, organization=source.organization, version='v1', is_latest_version=False,
             **kwargs)
         self.expansion.evaluated_source_versions.add(source)
-        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        # the default expansion of a collection that records nothing of the source
+        other_collection = OrganizationCollectionFactory()
+        other = Expansion.persist(index=False, collection_version=other_collection, mnemonic='autoexpand-HEAD')
+        other_collection.expansion_uri = other.uri
+        other_collection.save()
+        other.update_health()
         return version, other
 
     def test_releasing_a_version_of_a_recorded_repository_leaves_health_not_current(self):
@@ -633,6 +674,14 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
         self.assertIsNone(self.stored()[1])
 
+    def test_making_a_recorded_repository_private_leaves_health_not_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        version.public_access = ACCESS_TYPE_NONE
+        version.save()
+
+        self.assertIsNone(self.stored()[1])
+
     def test_a_save_that_changes_no_health_field_keeps_health_current(self):
         version, _ = self.recorded_source_version(released=True)
 
@@ -648,6 +697,65 @@ class ExpansionHealthStorageTest(OCLTestCase):
         version.delete()
 
         self.assertIsNone(self.stored()[1])
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_a_recompute_that_ran_before_a_delete_committed_is_not_left_current(self):
+        version, _ = self.recorded_source_version(released=True)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            version.delete()
+            # a recompute stores its result before the delete commits
+            Expansion.objects.filter(id=self.expansion.id).update(health_is_current=True)
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_a_change_to_a_value_set_leaves_expansions_judged_against_it_not_current(self):
+        value_set = OrganizationCollectionFactory()
+        value_set_expansion = Expansion.persist(index=False, collection_version=value_set, mnemonic='autoexpand-HEAD')
+        value_set.expansion_uri = value_set_expansion.uri
+        value_set.save()
+        self.expansion.evaluated_collection_versions.add(value_set)
+        self.assertTrue(self.stored()[1])
+
+        value_set.add_expressions({'expressions': [ConceptFactory().uri]}, value_set.created_by)
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_editing_a_member_in_head_recomputes_the_expansions_holding_it(self):
+        concept = ConceptFactory()
+        self.add(concept)
+        self.assertEqual(self.stored()[0]['state'], HEAD_RESOLVED)
+        member = concept.get_latest_version()
+
+        # the edit takes the old version out of HEAD, so the member it was is now interim
+        member.unmark_latest_version()
+
+        health, is_current = self.stored()
+        self.assertTrue(is_current)
+        self.assertEqual(health['members']['concepts'][INTERIM], 1)
+
+    def test_a_hard_deleted_member_leaves_the_expansions_holding_it_not_current(self):
+        concept = ConceptFactory()
+        self.add(concept)
+        self.assertTrue(self.stored()[1])
+
+        concept.delete()
+
+        self.assertIsNone(self.stored()[1])
+
+    def test_the_nightly_recheck_recomputes_default_expansions_that_are_not_current(self):
+        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id__in=[self.expansion.id, other.id]).update(health=None, health_is_current=None)
+
+        self.assertEqual(recheck_expansion_health(), 1)
+
+        self.assertTrue(self.stored()[1])
+        self.assertEqual(Expansion.objects.values_list('health_is_current', flat=True).get(id=other.id), None)
+
+    def test_the_nightly_recheck_leaves_queued_ones_to_their_run(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health_is_current=False)
+
+        self.assertEqual(recheck_expansion_health(), 0)
 
     def test_a_save_from_an_older_copy_keeps_the_health(self):
         older = Expansion.objects.get(id=self.expansion.id)

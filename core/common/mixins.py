@@ -676,6 +676,14 @@ class SourceChildMixin(ChecksumModel):
 
     ISOLATED_VERSION_DEFAULTS = {'extras': {}, 'retired': False}
 
+    def delete(self, *args, **kwargs):  # pylint: disable=arguments-differ
+        from core.collections.models import Expansion
+        # the cascade takes the membership rows (a versioned object's, its versions' too), so expansions go first
+        rows = self.__class__.objects.filter(versioned_object_id=self.id) if self.is_versioned_object else [self]
+        Expansion.mark_health_not_current_for_members(
+            f'{self.__class__.__name__.lower()}s', [self.id, *[row.id for row in rows]])
+        return super().delete(*args, **kwargs)
+
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
     # relations named like the serializer field that reads them; prefetched by load_list_fields when it's serialized
@@ -1146,6 +1154,14 @@ class SourceChildMixin(ChecksumModel):
                 self.sources.remove(parent)
             if add_parent:
                 self.sources.add(parent)
+            if remove_parent or add_parent:
+                self.mark_expansion_health_for_head_change()
+
+    def mark_expansion_health_for_head_change(self, *rows):
+        """A row leaving or re-entering HEAD changes its class in the expansions that hold it"""
+        from core.collections.models import Expansion
+        Expansion.mark_health_out_of_date_for_members(
+            f'{self.__class__.__name__.lower()}s', [row.id for row in (rows or [self]) if row])
 
     def set_version_fields(self, data, fields, isolated=False):
         for field in fields:
@@ -1166,6 +1182,7 @@ class SourceChildMixin(ChecksumModel):
         latest_version = versioned_object.get_latest_version()
         if latest_version:
             latest_version.sources.add(parent)
+        self.mark_expansion_health_for_head_change(versioned_object, latest_version)
         return latest_version
 
     def unmark_latest_version(self, index=True, parent=None):

@@ -982,8 +982,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
         from core.collections.models import Expansion
-        # before the rows go, while expansions still record this version
-        Expansion.mark_health_not_current_for_repository(self)
+        # before the rows go, while expansions still record this version; again on commit, whatever their flag then,
+        # so a recompute that ran before the delete committed isn't left current
+        health_expansion_ids = Expansion.mark_health_not_current_for_repository(self)
         export_paths = self.get_export_paths_to_delete()
         deleted_urls = [self.url]
         deleted_ids = [self.id]
@@ -1014,6 +1015,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
+        transaction.on_commit(lambda: Expansion.mark_health_not_current(health_expansion_ids))
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
         self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
