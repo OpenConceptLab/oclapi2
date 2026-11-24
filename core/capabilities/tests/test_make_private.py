@@ -417,10 +417,9 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
     def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
         """Its save leaves the column out, and it answers with the access the row has after it."""
         for repo in (self.source, self.collection):
-            model = type(repo)
-            model.objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_VIEW)
-            change = Mock(side_effect=lambda *args: model.objects.filter(id=repo.id).update(
-                public_access=ACCESS_TYPE_NONE))
+            rows = type(repo).objects.filter(id=repo.id)
+            rows.update(public_access=ACCESS_TYPE_VIEW)
+            change = Mock(side_effect=lambda *args, rows=rows: rows.update(public_access=ACCESS_TYPE_NONE))
             with self.subTest(uri=repo.uri), patch('core.common.models.check_make_private', change):
                 response = self.request('patch', repo.uri, {'name': 'Renamed'})
 
