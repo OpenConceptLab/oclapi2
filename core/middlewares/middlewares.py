@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from django.conf import settings
@@ -36,10 +37,40 @@ class BaseMiddleware:
 
 
 class CustomLoggerMiddleware(LoggingMiddleware):
+    """
+    django-request-logging: logs each request's method and path, and its status. Request and response bodies are
+    logged only with settings.LOG_REQUEST_BODIES; the library would log them at DEBUG, or at ERROR for a 4xx or 5xx
+    response. Credential headers (those analytics events redact) are masked.
+    """
+    def __init__(self, get_response=None):
+        super().__init__(get_response)
+        # A new list, not += on the library's shared default. The library matches request.headers names exactly, and
+        # Django title-cases them ('X-Api-Key').
+        self.sensitive_headers = self.sensitive_headers + [
+            name.title() for name in AnalyticsEventEmitter.SENSITIVE_HEADERS]
+        self.masked_header_names = {name.lower() for name in self.sensitive_headers}
+
     def __call__(self, request):
         if request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
             return self.get_response(request)
         return super().__call__(request)
+
+    def _log_request_body(self, request, logging_context, log_level, cached_request_body):
+        if settings.LOG_REQUEST_BODIES:
+            super()._log_request_body(request, logging_context, log_level, cached_request_body)
+
+    def _log_resp(self, level, response, logging_context):
+        """The library's: a JSON response's headers, now masked, then its body, now only with LOG_REQUEST_BODIES."""
+        if not re.match('^application/json', response.get('Content-Type', ''), re.I):
+            return
+        headers = {
+            name: '*****' if name.lower() in self.masked_header_names else value
+            for name, value in response.items()
+        }
+        self.logger.log(level, headers, logging_context)
+        if settings.LOG_REQUEST_BODIES:
+            body = '(data_stream)' if response.streaming else self._chunked_to_max(response.content)
+            self.logger.log(level, body, logging_context)
 
 
 class FixMalformedLimitParamMiddleware(BaseMiddleware):
