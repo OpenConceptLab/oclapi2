@@ -68,6 +68,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
     _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
+    _member_owners = None  # get_member_owners's, read once per request
     # a fuzzy search's targets, which only the concept list sets: without them it keeps to the URL's scope
     _source_versions = None
     _extra_filters = None
@@ -844,9 +845,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a source or
         owner name stays only if it names a repository the requester can view; a name of a mapping's or concept's
         target is left out only if the repositories it names exist and the requester can view none of them, so a
-        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. A hit kept as its
-        creator's can have its names missing, never wrong. `search`: get_facets_search's, which tells whether the
-        search filters by access.
+        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. `search`:
+        get_facets_search's, which tells whether the search filters by access.
         """
         user = self.request.user
         named = [facet for facet in self.repo_name_facets if facets.get(facet)]
@@ -998,18 +998,64 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return False
 
     def get_public_criteria(self):
+        """
+        Public documents and, for a signed-in requester, the private ones they can view: of repositories, concepts and
+        mappings, those of their own and their orgs' repositories, by current membership as lists and reads have it
+        (get_member_owner_criteria); of orgs, those the index lists them as a member of.
+        """
         criteria = Q('term', public_can_view=True)
         user = self.request.user
 
         if user.is_authenticated:
-            username = user.username
-            from core.orgs.documents import OrganizationDocument
-            if self.document_model in [OrganizationDocument]:
-                criteria |= (Q('term', public_can_view=False) & Q('term', user=username))
+            if self.is_org_document():
+                criteria |= (Q('term', public_can_view=False) & Q('term', user=user.username))
             if self.is_concept_container_document_model() or self.is_source_child_document_model():
-                criteria |= (Q('term', public_can_view=False) & Q('term', created_by=username))
+                member_criteria = self.get_member_owner_criteria()
+                if member_criteria is not None:
+                    criteria |= member_criteria
 
         return criteria
+
+    def get_member_owner_criteria(self):
+        """
+        The documents of the requester's own and their orgs' repositories, by owner type and name; None if there are
+        none. Concept documents hold the owner's name as it is. The others hold it lowercased, so a name another owner
+        of the same type has in another case is left out: it would match that owner's documents too. Its own scope
+        (/orgs/<org>/..., /user/...) still shows them.
+        """
+        exact = self.is_concept_document()
+        names = {}
+        for owner_type, name, has_twin in self.get_member_owners():
+            if exact or not has_twin:
+                names.setdefault(owner_type, []).append(name if exact else name.lower())
+        criteria = None
+        for owner_type, owner_names in names.items():
+            owner_criteria = Q('term', owner_type=owner_type) & Q(
+                'terms', **{EXACT_OWNER_FIELD if exact else 'owner': owner_names})
+            criteria = owner_criteria if criteria is None else criteria | owner_criteria
+        return criteria
+
+    def get_member_owners(self):
+        """
+        The requester and their orgs, as (owner type, name, whether another owner of that type has the name in another
+        case): one query, read once per request, as hits and facets each build a search.
+        """
+        if self._member_owners is None:
+            from core.orgs.models import Organization
+            from core.users.models import UserProfile
+            user = self.request.user
+            orgs = user.organizations.annotate(
+                _type=models.Value(ORG_OBJECT_TYPE), _name=F('mnemonic'), _twin=models.Exists(
+                    Organization.objects.filter(mnemonic__iexact=models.OuterRef('mnemonic')).exclude(
+                        id=models.OuterRef('id')))
+            ).order_by().values_list('_type', '_name', '_twin')
+            requester = UserProfile.objects.filter(id=user.id).annotate(
+                _type=models.Value(USER_OBJECT_TYPE), _name=F('username'), _twin=models.Exists(
+                    UserProfile.objects.filter(username__iexact=models.OuterRef('username')).exclude(
+                        id=models.OuterRef('id')))
+            ).values_list('_type', '_name', '_twin')
+            self._member_owners = list(requester.union(orgs, all=True))
+        return self._member_owners
 
     def is_global_scope(self):
         return self.kwargs.get('org', None) is None and self.kwargs.get('user', None) is None
@@ -1411,9 +1457,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         The hits the requester can view, as the database has them now: a hit whose index document is stale, such as a
         repository made private before it was reindexed, is left out, and so is a concept or mapping of a source the
         requester can't view (a source made private commits before its save signal makes them private). One query for
-        the page (one per model for the repo search, whose hits are sources and collections). Like the search's access
-        filter, it keeps the repositories, concepts and mappings the requester created. The page can then hold fewer
-        hits than its limit, while num_found stays the index's count.
+        the page (one per model for the repo search, whose hits are sources and collections). The page can then hold
+        fewer hits than its limit, while num_found stays the index's count.
         """
         user = self.request.user
         if not isinstance(hits, models.QuerySet):  # the repo search's sources and collections
@@ -1428,9 +1473,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             from core.sources.models import Source
             parents = Source.get_viewable(Source.objects.filter(id__in=hits.order_by().values('parent_id')), user)
             viewable = viewable.filter(parent_id__in=parents.values('id'))
-        if user.is_authenticated and not user.is_staff and (
-                self.is_concept_container_document_model() or self.is_source_child_document_model()):
-            viewable = hits.filter(models.Q(id__in=viewable.values('id')) | models.Q(created_by_id=user.id))
         return viewable
 
     def get_search_results_qs(self):

@@ -435,7 +435,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
 
 class ConceptVersionListSerializer(CollectionVersionsMixin, ConceptListSerializer):
     previous_version_url = CharField(read_only=True, source='prev_version_uri')
-    source_versions = ListField(read_only=True)
+    source_versions = SerializerMethodField()
     collection_versions = SerializerMethodField()
 
     class Meta:
@@ -741,7 +741,7 @@ class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionField
     child_concepts = SerializerMethodField()
     parent_concept_urls = ViewableHierarchyUrlsField('parent_concepts', read_only=True)
     child_concept_urls = ViewableHierarchyUrlsField('child_concepts', read_only=True)
-    source_versions = ListField(read_only=True)
+    source_versions = SerializerMethodField()
     collection_versions = SerializerMethodField()
     references = SerializerMethodField()
     latest_source_version = SerializerMethodField()

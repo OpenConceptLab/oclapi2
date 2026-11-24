@@ -716,11 +716,12 @@ class SourceChildMixin(ChecksumModel):
         loaders = {
             'version_url': cls.load_latest_version_uris,
             'previous_version_url': cls.load_previous_version_uris,
-            'source_versions': cls.load_source_versions,
         }
         for field, loader in loaders.items():
             if field in fields:
                 loader(instances)
+        if 'source_versions' in fields:
+            cls.load_source_versions(instances, user)
         if 'collection_versions' in fields:
             cls.load_collection_versions(instances, user)
 
@@ -730,9 +731,9 @@ class SourceChildMixin(ChecksumModel):
             if fields & {'references', 'latest_source_version'}:
                 cls.load_collection_references(instances, collection)
             if 'latest_source_version' in fields:
-                cls.load_collection_source_versions(instances, collection)
+                cls.load_collection_source_versions(instances, collection, user)
         if reads_latest_source_version:
-            cls.load_latest_source_versions(instances)
+            cls.load_latest_source_versions(instances, user)
 
     @classmethod
     def load_latest_version_uris(cls, instances):
@@ -746,13 +747,13 @@ class SourceChildMixin(ChecksumModel):
             instance._latest_version_uri = latest_version_uris.get(instance.id)  # pylint: disable=protected-access
 
     @classmethod
-    def load_source_versions(cls, instances):
-        """Sets each row's _source_versions: the uris of the released source versions holding it."""
+    def load_source_versions(cls, instances, user):
+        """Sets each row's _source_versions: the uris of the source versions holding it that the user can view."""
         key = f'{cls._meta.model_name}_id'
         uris = {}
-        for row_id, uri in cls.sources.through.objects.filter(
+        for row_id, uri in cls.filter_by_viewable_source_version(cls.sources.through.objects.filter(
                 **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(source__version=HEAD).order_by('source__created_at').values_list(key, 'source__uri'):
+        ).exclude(source__version=HEAD), user).order_by('source__created_at').values_list(key, 'source__uri'):
             uris.setdefault(row_id, []).append(uri)
         for instance in instances:
             instance._source_versions = uris.get(instance.id, [])  # pylint: disable=protected-access
@@ -771,18 +772,41 @@ class SourceChildMixin(ChecksumModel):
             instance._collection_versions = sorted(uris.get(instance.id, ()))  # pylint: disable=protected-access
 
     @classmethod
-    def load_latest_source_versions(cls, instances):
-        """Sets each row's _latest_source_version: the latest released source version holding it."""
+    def load_latest_source_versions(cls, instances, user=None):
+        """
+        Sets each row's _latest_source_version, the latest released source version holding it, and
+        _latest_source_version_name, the name of the latest of them the user can view (get_latest_source_version_name).
+        Two queries, as one for the version alone; one more when a row's latest is one the user can't view.
+        """
         key = f'{cls._meta.model_name}_id'
-        latest_source_version_ids = dict(cls.sources.through.objects.filter(
-            **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(source__version=HEAD).order_by(key, '-source__created_at').distinct(key).values_list(
-            key, 'source_id'))
-        source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
-            set(latest_source_version_ids.values()))
+        rows = cls.sources.through.objects.filter(
+            **{f'{key}__in': [instance.id for instance in instances]}).exclude(source__version=HEAD)
+        latest_source_version_ids = dict(
+            rows.order_by(key, '-source__created_at').distinct(key).values_list(key, 'source_id'))
+        source_model = cls._meta.get_field('sources').related_model
+        viewable = source_model.get_viewable_versions_criteria(user)
+        source_versions = (source_model.objects if viewable is None else source_model.objects.annotate(
+            _viewable=models.ExpressionWrapper(viewable, output_field=models.BooleanField()))
+        ).in_bulk(set(latest_source_version_ids.values()))
+        names = {row_id: source_versions[source_id].version for row_id, source_id in latest_source_version_ids.items()
+                 if get(source_versions[source_id], '_viewable', True)}
+        hidden = set(latest_source_version_ids) - set(names)
+        if hidden:  # those rows' latest viewable one, if any
+            names.update(cls.filter_by_viewable_source_version(rows.filter(**{f'{key}__in': hidden}), user).order_by(
+                key, '-source__created_at').distinct(key).values_list(key, 'source__version'))
         for instance in instances:
             # pylint: disable=protected-access
             instance._latest_source_version = source_versions.get(latest_source_version_ids.get(instance.id))
+            instance._latest_source_version_name = names.get(instance.id)
+
+    @classmethod
+    def filter_by_viewable_source_version(cls, rows, user):
+        """Rows of `sources`' through table naming a source version the user can view (has_view_access; staff: all)"""
+        source_model = cls._meta.get_field('sources').related_model
+        viewable = source_model.get_viewable_versions_criteria(user)
+        if viewable is None:
+            return rows
+        return rows.filter(Exists(source_model.objects.filter(viewable, id=OuterRef('source_id'))))
 
     @classmethod
     def load_previous_version_uris(cls, instances):
@@ -818,27 +842,36 @@ class SourceChildMixin(ChecksumModel):
         return list(self.collection_references(collection).order_by('id').values_list('id', flat=True))
 
     @classmethod
-    def load_collection_source_versions(cls, instances, collection):
+    def load_collection_source_versions(cls, instances, collection, user=None):
         """
         Sets each row's _collection_source_version: the newest source version holding it that the collection version's
-        expansion recorded (else that its references resolved to), or None when that is HEAD or no source version.
+        expansion recorded (else that its references resolved to), or None when that is HEAD, no source version or
+        one the user can't view.
         """
         expansion = collection.expansion
         if expansion:
             cls.load_expansion_source_versions(instances, expansion)
+        else:
+            reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
+            references = cls._meta.get_field('references').related_model.objects.in_bulk(
+                {reference_id for ids in reference_ids.values() for reference_id in ids})
+            resolved = {}
+            for instance in instances:
+                versions = compact(
+                    references[reference_id]._get_resolved_system_version(resolved)  # pylint: disable=protected-access
+                    for reference_id in reference_ids[instance.id]
+                )
+                instance.set_collection_source_version(versions)
+
+        source_model = cls._meta.get_field('sources').related_model
+        viewable = source_model.get_viewable_versions_criteria(user)
+        named = {get(instance, '_collection_source_version.id') for instance in instances} - {None}
+        if viewable is None or not named:
             return
-
-        reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
-        references = cls._meta.get_field('references').related_model.objects.in_bulk(
-            {reference_id for ids in reference_ids.values() for reference_id in ids})
-
-        resolved = {}
+        named -= set(source_model.objects.filter(viewable, id__in=named).values_list('id', flat=True))
         for instance in instances:
-            versions = compact(
-                references[reference_id]._get_resolved_system_version(resolved)  # pylint: disable=protected-access
-                for reference_id in reference_ids[instance.id]
-            )
-            instance.set_collection_source_version(versions)
+            if get(instance, '_collection_source_version.id') in named:
+                instance._collection_source_version = None  # pylint: disable=protected-access
 
     @classmethod
     def load_expansion_source_versions(cls, instances, expansion):  # pylint: disable=too-many-locals
@@ -882,6 +915,13 @@ class SourceChildMixin(ChecksumModel):
         if hasattr(self, '_latest_source_version'):  # loaded for the whole page by load_list_fields
             return self._latest_source_version
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
+
+    def get_latest_source_version_name(self, user):
+        """The name of the latest source version holding this row that the user can view, or None."""
+        if hasattr(self, '_latest_source_version_name'):  # loaded for the whole page by load_list_fields
+            return self._latest_source_version_name
+        return self.sources.model.get_viewable(self.sources.exclude(version=HEAD), user).order_by(
+            '-created_at').values_list('version', flat=True).first()
 
     @cached_property
     def _cached_latest_source_version(self):
@@ -1049,11 +1089,12 @@ class SourceChildMixin(ChecksumModel):
 
         return filters
 
-    @property
-    def source_versions(self):
+    def get_source_versions(self, user):
+        """URIs of the source versions holding this row that the user can view."""
         if hasattr(self, '_source_versions'):  # loaded for a whole page by load_list_fields
             return self._source_versions
-        return list(self.sources.exclude(version=HEAD).order_by('created_at').values_list('uri', flat=True))
+        return list(self.sources.model.get_viewable(self.sources.exclude(version=HEAD), user).order_by(
+            'created_at').values_list('uri', flat=True))
 
     def get_collection_versions(self, user):
         """URIs of the released collection versions holding this resource that the user can view."""

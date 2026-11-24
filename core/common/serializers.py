@@ -301,16 +301,24 @@ def get_collection_in_scope(context):
 
 class SourceVersionFieldMixin:
     """
-    latest_source_version for concepts and mappings: the latest released source version holding the row or, listed
-    in a collection, the source version the row's references there resolved to (ocl_issues#2770).
+    The source versions a concept or mapping is in, those the requester can view only. source_versions: their URIs.
+    latest_source_version: the latest one's name or, listed in a collection, the name of the source version the row's
+    references there resolved to (ocl_issues#2770).
     """
+    def get_requester(self):
+        # a $cascade bundle passes its requester as `user`
+        return get(self, 'context.request.user') or get(self, 'context.user')
+
+    def get_source_versions(self, obj):
+        return obj.get_source_versions(self.get_requester())
+
     def get_latest_source_version(self, obj):
         collection = get_collection_in_scope(self.context)
         if collection:
             if not hasattr(obj, '_collection_source_version'):
-                obj.load_collection_source_versions([obj], collection)
+                obj.load_collection_source_versions([obj], collection, self.get_requester())
             return get(obj, '_collection_source_version.version')
-        return get(obj.latest_source_version, 'version')
+        return obj.get_latest_source_version_name(self.get_requester())
 
 
 class SourceChildPageSerializer(ListSerializer):  # pylint: disable=abstract-method
