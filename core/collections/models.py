@@ -433,6 +433,28 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         return None
 
+    @staticmethod
+    def annotate_expansion_health(queryset):
+        """Each version's default expansion's health state and whether it's current, in the same query"""
+        # scoped to the version's own expansions, as Collection.expansion is
+        default_expansion = Expansion.objects.filter(
+            uri=models.OuterRef('expansion_uri'), collection_version_id=models.OuterRef('id'))
+        return queryset.annotate(
+            expansion_health_state=models.Subquery(default_expansion.values('health__state')[:1]),
+            expansion_health_is_current=models.Subquery(default_expansion.values('health_is_current')[:1]))
+
+    @staticmethod
+    def get_expansion_health(version):
+        """{state, is_current} of the version's default expansion; None until it has been computed"""
+        if hasattr(version, 'expansion_health_state'):
+            state, is_current = version.expansion_health_state, version.expansion_health_is_current
+        elif version.expansion_uri:
+            state, is_current = version.expansions.filter(uri=version.expansion_uri).values_list(
+                'health__state', 'health_is_current').first() or (None, None)
+        else:
+            state, is_current = None, None
+        return {'state': state, 'is_current': is_current} if state else None
+
     @cached_property
     def locked_source_versions(self):
         return self.get_locked_repo_versions('evaluated_source_versions')

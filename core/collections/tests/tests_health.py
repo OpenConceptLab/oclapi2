@@ -11,7 +11,7 @@ from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tasks import seed_children_to_new_version, recheck_expansion_health
-from core.common.tests import OCLTestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
 from core.sources.models import Source
@@ -981,3 +981,121 @@ class ExpansionHealthStorageTest(OCLTestCase):
         version.refresh_from_db()
         self.assertTrue(version.expansion.health_is_current)
         self.assertIsNotNone(version.expansion.health['state'])
+
+
+class ExpansionHealthAPITest(OCLAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.concept = ConceptFactory()
+        self.collection.add_expressions({'expressions': [self.concept.uri]}, self.collection.created_by)
+        self.expansion.refresh_from_db()
+
+    def test_expansion_detail_and_list_show_health_to_a_viewer(self):
+        detail = self.client.get(self.expansion.uri)
+        listing = self.client.get(self.collection.uri + 'HEAD/expansions/')
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data['health'], self.expansion.health)
+        self.assertTrue(detail.data['health_is_current'])
+        self.assertEqual(listing.data[0]['health']['state'], self.expansion.health['state'])
+
+    def test_versions_list_shows_each_default_expansion_state(self):
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v1', mnemonic=self.collection.mnemonic)
+
+        response = self.client.get(self.collection.uri + 'versions/')
+
+        self.assertEqual(response.status_code, 200)
+        health = {item['id']: item['expansion_health'] for item in response.data}
+        self.assertEqual(health['HEAD'], {'state': self.expansion.health['state'], 'is_current': True})
+        self.assertIsNone(health[version.version])
+
+    def test_version_detail_shows_its_default_expansion_state(self):
+        response = self.client.get(self.collection.uri + 'HEAD/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['expansion_health']['state'], self.expansion.health['state'])
+
+    def test_version_lists_nested_elsewhere_carry_no_expansion_health(self):
+        Expansion.objects.filter(id=self.expansion.id).update(health={'state': HEALTHY}, health_is_current=True)
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v1', mnemonic=self.collection.mnemonic)
+        self.expansion.evaluated_collection_versions.add(version)
+
+        response = self.client.get(self.expansion.uri)
+
+        self.assertNotIn('expansion_health', response.data['evaluated_collection_versions'][0])
+
+    def test_member_list_adds_each_members_class_only_when_asked(self):
+        url = self.expansion.uri + 'concepts/'
+
+        plain = self.client.get(url)
+        with_health = self.client.get(url + '?includeHealth=true')
+
+        self.assertNotIn('health', plain.data[0])
+        member = with_health.data[0]
+        self.assertIn(member['health']['class'], ('head', 'mismatch', 'release', 'unreleased'))
+        self.assertEqual(len(member['health']['references']), 1)
+        self.assertTrue(member['health']['references'][0].startswith(self.collection.uri + 'references/'))
+
+    def test_verbose_versions_list_shows_each_default_expansion_state(self):
+        response = self.client.get(self.collection.uri + 'versions/?verbose=true')
+
+        self.assertEqual(response.status_code, 200)
+        head = next(item for item in response.data if item['id'] == 'HEAD')
+        self.assertEqual(head['expansion_health']['state'], self.expansion.health['state'])
+
+    def test_version_export_leaves_out_expansion_health(self):
+        from core.collections.serializers import CollectionVersionExportSerializer
+        self.assertNotIn('expansion_health', CollectionVersionExportSerializer.Meta.fields)
+
+    def test_mapping_list_adds_each_members_class_when_asked(self):
+        from_concept, to_concept = ConceptFactory(), ConceptFactory()
+        mapping = MappingFactory(parent=from_concept.parent, from_concept=from_concept, to_concept=to_concept)
+        self.collection.add_expressions({'expressions': [mapping.uri]}, self.collection.created_by)
+
+        response = self.client.get(self.expansion.uri + 'mappings/?includeHealth=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertIn('class', response.data[0]['health'])
+        self.assertEqual(len(response.data[0]['health']['references']), 1)
+
+    def test_member_list_gives_each_row_its_own_class(self):
+        # a member of a release, next to the HEAD member from setUp, so swapped rows would show
+        second = ConceptFactory()
+        release = OrganizationSourceFactory(
+            mnemonic=second.parent.mnemonic, organization=second.parent.organization, version='v1', released=True)
+        second.get_latest_version().sources.add(release)
+        self.collection.add_expressions(
+            {'expressions': [f'{release.uri}concepts/{second.mnemonic}/']}, self.collection.created_by)
+        classes = ExpansionHealth(self.expansion).classify('concepts')
+        self.assertEqual(len({member_class for member_class, _, _ in classes.values()}), 2)
+
+        response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
+
+        self.assertEqual(len(response.data), 2)
+        for item in response.data:
+            self.assertEqual(item['health']['class'], classes[int(item['uuid'])][0])
+
+    @patch('core.common.utils.get_export_service')
+    def test_versions_list_csv_export_carries_no_health_annotation(self, export_service):
+        export_service.return_value.url_for.return_value = 'https://csv-url'
+
+        response = self.client.get(
+            self.collection.uri + 'versions/?csv=true',
+            HTTP_AUTHORIZATION=f'Token {self.collection.created_by.get_token()}')
+
+        # djqscsv writes the queryset's values(), which can't carry the health annotation
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'url': 'https://csv-url'})
+
+    def test_member_list_ignores_include_health_with_the_toggle_off(self):
+        with patch.object(Expansion, 'is_health_on', return_value=False):
+            response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
+
+        self.assertNotIn('health', response.data[0])
