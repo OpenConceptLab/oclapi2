@@ -1496,6 +1496,11 @@ class CollectionReference(models.Model):
         expansion = self.get_default_expansion(expansion_cache) if self.collection_id else None
         versions = []
         for valueset in self.valueset if isinstance(self.valueset, list) else []:
+            # a named version the expansion recorded stays what it resolved to, even once it's retired
+            named = expansion.get_recorded_named_collection_version(valueset) if expansion and valueset else None
+            if named:
+                versions.append(named)
+                continue
             version = self._get_valueset_version(valueset, valueset_version_cache) if valueset else None
             if version:
                 recorded = expansion.get_collection_versions_resolved_by(valueset, version) if expansion else []
@@ -2374,6 +2379,22 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     @cached_property
     def recorded_evaluated_collection_versions(self):
         return list(self.evaluated_collection_versions.all())
+
+    @cached_property
+    def recorded_explicit_collection_versions(self):
+        return list(self.explicit_collection_versions.all())
+
+    def get_recorded_named_collection_version(self, valueset):
+        """The explicit collection version this expansion recorded for a value set named with its version, if any"""
+        if not CollectionReference.is_explicit_valueset(valueset):
+            return None
+        url, version = split_canonical(valueset)
+        if version:
+            return next((
+                recorded for recorded in self.recorded_explicit_collection_versions
+                if recorded.version == version and url in (recorded.canonical_url, drop_version(recorded.uri))), None)
+        path = url if url.endswith('/') else url + '/'
+        return next((recorded for recorded in self.recorded_explicit_collection_versions if recorded.uri == path), None)
 
     @staticmethod
     def get_versions_of_repo(versions, repo_version):
