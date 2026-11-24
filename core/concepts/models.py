@@ -1531,15 +1531,19 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     @classmethod
     def reconcile_import_hierarchy(cls, hierarchy_map, user, replace_head=False):
-        ImportHierarchy.from_uri_map(hierarchy_map, user).apply(replace_head)
+        ImportHierarchy.from_uri_map(hierarchy_map, user, seed=replace_head).apply(replace_head)
 
     @classmethod
     def get_versioned_objects_by_uri(cls, uris):
+        """
+        uri -> (versioned object id, source id). A URL more than one versioned object has resolves to the lowest id,
+        the row the importers' `.first()` lookups write to, so an import's hierarchy links the concepts it wrote.
+        """
         resolved = {}
         for batch in chunks(sorted(uris), 5000):
             for uri, concept_id, source_id in cls.objects.filter(
-                    uri__in=batch, id=F('versioned_object_id')).values_list('uri', 'id', 'parent_id'):
-                resolved[uri] = (concept_id, source_id)
+                    uri__in=batch, id=F('versioned_object_id')).order_by('id').values_list('uri', 'id', 'parent_id'):
+                resolved.setdefault(uri, (concept_id, source_id))
         return resolved
 
     @classmethod
@@ -2099,14 +2103,17 @@ class ImportHierarchy:
             {*links, *(parent_id for parent_ids in links.values() for parent_id in parent_ids)})
 
     @classmethod
-    def from_uri_map(cls, hierarchy_map, user=None):
+    def from_uri_map(cls, hierarchy_map, user=None, seed=False):  # pylint: disable=too-many-locals
         """
         hierarchy_map: child uri -> parent uris. With a user, only children it can edit, in sources the capability
-        policy doesn't refuse it edits to (the only sources it's asked about), and parents it can view.
+        policy doesn't refuse it edits to (the only sources it's asked about), and parents it can view. seed: a
+        seeding import's hierarchy (resolve_parents).
         """
         from core.sources.models import Source
         # children's URLs are versionless, so one lookup resolves them with their parents
-        resolved = cls.resolve_parents({*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)})
+        resolved = cls.resolve_parents(
+            {*hierarchy_map, *(uri for uris in hierarchy_map.values() for uri in uris)},
+            set(hierarchy_map) if seed else None)
         editable = viewable = None
         if user:
             sources = Source.objects.filter(id__in={source_id for _, source_id in resolved.values()})
@@ -2127,18 +2134,25 @@ class ImportHierarchy:
         return cls(links)
 
     @classmethod
-    def resolve_parents(cls, uris):
+    def resolve_parents(cls, uris, seeded_uris=None):
         """
         uri -> (concept id, source id) of each parent URL: the concept a URL names, or the concept of the exact version
-        it names. A version that doesn't exist resolves to nothing.
+        it names. seeded_uris: a seed's concept URLs. A version of one of them that several concepts share a URL with
+        resolves to the one get_versioned_objects_by_uri resolves the URL to: the one the seed writes, which keeps the
+        code. A version that doesn't exist resolves to nothing.
         """
         versioned_uris = {uri for uri in uris if drop_version(uri) != uri}
         versionless_uris = set(uris) - versioned_uris
         resolved = Concept.get_versioned_objects_by_uri(versionless_uris) if versionless_uris else {}
+        named_versions = {}
         for batch in chunks(sorted(versioned_uris), cls.CHUNK_SIZE):
             for uri, versioned_object_id, source_id in Concept.objects.filter(uri__in=batch).values_list(
                     'uri', 'versioned_object_id', 'parent_id'):
-                resolved[uri] = (versioned_object_id, source_id)
+                named_versions[uri] = (versioned_object_id, source_id)
+        seeded = {drop_version(uri) for uri in named_versions} & (seeded_uris or set())
+        heads = Concept.get_versioned_objects_by_uri(seeded) if seeded else {}
+        for uri, row in named_versions.items():
+            resolved[uri] = heads.get(drop_version(uri), row)
         return resolved
 
     @classmethod
