@@ -3806,7 +3806,8 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
             self.get_facet_counts(url + '&q=Active&includeRetired=true'), ({'classA': 1, 'classB': 1}, {'false': 2}))
         self.assertEqual(self.get_facet_counts(url + '&retired=1'), ({'classA': 1}, both))
         self.assertEqual(self.get_facet_counts(url + '&retired=False'), ({'classA': 1, 'classB': 1}, both))
-        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false&retired=true'), ({}, both))
+        # the OCL Mapper sends includeRetired=false with its Retired filter
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false&retired=true'), ({'classA': 1}, both))
 
     def test_source_facets_agree_with_results(self):
         url = self.source.concepts_url + '?conceptClass=classA'
@@ -3818,7 +3819,7 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
         self.assertEqual(self.get_ids(url + '&retired=true'), ['RetiredA'])
         self.assertEqual(self.get_ids(url + '&retired=True'), ['RetiredA'])
         self.assertEqual(self.get_ids(url + '&retired=0'), ['ActiveA'])
-        self.assertEqual(self.get_ids(url + '&includeRetired=false&retired=true'), [])
+        self.assertEqual(self.get_ids(url + '&includeRetired=false&retired=true'), ['RetiredA'])
 
     def test_expansion_facets(self):
         url = self.expansion.url + 'concepts/?facetsOnly=true'
@@ -3837,6 +3838,7 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
         self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
         self.assertEqual(self.get_ids(url + '?conceptClass=classA&includeRetired=false'), ['ActiveA'])
         self.assertEqual(self.get_ids(url + '?conceptClass=classA&retired=false'), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '?includeRetired=false&retired=true'), ['RetiredA'])
 
     def test_collection_facets_agree_with_results(self):
         url = self.collection.concepts_url

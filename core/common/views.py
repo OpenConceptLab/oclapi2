@@ -107,12 +107,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
-        if params.get(INCLUDE_RETIRED_PARAM, None) in FALSY:
-            return True
-        if self.is_collection_members_list():
-            return False
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None)
         retired = {to_snake_case(key): value for key, value in params.items()}.get('retired')  # as get_faceted_filters
-        return not (retired in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY)
+        # a retired=true filter lets them in whatever includeRetired says: the OCL Mapper sends both
+        if retired in TRUTHY or include_retired in TRUTHY:
+            return False
+        if self.is_collection_members_list():  # in unless includeRetired=false
+            return include_retired in FALSY
+        return True
 
     def get_retired_criterion(self):
         """
