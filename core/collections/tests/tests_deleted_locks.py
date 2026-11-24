@@ -132,11 +132,47 @@ class DeletedLockTest(OCLTestCase):
 
     def test_health_counts_a_version_recorded_twice_once(self):
         self.expansion.evaluated_source_versions.add(self.v1)
-        Expansion.record_deleted_locks([self.v1])
-        Expansion.record_deleted_locks([self.v1])
+        Expansion.record_deleted_locks(Expansion.plan_deleted_locks([self.v1]))
+        Expansion.record_deleted_locks(Expansion.plan_deleted_locks([self.v1]))
 
         self.assertEqual(
             self.deleted_lock_reason(), {'code': 'locked_version_deleted', 'count': 1, 'versions': [self.v1.uri]})
+
+    def test_the_delete_recomputes_health_so_the_warning_shows_at_once(self):
+        self.expansion.evaluated_source_versions.add(self.v1)
+
+        self.v1.delete()
+
+        health, is_current = Expansion.objects.values_list('health', 'health_is_current').get(id=self.expansion.id)
+        self.assertTrue(is_current)
+        self.assertIn('locked_version_deleted', [reason['code'] for reason in health['reasons']])
+
+    def test_a_public_release_under_a_private_head_is_recorded_as_private(self):
+        type(self.source).objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
+        self.expansion.evaluated_source_versions.add(self.v1)
+
+        self.v1.delete()
+
+        self.assertEqual(self.recorded(self.expansion)[0]['public'], False)
+
+    def test_a_delete_that_fails_records_nothing(self):
+        self.expansion.evaluated_source_versions.add(self.v1)
+
+        with patch.object(type(self.v1), 'delete_version_changelogs', side_effect=RuntimeError('boom')), \
+                self.assertRaises(RuntimeError):
+            self.v1.delete()
+
+        self.assertEqual(self.recorded(self.expansion), [])
+
+    def test_a_rebuild_that_fails_keeps_the_record(self):
+        self.expansion.evaluated_source_versions.add(self.v1)
+        self.v1.delete()
+
+        with patch.object(Expansion, 'dedupe_resources', side_effect=RuntimeError('boom')), \
+                self.assertRaises(RuntimeError):
+            Expansion.objects.get(id=self.expansion.id).seed_children(index=False, force_reevaluate=True)
+
+        self.assertEqual(len(self.recorded(self.expansion)), 1)
 
     def test_a_rebuild_from_scratch_clears_the_record(self):
         self.expansion.evaluated_source_versions.add(self.v1)

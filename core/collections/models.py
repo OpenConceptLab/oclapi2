@@ -1994,9 +1994,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.evaluated_collection_versions.clear()
             self.evaluated_source_versions.clear()
             self.unresolved_repo_versions = []
-            # rebuilt without the deleted locks, so it no longer stands on them
-            self.deleted_locked_repo_versions = []
-            Expansion.objects.filter(id=self.id).update(deleted_locked_repo_versions=[])
 
         # attempt_reevaluate is False for delete reference(s)
         should_reevaluate = force_reevaluate or (attempt_reevaluate and not self.is_auto_generated)
@@ -2191,6 +2188,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.unresolved_repo_versions = unresolved_repo_versions
             self.save()
         self.dedupe_resources()
+        if force_reevaluate and is_adding_all:
+            # rebuilt without the deleted locks, so it no longer stands on them; cleared only once that's done
+            self.deleted_locked_repo_versions = []
+            Expansion.objects.filter(id=self.id).update(deleted_locked_repo_versions=[])
         if index:
             member_concept_ids = set(self.concepts.values_list('id', flat=True))
             member_mapping_ids = set(self.mappings.values_list('id', flat=True))
@@ -2651,24 +2652,50 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     output_field=models.BooleanField(null=True)))
 
     @classmethod
-    def record_deleted_locks(cls, repo_versions):
-        """On each expansion locked to one of these versions, which one is being deleted. Deleting the rows drops
-        the lock, so a later add would quietly fall back to the latest release; this keeps the sign of it"""
-        from core.common.models import BaseModel
+    def before_repository_delete(cls, repo_version, versions):
+        """Marks the expansions that recorded the repository not current and plans the deleted-lock records, while
+        the rows still exist. Returns what to run once the delete has succeeded: write the records, and mark the same
+        expansions again on commit, whatever their flag, so a recompute that ran meanwhile isn't left current"""
+        expansion_ids = cls.mark_health_not_current_for_repository(repo_version)
+        deleted_locks = cls.plan_deleted_locks(versions)
+
+        def after_delete():
+            cls.record_deleted_locks(deleted_locks)
+            transaction.on_commit(lambda: cls.mark_health_not_current(expansion_ids))
+        return after_delete
+
+    @classmethod
+    def plan_deleted_locks(cls, repo_versions):
+        """[(ids of the expansions locked to a version, its record)] for versions about to be deleted. Read before
+        the delete, while the locks and the version's HEAD still exist"""
         deleted_at = timezone.now().isoformat()
+        plan = []
         for version in repo_versions:
             kind = 'collection' if isinstance(version, Collection) else 'source'
             through = getattr(cls, f'evaluated_{kind}_versions').through
-            entry = {
-                'url': version.uri, 'repo_url': drop_version(version.uri), 'version': version.version,
-                'type': version.resource_type, 'deleted_at': deleted_at, 'owner_url': version.parent_url,
-                # health names it only where it was visible, as the version is gone by the time anyone asks
-                'public': version.public_access in BaseModel.PUBLIC_ACCESS_VALUES}
-            entries = ArrayField(models.JSONField())
-            locked = through.objects.filter(**{f'{kind}_id': version.id}).values('expansion_id')
-            cls.objects.filter(id__in=locked).update(deleted_locked_repo_versions=models.Func(
+            expansion_ids = list(through.objects.filter(**{f'{kind}_id': version.id}).values_list(
+                'expansion_id', flat=True).distinct())
+            if expansion_ids:
+                plan.append((expansion_ids, {
+                    'url': version.uri, 'repo_url': drop_version(version.uri), 'version': version.version,
+                    'type': version.resource_type, 'deleted_at': deleted_at, 'owner_url': version.parent_url,
+                    # health names it only where it was visible, as the version is gone by the time anyone asks
+                    'public': version.is_publicly_viewable}))
+        return plan
+
+    @classmethod
+    def record_deleted_locks(cls, plan):
+        """Writes the planned records once the delete has succeeded, and recomputes each expansion's health, so the
+        warning shows now rather than at its next change, which a frozen release never gets"""
+        entries = ArrayField(models.JSONField())
+        expansion_ids = set()
+        for locked_ids, entry in plan:
+            cls.objects.filter(id__in=locked_ids).update(deleted_locked_repo_versions=models.Func(
                 Coalesce(models.F('deleted_locked_repo_versions'), models.Value([], output_field=entries)),
                 models.Value([entry], output_field=entries), function='array_cat', output_field=entries))
+            expansion_ids.update(locked_ids)
+        for expansion in cls.objects.filter(id__in=expansion_ids):
+            expansion.mark_health_out_of_date()
 
     @classmethod
     def mark_health_not_current_for_repository(cls, repo_version):
