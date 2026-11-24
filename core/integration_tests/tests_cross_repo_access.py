@@ -1,3 +1,4 @@
+import itertools
 import uuid
 
 import factory
@@ -684,6 +685,12 @@ class FuzzySearchListsTest(CrossRepoAccessBaseTest):
                 self.assertEqual(response.status_code, 400, (url, min_score))
             response = self.client.get(f'{url}?fuzzy=true&q={self.name}&min_score=0.01')
             self.assertEqual((response.status_code, len(response.data)), (200, 1), url)
+
+    def test_stats_only_search_for_nothing_answers_an_empty_list(self):
+        for url in ['/mappings/', self.collection.uri + 'concepts/', self.public_source.uri + 'concepts/']:
+            for fuzzy, query in itertools.product(['true', 'false'], ['%22%22', '%20', "''"]):
+                response = self.client.get(f'{url}?fuzzy={fuzzy}&q={query}&searchStatsOnly=true')
+                self.assertEqual((response.status_code, response.data), (200, []), (url, fuzzy, query))
 
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
