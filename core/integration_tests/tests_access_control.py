@@ -2379,6 +2379,10 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(facets['collection_version'][f'hidden{self.tag}'], 4, user)
             self.assertEqual(facets['expansion'][f'hidden{self.tag}'], 4, user)
         self.assertEqual(self.facets(url, self.member)['collection_version']['v1'], 3)
+        # neither facet is a query-string filter: naming one of their buckets lists the scope as it is
+        everything = self.listed(url, self.outsider, 'concepts')
+        for query in ['collectionVersion=v1', f'collectionVersion=hidden{self.tag}', f'expansion=hidden{self.tag}']:
+            self.assertEqual(self.listed(f'{url}?{query}', self.outsider, 'concepts'), everything, query)
 
     def test_a_prefix_matching_too_many_versions_answers_400(self):
         url = f'/concepts/?collection={self.tag}*'
