@@ -280,8 +280,9 @@ class CollectionListViewTest(OCLAPITestCase):
         collection.refresh_from_db()
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.expansion.concepts.count(), 1)
-        self.assertEqual(collection.expansion.active_concepts, 1)
-        self.assertEqual(collection.expansion.active_mappings, 0)
+        self.assertEqual(
+            collection.expansion.get_member_counts(),
+            {'active_concepts': 1, 'active_mappings': 0, 'retired_concepts': 0, 'retired_mappings': 0})
         self.assertTrue(collection.references.filter(expression=concept.uri).exists())
         self.assertEqual(
             response.data,

@@ -1747,21 +1747,15 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     def get_mappings_queryset(self):
         return self.mappings.filter()
 
-    @property
-    def active_concepts(self):
-        return self.concepts.filter(retired=False, is_active=True).count()
-
-    @property
-    def active_mappings(self):
-        return self.mappings.filter(retired=False, is_active=True).count()
-
-    @property
-    def retired_concepts(self):
-        return self.concepts.filter(retired=True).count()
-
-    @property
-    def retired_mappings(self):
-        return self.mappings.filter(retired=True).count()
+    def get_member_counts(self):
+        """Its summary: how many of its concepts and of its mappings are active (not retired), and retired."""
+        counts = {}
+        for resource in ('concepts', 'mappings'):
+            for key, count in getattr(self, resource).aggregate(
+                    active=models.Count('id', filter=models.Q(retired=False, is_active=True)),
+                    retired=models.Count('id', filter=models.Q(retired=True))).items():
+                counts[f'{key}_{resource}'] = count
+        return counts
 
     @property
     def owner_url(self):
