@@ -147,7 +147,7 @@ class ExpansionHealthTest(OCLTestCase):
         mismatch = next(reason for reason in self.health()['reasons'] if reason['code'] == 'version_mismatches')
         self.assertEqual(mismatch['head_concept'], 1)
 
-    def test_head_concept_judged_differently_is_ambiguous_and_still_counted_apart(self):
+    def test_head_concept_named_by_a_pinned_reference_too_stays_a_mismatch(self):
         head_concept = ConceptFactory(parent=self.source)
         self.reference(head_concept, head_concept)
         pinned = CollectionReference(
@@ -156,21 +156,22 @@ class ExpansionHealthTest(OCLTestCase):
         pinned.save()
         pinned.concepts.add(head_concept)
 
-        self.assertEqual(self.classify(), {head_concept.id: AMBIGUOUS})
-        ambiguous = next(reason for reason in self.health()['reasons'] if reason['code'] == 'ambiguous_members')
-        self.assertEqual(ambiguous, {'code': 'ambiguous_members', 'count': 1, 'head_concept': 1, 'head_mapping': 0})
+        # a HEAD object is a mismatch whichever reference judges it, so it is never ambiguous
+        self.assertEqual(self.classify(), {head_concept.id: MISMATCH})
+        reasons = {reason['code']: reason for reason in self.health()['reasons']}
+        self.assertEqual(reasons['version_mismatches']['head_concept'], 1)
+        self.assertNotIn('ambiguous_members', reasons)
 
     def test_member_two_references_judge_differently_is_ambiguous(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()
         release = self.release('v1', version)
-        self.expansion.evaluated_source_versions.add(release)
-        self.reference(concept, version)
-        pinned = CollectionReference(
-            expression=version.uri, collection=self.collection, system=self.source.uri, code=concept.mnemonic,
-            resource_version=version.version)
-        pinned.save()
-        pinned.concepts.add(version)
+        draft = OrganizationSourceFactory(
+            mnemonic=self.source.mnemonic, organization=self.source.organization, version='draft', released=False)
+        version.sources.add(draft)
+        self.expansion.explicit_source_versions.add(release, draft)
+        self.reference(concept, version, version='v1')
+        self.reference(concept, version, version='draft')
 
         classes = ExpansionHealth(self.expansion).classify('concepts')
         self.assertEqual(classes[version.id][0], AMBIGUOUS)
