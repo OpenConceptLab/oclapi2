@@ -32,7 +32,8 @@ from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, DEPRECATED_API_HEADER, ACCESS_TYPE_NONE
 from core.common.tasks import post_import_update_resource_counts, bulk_import_parts_inline, bulk_import_inline, \
     bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new, index_concepts_mapped_codes, \
-    index_dropped_source_children, try_job_lock, POST_IMPORT_COUNTS_LOCK, POST_IMPORT_COUNTS_REQUEUE_SECONDS
+    index_dropped_source_children, try_job_lock, POST_IMPORT_COUNTS_LOCK, POST_IMPORT_COUNTS_REQUEUE_SECONDS, \
+    seed_children_to_new_version
 from core.common.backends import QueueOnceRedisBackend
 from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key, \
@@ -4978,7 +4979,7 @@ class TasksTest(OCLTestCase):
         bulk_import_parts_inline([1, 2], 'username', True)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(
             content=None, username='username', update_if_exists=True, input_list=[1, 2],
-            self_task_id=ANY, skip_hierarchy_tasks=True, index=True, isolated=False
+            self_task_id=ANY, skip_hierarchy_tasks=True, index=True, isolated=False, snapshot_boundary=False
         )
         bulk_import_inline_mock().run.assert_called_once()
 
@@ -4986,7 +4987,7 @@ class TasksTest(OCLTestCase):
         bulk_import_parts_inline([1, 2], 'username', True, False)  # pylint: disable=no-value-for-parameter
         bulk_import_inline_mock.assert_called_once_with(
             content=None, username='username', update_if_exists=True, input_list=[1, 2],
-            self_task_id=ANY, skip_hierarchy_tasks=True, index=False, isolated=False
+            self_task_id=ANY, skip_hierarchy_tasks=True, index=False, isolated=False, snapshot_boundary=False
         )
 
     @patch('core.importers.models.BulkImportInline')
@@ -7730,6 +7731,184 @@ class IsolatedVersionImportTest(OCLTestCase):
 
         self.assertEqual(len(importer.failed), 0)
         self.assertEqual(self.head_concepts(), {'A', 'B', 'C'})
+
+    def run_legacy_parallel(self, lines):
+        """Execute real part tasks eagerly without letting their exit hooks close the test transaction."""
+        Task.objects.create(id='legacy-boundaries', name='bulk_import')
+        runner = BulkImportParallelRunner('\n'.join(map(json.dumps, lines)), 'ocladmin', True, parallel=3,
+                                          self_task_id='legacy-boundaries', index=False)
+        with patch('core.importers.models.group.apply_async', autospec=True,
+                   side_effect=lambda job, **_: job.apply()), \
+                patch('django.db.backends.base.base.BaseDatabaseWrapper.close_if_unusable_or_obsolete'), \
+                patch('core.importers.models.post_import_update_resource_counts.apply_async'):
+            runner.run()
+        return runner
+
+    def test_legacy_parallel_versions_keep_the_hierarchy_at_each_boundary(self):
+        """Each release gets its own child revision and links; trailing content only goes to HEAD."""
+        lines = [self.source_line, self.concept('C', parents=['P1']), self.concept('R', parents=['P1']),
+                 self.concept('P1'), self.concept('P2'), self.version('v1'),
+                 self.concept('C', parents=['P2'], extras={'delta': True}),
+                 {**self.concept('R'), '__action': 'DELETE'}, self.concept('N', parents=['P1']), self.version('v2'),
+                 self.concept('C', parents=['P3'], extras={'unreleased': True}), self.concept('P3')]
+        runner = self.run_legacy_parallel(lines)
+        result = runner.json_result
+        self.assertEqual(result['failed'] + result['exception'], [])
+        self.assertEqual(result['processed'], len(lines))
+        for version, expected in [('v1', {'P1'}), ('v2', {'P2'})]:
+            with self.subTest(version=version):
+                release = Source.objects.get(mnemonic='LOINC', version=version)
+                child = release.concepts.get(mnemonic='C')
+                self.assertEqual(set(child.parent_concepts.values_list('mnemonic', flat=True)), expected)
+        self.assertEqual(self.members('v1'), {'C', 'R', 'P1', 'P2'})
+        self.assertEqual(self.members('v2'), {'C', 'R', 'N', 'P1', 'P2'})
+        release = Source.objects.get(mnemonic='LOINC', version='v1')
+        retired_later = release.concepts.get(mnemonic='R')
+        self.assertFalse(retired_later.retired)
+        self.assertTrue(retired_later.parent_concepts.filter(mnemonic='P1').exists())
+        token = UserProfile.objects.get(username='ocladmin').get_token()
+        for path, expected_ids in [('C/parents/', {'P1'}), ('P1/children/', {'C', 'R'})]:
+            response = self.client.get(f'{release.uri}concepts/{path}', HTTP_AUTHORIZATION='Token ' + token)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual({row['id'] for row in response.json()}, expected_ids)
+        head = Source.objects.get(mnemonic='LOINC', version='HEAD')
+        latest = head.concepts.get(mnemonic='C', is_latest_version=True)
+        self.assertTrue(latest.parent_concepts.filter(mnemonic='P3').exists())
+        self.assertEqual(runner.get_completed_progress(), runner.get_total_progress_target())
+
+    def test_legacy_parallel_boundary_does_not_consume_other_sources_links(self):
+        """An unrelated release must not consume links whose parent is still to be imported."""
+        other_parent = '/orgs/Regen/sources/OTHER/concepts/P/'
+        lines = [self.source_line, {**self.source_line, 'id': 'OTHER'},
+                 self.concept('C', source='OTHER', parent_concept_urls=[other_parent]),
+                 self.version('v1'), self.concept('P', source='OTHER'), self.version('v1', source='OTHER')]
+        runner = self.run_legacy_parallel(lines)
+
+        self.assertEqual(runner.json_result['failed'] + runner.json_result['exception'], [])
+        release = Source.objects.get(mnemonic='OTHER', version='v1')
+        child = release.concepts.get(mnemonic='C')
+        self.assertTrue(child.parent_concepts.filter(uri__startswith=other_parent).exists())
+
+    def test_legacy_parallel_worker_queues_the_recoverable_seed(self):
+        """Membership, indexing and export belong to the existing durable seed task."""
+        self.run_import([self.concept('A'), self.concept('B'), self.mapping('M', 'A', 'B')], isolated_version=False)
+        with override_settings(TEST_MODE=False), \
+                patch('core.common.models.seed_children_to_new_version.apply_async') as seed_mock, \
+                self.captureOnCommitCallbacks(execute=True):
+            result = bulk_import_parts_inline.run([self.version('v1')], 'ocladmin', True, index=False)
+            self.assertEqual(len(result['json']['created']), 1)
+            self.assertEqual(self.members('v1'), set())
+            seed_mock.assert_not_called()
+        release = Source.objects.get(mnemonic='LOINC', version='v1')
+        seed = release.get_seed_new_version_task()
+        self.assertEqual(seed.args, ['source', release.id, True, False])
+        seed_mock.assert_called_once_with(tuple(seed.args), task_id=seed.id, queue='default', persist_args=True)
+
+    def test_legacy_parallel_source_named_concepts_keeps_its_links_at_the_boundary(self):
+        parent = '/orgs/Regen/sources/concepts/concepts/P/'
+        lines = [{**self.source_line, 'id': 'concepts'},
+                 self.concept('C', source='concepts', parent_concept_urls=[parent]),
+                 self.concept('P', source='concepts'), self.version('v1', source='concepts')]
+        original_seed = Source.seed_concepts
+
+        def seed(release, **kwargs):
+            self.assertTrue(Concept.objects.get(
+                mnemonic='C', is_latest_version=True).parent_concepts.filter(mnemonic='P').exists())
+            original_seed(release, **kwargs)
+
+        with patch.object(Source, 'seed_concepts', autospec=True, side_effect=seed):
+            runner = self.run_legacy_parallel(lines)
+        self.assertEqual(len(runner.json_result['created']), len(lines))
+
+    def test_legacy_parallel_waits_for_durable_seed_before_dispatching_later_parts(self):
+        self.run_import([self.concept('A'), self.concept('B'), self.mapping('M', 'A', 'B')], isolated_version=False)
+        root = Task.objects.create(id='root-seed-barrier', name='bulk_import')
+        runner = BulkImportParallelRunner([self.version('v1'), self.concept('Later')], 'ocladmin', True,
+                                          self_task_id=root.id, index=False)
+        dispatched = []
+
+        def queue_part(job, **_):
+            if dispatched:
+                self.assertEqual(self.members('v1'), {'A', 'B'})
+                self.assertEqual(set(Source.objects.get(version='v1').mappings.values_list('mnemonic', flat=True)),
+                                 {'M'})
+            dispatched.append(job)
+            with self.captureOnCommitCallbacks(execute=True):
+                return job.apply()
+
+        def finish_seed(_):
+            self.assertEqual(len(dispatched), 1)
+            self.assertEqual(self.members('v1'), set())
+            seed = Source.objects.get(version='v1').get_seed_new_version_task()
+            result = seed_children_to_new_version.apply(args=seed.args, task_id=seed.id, throw=True)
+            seed.celery_result.backend.mark_as_done(seed.id, result.result)
+
+        with override_settings(TEST_MODE=False), \
+                patch('core.importers.models.group.apply_async', autospec=True, side_effect=queue_part), \
+                patch('django.db.backends.base.base.BaseDatabaseWrapper.close_if_unusable_or_obsolete'), \
+                patch('core.common.models.seed_children_to_new_version.apply_async') as enqueue, \
+                patch.object(Source, 'index_children'), \
+                patch.object(Source, 'index_resources_for_self_as_latest_released', return_value=False), \
+                patch('core.common.tasks.export_source.apply_async') as export, \
+                patch('core.common.tasks.source_version_compare.apply_async'), \
+                patch('core.importers.models.post_import_update_resource_counts.apply_async'), \
+                patch('core.importers.models.time.sleep', side_effect=finish_seed) as sleep:
+            runner.run()
+        enqueue.assert_called_once()
+        sleep.assert_called_once()
+        export.assert_called_once()
+        self.assertEqual(len(runner.json_result['created']), 2)
+        self.assertEqual(self.members('v1'), {'A', 'B'})
+
+    def test_legacy_snapshot_part_inherits_parents_without_a_hierarchy_worker(self):
+        self.run_import([self.concept('P'), self.concept('C', parents=['P'])], isolated_version=False)
+        updated = self.concept('C', extras={'changed': True})
+        del updated['parent_concept_urls']
+        with override_settings(TEST_MODE=False), \
+                patch('core.concepts.models.process_hierarchy_for_concept_version.apply_async') as hierarchy:
+            bulk_import_parts_inline.run([updated], 'ocladmin', True, index=False, snapshot_boundary=True)
+        hierarchy.assert_not_called()
+        self.assertEqual(set(Concept.objects.get(mnemonic='C', is_latest_version=True)
+                             .parent_concepts.values_list('mnemonic', flat=True)), {'P'})
+
+    def test_legacy_parallel_does_not_cross_a_failed_version_line(self):
+        lines = [self.source_line, self.version('v1', properties='invalid'), self.concept('Later')]
+        with self.assertRaisesRegex(RuntimeError, 'Source Version'):
+            self.run_legacy_parallel(lines)
+        self.assertFalse(Concept.objects.filter(mnemonic='Later').exists())
+
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async')
+    def test_legacy_parallel_does_not_cross_a_failed_worker_part(self, counts):
+        runner = BulkImportParallelRunner([self.concept('C'), self.version('v1')], 'ocladmin', True)
+        for status in ('FAILURE', 'REVOKED'):
+            with self.subTest(status=status):
+                runner.parts.clear()
+                runner.parts.extend([[self.concept('C')], [self.version('v1')]])
+                part = Mock(results=[Mock(id='failed-part', state=status)])
+                with patch.object(runner, 'queue_tasks', return_value=part) as queue:
+                    with self.assertRaisesRegex(RuntimeError, status):
+                        runner.run()
+                    queue.assert_called_once()
+        counts.assert_not_called()
+
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async')
+    @patch('core.importers.models.time.sleep')
+    def test_legacy_parallel_snapshot_waits_for_a_pending_part(self, sleep_mock, _counts):
+        """A queued part has no STARTED worker to ping yet; it is not complete."""
+        lines = [self.concept('C'), self.version('v1'), self.concept('Later')]
+        runner = BulkImportParallelRunner('\n'.join(map(json.dumps, lines)), 'ocladmin', True)
+        pending = Mock()
+        type(pending).state = PropertyMock(side_effect=['PENDING', 'SUCCESS'])
+
+        def queue(part, _is_child, **_):
+            if part[0]['id'] == 'C':
+                return Mock(results=[pending])
+            sleep_mock.assert_called_once()
+            return Mock(results=[Mock(state='SUCCESS', result={'json': {'exists': [part[0]]}})])
+
+        with patch.object(runner, 'queue_tasks', side_effect=queue), \
+                patch('core.importers.models.app.control.ping', return_value=[]):
+            runner.run()
 
     @patch('core.importers.models.post_import_update_resource_counts', Mock())
     def test_parallel_commits_the_source_version_after_lines_grouped_before_it(self):

@@ -637,7 +637,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
-            _hierarchy_processing=False, is_patch=False, isolated=False
+            _hierarchy_processing=False, is_patch=False, isolated=False, sync_hierarchy=False
     ):  # pylint: disable=too-many-arguments,too-many-locals
         mappings_payload = data.pop('mappings_payload', None)
         prev_latest = Concept.objects.filter(
@@ -650,6 +650,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.set_version_fields(
             data, ('datatype', 'extras', 'external_id', 'retire_reason', 'retired'), isolated)
         instance._isolated = isolated  # pylint: disable=protected-access
+        instance._sync_hierarchy = sync_hierarchy  # pylint: disable=protected-access
         if is_patch:
             prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()
             new_names = ConceptName.build(data.get('names', [])) if 'names' in data else (
@@ -1160,6 +1161,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if parent_concept_uris:
             parent_concept_uris = cls.get_viewable_parent_uris(parent_concept_uris, user)
         skip_hierarchy_tasks = data.pop('_skip_hierarchy_tasks', False)
+        sync_hierarchy = data.pop('_sync_hierarchy', False)
         mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
         mappings_result = []
         has_mapping_errors = False
@@ -1225,7 +1227,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
             if parent_concept_uris and not skip_hierarchy_tasks:
-                if get(settings, 'TEST_MODE', False):
+                if sync_hierarchy or get(settings, 'TEST_MODE', False):
                     process_hierarchy_for_new_concept(
                         concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
                 else:
@@ -1303,7 +1305,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return
         task = process_hierarchy_for_concept_version
         args = (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
-        if get(settings, 'TEST_MODE', False):
+        if get(self, '_sync_hierarchy', False) or get(settings, 'TEST_MODE', False):
             task(*args)
         else:
             task.apply_async(args, queue='concurrent', permanent=False)

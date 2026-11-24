@@ -352,11 +352,13 @@ def import_finisher(task_id):
 
 
 @app.task(bind=True, retry_kwargs={'max_retries': 0})
-def bulk_import_parts_inline(self, input_list, username, update_if_exists, index=True, isolated=False):  # pylint: disable=too-many-arguments
+def bulk_import_parts_inline(  # pylint: disable=too-many-arguments
+        self, input_list, username, update_if_exists, index=True, isolated=False, snapshot_boundary=False):
     from core.importers.models import BulkImportInline
     return BulkImportInline(
         content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index, isolated=isolated
+        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index, isolated=isolated,
+        snapshot_boundary=snapshot_boundary
     ).run()
 
 

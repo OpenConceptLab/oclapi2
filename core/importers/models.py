@@ -3,7 +3,7 @@ import time
 from collections import deque
 from datetime import datetime
 
-from celery import group
+from celery import group, states
 from celery.utils.log import get_task_logger
 
 from django.conf import settings
@@ -360,11 +360,14 @@ class SourceVersionImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Source Version'
 
-    def exists(self):
+    def get_queryset(self):
         return Source.objects.filter(
             **{self.get_owner_type_filter(): self.get('owner'),
                'mnemonic': self.get('source'), 'version': self.get('id')}
-        ).exists()
+        )
+
+    def exists(self):
+        return self.get_queryset().exists()
 
     def parse(self):
         owner_type = self.get('owner_type').lower()
@@ -824,12 +827,13 @@ class ConceptImporter(BaseResourceImporter):
 
     def __init__(  # pylint: disable=too-many-arguments
             self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None, isolated=False,
-            write_refusals=None
+            write_refusals=None, sync_hierarchy=False
     ):
         super().__init__(
             data, user, update_if_exists, cache=cache, isolated=isolated, write_refusals=write_refusals)
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
+        self.sync_hierarchy = sync_hierarchy
         self.instance = None
         self.assigns_id = not get(data, 'id')
         self.line_parent_urls = get(data, 'parent_concept_urls') or []
@@ -892,7 +896,7 @@ class ConceptImporter(BaseResourceImporter):
                 self.instance._index = False  # pylint: disable=protected-access
                 errors = Concept.create_new_version_for(
                     instance=self.instance, data=self.data, user=self.user, create_parent_version=False,
-                    add_prev_version_children=False, isolated=self.isolated
+                    add_prev_version_children=False, isolated=self.isolated, sync_hierarchy=self.sync_hierarchy
                 )
                 if errors and Concept.is_standard_checksum_error(errors):
                     return self.track_result(UNCHANGED)
@@ -904,6 +908,8 @@ class ConceptImporter(BaseResourceImporter):
             persist_data = {**self.data, '_counted': None, '_index': False}
             if self.skip_hierarchy_tasks or self.isolated:  # a seeding import links them when it commits
                 persist_data['_skip_hierarchy_tasks'] = True
+            if self.sync_hierarchy:
+                persist_data['_sync_hierarchy'] = True
             self.instance = Concept.persist_new(
                 data=persist_data,
                 user=self.user, create_parent_version=False)
@@ -1317,13 +1323,15 @@ class BulkImportInline(BaseImporter):
 
     def __init__(  # pylint: disable=too-many-arguments
             self, content, username, update_if_exists=False, input_list=None, user=None, set_user=True,
-            self_task_id=None, skip_hierarchy_tasks=False, index=None, isolated_version=False, isolated=False
+            self_task_id=None, skip_hierarchy_tasks=False, index=None, isolated_version=False, isolated=False,
+            snapshot_boundary=False
     ):
         super().__init__(content, username, update_if_exists, user, not bool(input_list), set_user)
         self.self_task_id = self_task_id
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.isolated_version = isolated_version
         self.isolated = isolated or isolated_version
+        self.snapshot_boundary = snapshot_boundary
         self.seen_concept_ids = set()
         self.seen_mapping_ids = set()
         self.assigned_hierarchy = {}
@@ -1509,7 +1517,8 @@ class BulkImportInline(BaseImporter):
                         concept_importer = ConceptImporter(
                             item, self.user, self.update_if_exists,
                             skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
-                            cache=self.cache, isolated=self.isolated, write_refusals=self.write_refusals
+                            cache=self.cache, isolated=self.isolated, write_refusals=self.write_refusals,
+                            sync_hierarchy=self.snapshot_boundary
                         )
                         _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                         indexer.add(concept_importer.instance)
@@ -1599,6 +1608,8 @@ class BulkImportInline(BaseImporter):
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
+    SNAPSHOT_WAIT_TIMEOUT_SECONDS = 60 * 60
+
     def __init__(
             self, content, username, update_if_exists, parallel=None, self_task_id=None, index=None,
             isolated_version=False
@@ -1772,20 +1783,29 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def has_hierarchy_reconciliation_step(self):
         return bool(self.concept_hierarchy_map)
 
-    def reconcile_hierarchy(self):
+    def reconcile_hierarchy(self, pending_hierarchy=None):
         # an import-seeded version's hierarchy is rebuilt only by its commit, inside the version's transaction
         if self.isolated_version or self.hierarchy_reconciliation_done or not self.concept_hierarchy_map:
             return
         user = UserProfile.objects.filter(username=self.username).first()
-        Concept.reconcile_import_hierarchy(self.concept_hierarchy_map, user)
+        hierarchy = self.concept_hierarchy_map if pending_hierarchy is None else pending_hierarchy
+        if hierarchy:
+            Concept.reconcile_import_hierarchy(hierarchy, user)
         self.hierarchy_reconciliation_done = True
         self.notify_progress()
 
-    def get_source_version_index(self, part_list):
-        if not self.isolated_version:
-            return None
+    @staticmethod
+    def get_source_version_index(part_list):
+        """Find the next snapshot boundary, even within a mixed part."""
         return next((index for index, line in enumerate(part_list or [])
                      if (line.get('type', '') or '').lower() == 'source version'), None)
+
+    def reconcile_before_source_version(self, version_line, pending):
+        """Flush only preceding links for this source; later lines must not rewrite the snapshot."""
+        hierarchy = pending.pop(Source.get_import_target(version_line), None)
+        if hierarchy:
+            user = UserProfile.objects.filter(username=self.username).first()
+            Concept.reconcile_import_hierarchy(hierarchy, user)
 
     def commit_isolated_version(self, version_line):
         commit = IsolatedVersionCommit(
@@ -1846,11 +1866,86 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.update_elapsed_seconds()
             self.notify_progress()
 
+    def wait_for_snapshot_tasks(self, tasks, description):
+        """Wait for success, not just a terminal state or a live worker."""
+        pending = list(tasks)
+        deadline = time.monotonic() + self.SNAPSHOT_WAIT_TIMEOUT_SECONDS
+        while pending:
+            incomplete = []
+            for task in pending:
+                state = task.state
+                if state == states.SUCCESS:
+                    continue
+                if state in states.READY_STATES or state == states.REJECTED:
+                    raise RuntimeError(f'{description}: task {task.id} ended in {state}')
+                incomplete.append(task)
+            pending = incomplete
+            if not pending:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f'{description}: timed out awaiting task {pending[0].id}')
+            time.sleep(5)
+            self.update_elapsed_seconds()
+            self.notify_progress()
+
+    def wait_for_source_version(self, part, version_line):
+        """Wait for the durable seed of the exact newly created version, not an existing version's seed."""
+        result = get(part.results[0].result, 'json', {})
+        if result.get('exists'):
+            return
+        if not result.get('created'):
+            errors = {key: result[key] for key in ('failed', 'invalid', 'exception', 'permission_denied')
+                      if result.get(key)}
+            raise RuntimeError(f'Source Version {version_line.get("id")} was not created: {errors}')
+        if not get(settings, 'TEST_MODE', False):
+            version = SourceVersionImporter(version_line, self.user).get_queryset().get()
+            seed = version.get_seed_new_version_task()
+            if not seed:
+                raise RuntimeError(f'Source Version {version.uri} has no seed task')
+            self.wait_for_snapshot_tasks([seed.celery_result], f'Source Version {version.uri} seed')
+
+    @staticmethod
+    def collect_snapshot_hierarchy(part_list, pending_hierarchy):
+        """Group explicit hierarchy by source identity; a repository mnemonic may itself be 'concepts'."""
+        by_target = {}
+        for line in part_list:
+            if 'parent_concept_urls' in line:
+                by_target.setdefault(Source.get_import_target(line), []).append(line)
+        for target, lines in by_target.items():
+            pending_hierarchy.setdefault(target, {}).update(
+                Concept.get_import_hierarchy_map(lines, include_parentless=True))
+
+    def run_part(self, part_list, pending_hierarchy):
+        """Run one part and collect version-bound hierarchy only after its tasks complete."""
+        part_type = get(part_list, '0.type', '').lower()
+        if not part_type:
+            return
+        is_child = part_type in ['concept', 'mapping', 'reference']
+        start_time = time.time()
+        if pending_hierarchy is None:
+            self.queue_tasks(part_list, is_child)
+            self.wait_till_tasks_alive()
+        else:
+            part = self.queue_tasks(part_list, is_child, snapshot_boundary=True)
+            description = f'Source Version {part_list[0].get("id")}' if part_type == 'source version' else \
+                'Parallel snapshot import part'
+            self.wait_for_snapshot_tasks(part.results, description)
+            if part_type == 'concept':
+                self.collect_snapshot_hierarchy(part_list, pending_hierarchy)
+            elif part_type == 'source version':
+                self.wait_for_source_version(part, part_list[0])
+        if is_child:
+            self.resource_wise_time[part_type] = self.resource_wise_time.get(part_type, 0) + round(
+                time.time() - start_time, 4)
+
     def run(self):
         if self.self_task_id:
             print("****STARTED MAIN****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
+        # Versionless legacy imports still reconcile once using the precomputed map.
+        pending_hierarchy = {} if not self.isolated_version and any(
+            self.get_source_version_index(part) is not None for part in self.parts) else None
         while len(self.parts) > 0:
             part_list = self.parts.popleft()
             version_index = self.get_source_version_index(part_list)
@@ -1858,22 +1953,20 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 self.parts.appendleft(part_list[version_index:])
                 part_list = part_list[:version_index]
             elif version_index == 0:
-                self.commit_isolated_version(part_list[0])
-                part_list = part_list[1:]
-            if part_list:
-                part_type = get(part_list, '0.type', '').lower()
-                if part_type:
-                    is_child = part_type in ['concept', 'mapping', 'reference']
-                    start_time = time.time()
-                    self.queue_tasks(part_list, is_child)
-                    self.wait_till_tasks_alive()
-                    if is_child:
-                        if part_type not in self.resource_wise_time:
-                            self.resource_wise_time[part_type] = 0
-                        self.resource_wise_time[part_type] += round(time.time() - start_time, 4)
+                if self.isolated_version:
+                    self.commit_isolated_version(part_list[0])
+                    part_list = part_list[1:]
+                else:
+                    self.reconcile_before_source_version(part_list[0], pending_hierarchy)
+                    if len(part_list) > 1:
+                        self.parts.appendleft(part_list[1:])
+                    part_list = part_list[:1]
+            self.run_part(part_list, pending_hierarchy)
 
         self.notify_progress()
-        self.reconcile_hierarchy()
+        remaining_links = None if pending_hierarchy is None else {
+            uri: parents for hierarchy in pending_hierarchy.values() for uri, parents in hierarchy.items()}
+        self.reconcile_hierarchy(remaining_links)
 
         post_import_update_resource_counts.apply_async(queue='default', permanent=False)
 
@@ -1971,12 +2064,15 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             'report': self.report
         }
 
-    def queue_tasks(self, part_list, is_child):
+    def queue_tasks(self, part_list, is_child, snapshot_boundary=False):
         has_delete_action = not is_child and any(line.get('__action') == 'DELETE' for line in part_list)
         chunked_lists = [part_list] if has_delete_action else compact(
             self.chunker_list(part_list, self.parallel, is_child))
+        # Old workers must reject snapshot parts, not silently report success before hierarchy is ready.
+        options = {'snapshot_boundary': True} if snapshot_boundary else {}
         jobs = group(
-            bulk_import_parts_inline.s(_list, self.username, self.update_if_exists, self.index, self.isolated_version)
+            bulk_import_parts_inline.s(
+                _list, self.username, self.update_if_exists, self.index, self.isolated_version, **options)
             for _list in chunked_lists
         )
         group_result = jobs.apply_async(queue='concurrent')
@@ -1985,3 +2081,4 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.task.children += list({task.task_id for task in self.tasks})
         self.task.children = list(set(self.task.children))
         self.task.save()
+        return group_result
