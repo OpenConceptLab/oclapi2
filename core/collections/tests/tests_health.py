@@ -858,6 +858,35 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertEqual((health['state'], health['reasons']), (EMPTY, []))
         self.assertEqual(Expansion.objects.get(id=self.expansion.id).unresolved_repo_versions, [])
 
+    def missing_system_reference(self, version):
+        system = '/orgs/missing/sources/missing/'
+        reference = CollectionReference(
+            expression=f'{system}{version}/concepts/c1/', collection=self.collection, system=system, version=version,
+            code='c1')
+        reference.save()
+        return reference
+
+    def test_deleting_one_of_two_references_to_a_system_keeps_the_other_s_unresolved_entry(self):
+        first, second = self.missing_system_reference('v1'), self.missing_system_reference('v2')
+        Expansion.objects.get(id=self.expansion.id).add_references([first, second], index=False)
+
+        self.collection.delete_references([first.expression])
+
+        entries = Expansion.objects.get(id=self.expansion.id).unresolved_repo_versions
+        self.assertEqual([(entry['url'], entry['version']) for entry in entries], [(second.system, 'v2')])
+
+    def test_an_add_that_finds_something_unresolved_writes_only_that(self):
+        Expansion.objects.filter(id=self.expansion.id).update(is_processing=True)
+        # loaded during a build, which has ended by the time the add saves
+        stale = Expansion.objects.get(id=self.expansion.id)
+        Expansion.objects.filter(id=self.expansion.id).update(is_processing=False)
+
+        stale.add_references([self.missing_system_reference('v1')], index=False)
+
+        expansion = Expansion.objects.get(id=self.expansion.id)
+        self.assertFalse(expansion.is_processing)
+        self.assertEqual(len(expansion.unresolved_repo_versions), 1)
+
     @patch('core.sources.models.Source.index_resources_for_self_as_latest_released', Mock(return_value=True))
     @patch('core.sources.models.Source.index_children', Mock())
     @patch('core.common.tasks.export_source', Mock())
