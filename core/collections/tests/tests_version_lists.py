@@ -395,6 +395,19 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.v1])
         self.assertEqual((list(self.expansion.concepts.all()), list(self.expansion.mappings.all())), members)
 
+    def test_apply_marks_stored_health_not_current(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+        Expansion.objects.filter(id=self.expansion.id).update(health={'state': 'healthy'}, health_is_current=True)
+        revision = Expansion.objects.get(id=self.expansion.id).health_revision
+
+        self.rebuild().apply()
+
+        self.expansion.refresh_from_db()
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.v1])
+        self.assertIsNone(self.expansion.health_is_current)
+        self.assertEqual(self.expansion.health_revision, revision + 1)
+
     def test_rebuilding_rebuilt_lists_changes_nothing(self):
         self.reference([self.member])
         self.reference([self.member], version='v2')

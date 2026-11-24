@@ -655,3 +655,5 @@ class ExpansionVersionLists:
                 getattr(self.expansion, relation).set(list(self.after[relation]))
             if self.get_member_summary() != self.built_from['members']:
                 raise RuntimeError(f'Members of {self.expansion.uri} changed; nothing was written')
+            # health resolves references through these lists, so what's stored came from the old ones
+            Expansion.mark_health_not_current([self.expansion.id])
