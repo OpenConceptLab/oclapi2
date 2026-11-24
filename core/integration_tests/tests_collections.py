@@ -4758,6 +4758,29 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
         self.assertEqual(list(expansion.concepts.all()), [locked_concept])
         self.assertEqual(list(expansion.evaluated_collection_versions.all()), [locked])
 
+    @patch('core.common.tasks.export_collection')
+    def test_get_shows_how_version_create_built_the_expansion(self, _):
+        token = self.collection.created_by.get_token()
+        for version, choice in (('r1', 'lock'), ('r2', 'latest')):
+            response = self.client.post(
+                self.collection.url + 'versions/', {'id': version, 'description': version, 'expansion': choice},
+                HTTP_AUTHORIZATION='Token ' + token, format='json')
+            self.assertEqual(response.status_code, 201)
+
+        for version, choice in (('r1', 'lock'), ('r2', 'latest')):
+            expansion = self.collection.versions.get(version=version).expansion
+            response = self.client.get(expansion.url, HTTP_AUTHORIZATION='Token ' + token)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['built_with'], choice)
+            response = self.client.get(
+                expansion.collection_version.uri + 'expansions/', HTTP_AUTHORIZATION='Token ' + token)
+            self.assertEqual([item['built_with'] for item in response.data], [choice])
+
+        # an expansion made on its own records no choice
+        response = self.client.get(self.expansion.url, HTTP_AUTHORIZATION='Token ' + token)
+        self.assertIsNone(response.data['built_with'])
+
+
 class CollectionVersionExpansionsViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
