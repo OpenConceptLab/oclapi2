@@ -30,8 +30,7 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS, \
-    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY, INDEX_BATCH_SIZE, INCLUDE_MAPPINGS_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, \
-    MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_FROM_CONCEPT, MAPPING_LOOKUP_TO_CONCEPT
+    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY, INDEX_BATCH_SIZE
 from core.common.es import ESScript
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
@@ -48,10 +47,6 @@ TRUTHY = get_truthy_values()
 PER_REQUESTER_LIST_PARAMS = (
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS,
     INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY)
-# list params that embed other repositories' concepts or mappings, whose source version names follow the requester
-EMBEDDING_LIST_PARAMS = (
-    INCLUDE_MAPPINGS_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_FROM_CONCEPT,
-    MAPPING_LOOKUP_TO_CONCEPT)
 MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpaginated (ocl_online#230)
 FACETS_CACHE_SUFFIX = '#for-anyone'  # a facetsOnly answer's cache key ends with it
 
@@ -209,19 +204,35 @@ class ListWithHeadersMixin(ListModelMixin):
                 not self.should_include_facets() and not self.should_include_search_stats() and
                 all(params.get(param) not in TRUTHY for param in PER_REQUESTER_LIST_PARAMS) and
                 not any(to_snake_case(param) in collection_facets for param in params) and
-                get(self, 'parent_resource.is_latest_version', False) and
-                (self.only_facets() or self.__names_the_public_s_source_versions()))
+                get(self, 'parent_resource.is_latest_version', False))
 
-    def __names_the_public_s_source_versions(self):
+    def get_requester_labels(self, data):
         """
-        Whether the page names, for this requester, the source versions it names for the public (source_versions,
-        latest_source_version), so one cached answer serves both: signed out, always; signed in, where nothing on it
-        comes from another repository and its own repository has no version the public can't view.
+        A cached page as this requester sees it: the latest_source_version of each concept and mapping on it, embedded
+        ones too, names only a version the requester can view, so it's read again for them, in one query for each kind
+        of resource the page has. One whose kind or uuid isn't known names none.
         """
-        if not get(self.request.user, 'is_authenticated'):
-            return True
-        return all(self.request.query_params.get(param) not in TRUTHY for param in EMBEDDING_LIST_PARAMS) and \
-            not self.parent_resource.has_versions_hidden_from_public()
+        from core.concepts.models import Concept
+        from core.mappings.models import Mapping
+        labelled = {}
+
+        def collect(value):
+            if isinstance(value, dict):
+                if 'latest_source_version' in value:
+                    labelled.setdefault(value.get('type'), []).append(value)
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+        collect(data)
+        for kind, items in labelled.items():
+            model = {Concept.OBJECT_TYPE: Concept, Mapping.OBJECT_TYPE: Mapping}.get(kind)
+            names = model.get_latest_source_version_names(
+                {to_int(item.get('uuid'), None) for item in items} - {None}, self.request.user) if model else {}
+            for item in items:
+                item['latest_source_version'] = names.get(to_int(item.get('uuid'), None))
+        return data
 
     def list(self, request, *args, **kwargs):
         """
@@ -260,6 +271,8 @@ class ListWithHeadersMixin(ListModelMixin):
                 data = None
             if data and self.only_facets():  # cached as anyone sees them, so as this requester sees them
                 return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
+            if data:  # cached as whoever asked first sees it
+                data = self.get_requester_labels(data)
 
         if not data:
             search_string = query_params.get('type', None)
@@ -793,30 +806,41 @@ class SourceChildMixin(ChecksumModel):
         """
         Sets each row's _latest_source_version, the latest source version holding it, HEAD aside, and
         _latest_source_version_name, the name of the latest of them the user can view (get_latest_source_version_name):
-        two queries for the page, as for the version alone. The first reads, for each row, the latest version the user
-        can view and the latest they can't.
+        two queries for the page, as for the version alone.
+        """
+        latest = cls.get_latest_source_versions({instance.id for instance in instances}, user)
+        source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
+            {source_id for source_id, _ in latest.values()})
+        for instance in instances:
+            source_id, name = latest.get(instance.id, (None, None))
+            instance._latest_source_version = source_versions.get(source_id)  # pylint: disable=protected-access
+            instance._latest_source_version_name = name  # pylint: disable=protected-access
+
+    @classmethod
+    def get_latest_source_version_names(cls, ids, user):
+        """{id: the name of the latest source version holding that row that the user can view} of these rows"""
+        return {row_id: name for row_id, (_, name) in cls.get_latest_source_versions(ids, user).items() if name}
+
+    @classmethod
+    def get_latest_source_versions(cls, ids, user):
+        """
+        {id: (the latest source version holding that row, HEAD aside, the name of the latest the user can view)} of
+        these rows, in one query: for each row, the latest version the user can view and the latest they can't.
         """
         key = f'{cls._meta.model_name}_id'
         criteria = cls.get_viewable_source_version_criteria(user)
         is_viewable = models.Value(True) if criteria is None else models.ExpressionWrapper(
             criteria, output_field=models.BooleanField())
-        latest, names = {}, {}
+        latest = {}
         for row_id, is_viewed, source_id, version, created_at in cls.sources.through.objects.filter(
-                **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(source__version=HEAD).annotate(_viewable=is_viewable).order_by(
+                **{f'{key}__in': ids}).exclude(source__version=HEAD).annotate(_viewable=is_viewable).order_by(
                 key, '_viewable', '-source__created_at').distinct(key, '_viewable').values_list(
                 key, '_viewable', 'source_id', 'source__version', 'source__created_at'):
-            if row_id not in latest or created_at > latest[row_id][1]:
-                latest[row_id] = (source_id, created_at)
-            if is_viewed:
-                names[row_id] = version
-        source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
-            {source_id for source_id, _ in latest.values()})
-        for instance in instances:
-            # pylint: disable=protected-access
-            instance._latest_source_version = source_versions.get(latest[instance.id][0]) if (
-                instance.id in latest) else None
-            instance._latest_source_version_name = names.get(instance.id)
+            latest_id, latest_at, name = latest.get(row_id, (None, None, None))
+            if latest_at is None or created_at > latest_at:
+                latest_id, latest_at = source_id, created_at
+            latest[row_id] = (latest_id, latest_at, version if is_viewed else name)
+        return {row_id: (source_id, name) for row_id, (source_id, _, name) in latest.items()}
 
     @classmethod
     def get_viewable_source_version_criteria(cls, user):

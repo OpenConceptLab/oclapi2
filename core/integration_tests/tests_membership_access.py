@@ -111,8 +111,8 @@ class SearchMembershipAccessTest(AccessTestMixin, OCLAPITestCase):
 
     def test_an_org_whose_name_another_org_has_in_another_case_doesn_t_match_the_other_s_content(self):
         """
-        Only concepts keep their owner's name's case in the index. The others match it in any case, so they show such
-        an org's private content to no one but staff, as its own scope does (get_scope_owner_criteria).
+        The index matches owner names in any case, so outside its own scope such an org's private content shows to no
+        one but staff.
         """
         upper = OrganizationFactory(mnemonic=self.org.mnemonic.upper(), public_access=ACCESS_TYPE_VIEW)
         token = self.token + 'twin'
@@ -122,9 +122,10 @@ class SearchMembershipAccessTest(AccessTestMixin, OCLAPITestCase):
             with self.subTest(url=url):
                 self.assertEqual(self.search(url, self.member), ([], '0'))
         twin_member = UserProfileFactory(organizations=[upper])
-        self.assertIn(f'{token}concept', self.search(f'/concepts/?q={token}concept', twin_member)[0])
-        self.assertEqual(self.search(f'/mappings/?q={token}map', twin_member), ([], '0'))
-        self.assertIn(f'{token}map', self.search(f'/mappings/?q={token}map', self.staff)[0])
+        for url, _id in self.searches(token):
+            with self.subTest(url=url):
+                self.assertEqual(self.search(url, twin_member), ([], '0'))
+                self.assertIn(_id, self.search(url, self.staff)[0])
 
 
 class PublicReleaseMixin(SourceVersionReadAccessMixin):
@@ -236,6 +237,14 @@ class ReleaseLabelAccessTest(PublicReleaseMixin, OCLAPITestCase):
                 self.assertEqual(
                     [item['latest_source_version'] for item in response.data], ['v1' if can_view else None])
 
+    def test_a_release_s_embedded_concepts_and_mappings_name_the_requester_s_releases(self):
+        url = f'{self.public_release.uri}?includeConcepts=true&includeMappings=true'
+        for user, can_view in self.users():
+            with self.subTest(user=user):
+                labels = self.labels(url, user)
+                self.assertEqual('v1' in labels, can_view, labels)
+                self.assertEqual('v0' in labels, not can_view, labels)
+
     def test_concepts_and_mappings_embedded_in_another_name_the_requester_s_releases(self):
         """A concept's mappings and parents. The parent here, the mapping's other concept, is held by v1 only."""
         self.concept.parent_concepts.add(self.mapping.to_concept)
@@ -278,13 +287,13 @@ class ReleaseLabelCacheTest(PublicReleaseMixin, OCLAPITestCase):
                         labels = self.labels(url, user)
                         self.assertEqual('v1' in labels, can_view, labels)
 
-    def test_a_page_that_names_only_public_versions_is_cached_for_anyone(self):
-        Source.objects.filter(id=self.release.id).update(public_access=ACCESS_TYPE_VIEW)
+    def test_a_cached_page_names_each_requester_s_releases_as_they_are_now(self):
         body_key, _ = self.public_release.get_concepts_cache_keys()
-        self.labels(self.public_release.uri + 'concepts/', self.member)
-        self.assertIsNotNone(cache.get(body_key))
-        cache.clear()
-        self.labels(self.public_release.uri + 'concepts/?includeMappings=true', self.member)
-        self.assertIsNone(cache.get(body_key + '?includeMappings=true'))
-        self.labels(self.public_release.uri + 'concepts/?includeMappings=true')
-        self.assertIsNotNone(cache.get(body_key + '?includeMappings=true'))
+        url = self.public_release.uri + 'concepts/'
+        self.assertIn('v1', self.labels(url, self.member))
+        self.assertIsNotNone(cache.get(body_key))  # one page, cached for anyone
+        self.assertNotIn('v1', self.labels(url))
+        Source.objects.filter(id=self.release.id).update(public_access=ACCESS_TYPE_VIEW)
+        self.assertIn('v1', self.labels(url))
+        Source.objects.filter(id=self.release.id).update(public_access=ACCESS_TYPE_NONE)
+        self.assertNotIn('v1', self.labels(url))

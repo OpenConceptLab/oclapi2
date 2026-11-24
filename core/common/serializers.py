@@ -415,7 +415,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.concepts.serializers import ConceptListSerializer
             queryset = self._paginate(
                 Concept.apply_attribute_based_filters(obj.get_concepts_queryset(), self.query_params), '-id')
-            results = self._serialize(queryset, ConceptListSerializer)
+            results = self._serialize(queryset, ConceptListSerializer, self.get_label_context())
         return results
 
     def get_mappings(self, obj):
@@ -425,7 +425,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.mappings.serializers import MappingListSerializer
             queryset = self._paginate(
                 Mapping.apply_attribute_based_filters(obj.get_mappings_queryset(), self.query_params), '-id')
-            results = self._serialize(queryset, MappingListSerializer)
+            results = self._serialize(queryset, MappingListSerializer, self.get_label_context())
         return results
 
     def get_references(self, obj):
@@ -438,6 +438,10 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
     def _paginate(self, queryset, order_by='-updated_at'):
         return queryset.order_by(order_by)[self.offset:self.offset + self.limit]
 
+    def get_label_context(self):
+        """The embedded concepts' and mappings' context: the requester, whose source versions they name"""
+        return {'user': get(self, 'context.request.user')}
+
     @staticmethod
-    def _serialize(queryset, klass):
-        return klass(queryset, many=True).data
+    def _serialize(queryset, klass, context=None):
+        return klass(queryset, many=True, context=context or {}).data

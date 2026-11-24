@@ -1019,19 +1019,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_member_owner_criteria(self):
         """
         The documents of the requester's own and their orgs' repositories, by owner type and name; None if there are
-        none. Concept documents hold the owner's name as it is. The others hold it lowercased, so a name another owner
-        of the same type has in another case is left out: it would match that owner's documents too. Its own scope
-        (/orgs/<org>/..., /user/...) still shows them.
+        none. The index's `owner` holds names lowercased, and a URL's owner filters by it too, so a name another owner
+        of the same type has in another case is left out: it would match that owner's documents as well.
         """
-        exact = self.is_concept_document()
         names = {}
         for owner_type, name, has_twin in self.get_member_owners():
-            if exact or not has_twin:
-                names.setdefault(owner_type, []).append(name if exact else name.lower())
+            if not has_twin:
+                names.setdefault(owner_type, []).append(name.lower())
         criteria = None
         for owner_type, owner_names in names.items():
-            owner_criteria = Q('term', owner_type=owner_type) & Q(
-                'terms', **{EXACT_OWNER_FIELD if exact else 'owner': owner_names})
+            owner_criteria = Q('term', owner_type=owner_type) & Q('terms', owner=owner_names)
             criteria = owner_criteria if criteria is None else criteria | owner_criteria
         return criteria
 
