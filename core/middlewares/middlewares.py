@@ -44,8 +44,10 @@ class CustomLoggerMiddleware(LoggingMiddleware):
     """
     def __init__(self, get_response=None):
         super().__init__(get_response)
-        # The library matches request.headers names exactly, and Django title-cases them ('X-Api-Key').
-        self.sensitive_headers = [name.title() for name in AnalyticsEventEmitter.SENSITIVE_HEADERS]
+        # A new list, not += on the library's shared default. The library matches request.headers names exactly, and
+        # Django title-cases them ('X-Api-Key').
+        self.sensitive_headers = self.sensitive_headers + [
+            name.title() for name in AnalyticsEventEmitter.SENSITIVE_HEADERS]
 
     def __call__(self, request):
         if request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):

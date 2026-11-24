@@ -32,16 +32,16 @@ class SchemaErrorLoggingTest(SimpleTestCase):
         with self.assertNoLogs('strawberry.execution'):
             schema.process_errors([error])
 
-    def test_logs_an_unexpected_resolver_exception_without_the_query(self):
+    def test_logs_an_unexpected_resolver_exception_without_the_query_or_its_alias(self):
         error = GraphQLError(
-            'Database unavailable', source=Source(QUERY), positions=[2], path=['concepts'],
+            'Database unavailable', source=Source(QUERY), positions=[2], path=[QUERY_MARKER],
             original_error=ValueError('Database unavailable'))
         with self.assertLogs('strawberry.execution') as logs:
             schema.process_errors([error])
 
         output = '\n'.join(logs.output)
         self.assertNotIn(QUERY_MARKER, output)
-        self.assertIn("GraphQL error at ['concepts']", output)
+        self.assertIn('GraphQL resolver error', output)
         self.assertIn('ValueError: Database unavailable', output)
 
     @override_settings(ENV='development')
