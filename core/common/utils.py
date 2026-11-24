@@ -192,7 +192,7 @@ EXPORT_BATCH_SIZE = 1000
 
 
 class HeadExportSnapshot(NamedTuple):
-    """What a HEAD export lists, read at one point in time. Ids are in export order (-id)."""
+    """What a HEAD export lists, as of one point in time (take_head_export_snapshot). Ids in export order (-id)."""
     concept_ids: list
     mapping_ids: list
     reference_ids: list
@@ -218,14 +218,16 @@ def one_snapshot():
 def take_head_export_snapshot(version, concept_ids, mapping_ids, filters):
     """
     The members of a HEAD version (a source's active latest versions, from its member ids; a collection's expansion
-    members and references), their previous versions' uris (a source's) and the version's last child update, all as of
-    one point in time, in a short transaction. The export then reads their rows at its own pace while the repo is
-    edited. Members, and their previous versions, are looked up a page at a time, as the export's pages read them, so
-    no query here can become a scan of the concept or mapping table.
+    members and references) and their previous versions' uris (a source's), all as of one point in time, in a short
+    transaction. The export then reads their rows at its own pace while the repo is edited. Members, and their previous
+    versions, are looked up a page at a time, as the export's pages read them, so no query here can become a scan of
+    the concept or mapping table. The version's last child update is read just before, so the export's key is never
+    newer than its content: an edit in between makes the export look stale, not current.
     """
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
     is_source = version.resource_type == 'Source'
+    last_child_update = version.last_child_update
 
     def members(model, ids):
         """(id, versioned_object_id) of each member, in export order"""
@@ -247,7 +249,6 @@ def take_head_export_snapshot(version, concept_ids, mapping_ids, filters):
                 ).order_by('versioned_object_id', '-created_at').distinct(
                     'versioned_object_id'
                 ).values_list('versioned_object_id', 'uri'))
-        last_child_update = version.last_child_update
     return HeadExportSnapshot(
         [concept_id for concept_id, _ in concepts], [mapping_id for mapping_id, _ in mappings], reference_ids,
         prev_version_uris, last_child_update)

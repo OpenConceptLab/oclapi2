@@ -1618,23 +1618,36 @@ class HeadExportSnapshotTest(OCLTestCase):
 
 class HeadExportSnapshotTransactionTest(OCLAPITransactionTestCase):
     def test_snapshot_reads_in_one_read_only_repeatable_read_transaction(self):
-        """Outside a transaction, as in the export task, the snapshot's reads share one REPEATABLE READ transaction"""
+        """
+        Outside a transaction, as in the export task, the snapshot's member lookups share one read-only REPEATABLE READ
+        transaction; the key's timestamp is read before it, and the pages after it
+        """
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source, names=1)
         seen = []
 
-        def last_child_update():
+        def record(label):
             with connection.cursor() as cursor:
                 cursor.execute('SHOW transaction_isolation')
                 isolation = cursor.fetchone()[0]
                 cursor.execute('SHOW transaction_read_only')
-                seen.append((isolation, cursor.fetchone()[0], connection.in_atomic_block))
+                seen.append((label, isolation, cursor.fetchone()[0], connection.in_atomic_block))
+
+        def timestamp():
+            record('timestamp')
             return timezone.now()
 
-        with patch.object(Source, 'last_child_update', new_callable=PropertyMock, side_effect=last_child_update):
+        def lookup_chunks(items, size):
+            record('lookup')
+            return chunks(items, size)
+
+        with patch.object(Source, 'last_child_update', new_callable=PropertyMock, side_effect=timestamp), \
+                patch('core.common.utils.chunks', side_effect=lookup_chunks):
             exported, _ = HeadExportSnapshotTest.export(source)
 
-        self.assertEqual(seen, [('repeatable read', 'on', True)])
+        self.assertEqual(seen[:2], [
+            ('timestamp', 'read committed', 'off', False), ('lookup', 'repeatable read', 'on', True)])
+        self.assertEqual(seen[-1], ('lookup', 'read committed', 'off', False))
         self.assertEqual(len(exported['concepts']), 1)
         self.assertTrue(transaction.get_autocommit())
 
