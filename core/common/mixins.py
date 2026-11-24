@@ -46,6 +46,7 @@ PER_REQUESTER_LIST_PARAMS = (
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS,
     INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY)
 MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpaginated (ocl_online#230)
+FACETS_CACHE_SUFFIX = '#for-anyone'  # a facetsOnly answer's cache key ends with it
 
 
 class CustomPaginator:
@@ -185,6 +186,9 @@ class ListWithHeadersMixin(ListModelMixin):
         if query_string:
             key_body += '?' + query_string
             key_headers += '?' + query_string
+        if self.only_facets():  # get_facets(for_requester=False)'s, not the answers cached before as one requester's
+            key_body += FACETS_CACHE_SUFFIX
+            key_headers += FACETS_CACHE_SUFFIX
 
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
@@ -235,6 +239,8 @@ class ListWithHeadersMixin(ListModelMixin):
             cache_key_body, data, cache_key_headers, headers = self.__get_cached_data_if_any(request)
             if self.request.query_params.get('_force_cache_clear') in TRUTHY:
                 data = None
+            if data and self.only_facets():  # cached as anyone sees them, so as this requester sees them
+                return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
 
         if not data:
             search_string = query_params.get('type', None)
@@ -245,13 +251,15 @@ class ListWithHeadersMixin(ListModelMixin):
                 return self.get_csv(request)
 
             if self.only_facets():
-                data = {'facets': {'fields': self.get_facets()}}
+                data = {'facets': {'fields': self.get_facets(for_requester=False)}}  # the same for everyone
                 if cache_key_body is not None:
                     timeout = 60 * 60 * 24  # 1 day
                     cache.set(cache_key_body, data, timeout=timeout)
                     cache.set(cache_key_headers, headers, timeout=timeout)
-                return Response(data)
-            if self.only_search_stats() and search_term:
+                return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
+            # stats only where a search runs: anywhere else, the list answers as it would without searchStatsOnly
+            if self.only_search_stats() and search_term and get(self, 'is_searchable', False) and \
+                    self.should_perform_es_search():
                 return Response(
                     self.get_search_stats(
                         get(self, '_source_versions', []), get(self, '_extra_filters', None)))
@@ -379,6 +387,8 @@ class ListWithHeadersMixin(ListModelMixin):
         data = self.get_csv_rows(queryset) if hasattr(self, 'get_csv_rows') else queryset.values()
         if hasattr(self, 'get_csv_field_serializers'):
             kwargs['field_serializer_map'] = self.get_csv_field_serializers()
+        if hasattr(self, 'get_csv_headers'):
+            kwargs['headers'] = self.get_csv_headers()
         requester = request.user.id if request.user.is_authenticated else 'anonymous'
         url = write_csv_to_s3(data, requester, **kwargs)
 
@@ -902,6 +912,15 @@ class SourceChildMixin(ChecksumModel):
     @staticmethod
     def is_strictly_equal(instance1, instance2):
         return instance1.get_checksums() == instance2.get_checksums()
+
+    @staticmethod
+    def get_viewable(queryset, user):
+        """The concepts or mappings of `queryset` in repos `user` (None or anonymous for the public) can view."""
+        if get(user, 'is_staff'):
+            return queryset
+        if not get(user, 'is_authenticated'):
+            return queryset.exclude(public_access=ACCESS_TYPE_NONE)
+        return SourceChildMixin.apply_user_criteria(queryset, user)
 
     @staticmethod
     def apply_user_criteria(queryset, user):

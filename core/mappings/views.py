@@ -194,7 +194,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return instance
 
     def get_permissions(self):
-        if self.request.method in ['GET']:
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewParentDictionary(), ]
 
         if self.request.method == 'DELETE' and self.is_hard_delete_requested():

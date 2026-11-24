@@ -18,6 +18,7 @@ class AnalyticsEventEmitter:  # pragma: no cover
         "x-api-key",
         "x-auth-token",
         "x-amz-security-token",
+        "x-csrftoken",
         "proxy-authorization",
     }
     IGNORED_HEADERS = {

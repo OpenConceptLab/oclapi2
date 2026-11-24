@@ -2584,7 +2584,7 @@ class ReseededVersionSearchTest(OCLAPITestCase):
         self.queued = {}
         for target in ('core.importers.models.batch_index_resources',
                        'core.importers.models.index_concepts_mapped_codes',
-                       'core.sources.models.batch_index_resources'):
+                       'core.common.models.batch_index_resources'):
             self.queued[target] = self.start_patch(patch(target))
         for target in ('core.sources.models.index_source_concepts', 'core.sources.models.index_source_mappings'):
             self.start_patch(patch(target, Mock(__name__=target.rsplit('.', 1)[-1])))  # the version's own, see seed
@@ -2603,7 +2603,7 @@ class ReseededVersionSearchTest(OCLAPITestCase):
                                  ('core.importers.models.index_concepts_mapped_codes', index_concepts_mapped_codes)):
                 for call_args in self.queued[target].apply_async.call_args_list:
                     task(*call_args[0][0])
-            for call_args in self.queued['core.sources.models.batch_index_resources'].call_args_list:
+            for call_args in self.queued['core.common.models.batch_index_resources'].call_args_list:
                 batch_index_resources(*call_args[0])  # called, not queued, in TEST_MODE
         for task_mock in self.queued.values():
             task_mock.reset_mock()
@@ -7133,7 +7133,7 @@ class IsolatedVersionImportTest(OCLTestCase):
         a_in_v1 = Concept.objects.get(mnemonic='A', is_latest_version=True)
         invalid = self.concept('C')
         invalid.pop('concept_class')
-        with patch('core.sources.models.batch_index_resources') as batch_index_resources_mock:
+        with patch('core.common.models.batch_index_resources') as batch_index_resources_mock:
             self.run_import([self.concept('A', extras={'x': 1}), self.concept('B'), invalid, self.version('v2')])
             self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
             batch_index_resources_mock.assert_not_called()
