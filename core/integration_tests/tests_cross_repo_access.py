@@ -694,6 +694,13 @@ class FuzzySearchListsTest(CrossRepoAccessBaseTest):
                 self.assertEqual(response.status_code, 200, (url, params))
                 self.assertEqual(list(response.data), list(self.client.get(url + params).data), (url, params))
 
+    def test_stats_only_search_by_filter_with_a_blank_query_answers_stats(self):
+        response = self.client.get(
+            self.public_source.uri + 'concepts/?q=%20&extras.exact.foo=bar&searchStatsOnly=true&raw=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('score', response.data)
+
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
     def setUp(self):

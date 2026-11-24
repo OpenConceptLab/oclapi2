@@ -258,7 +258,8 @@ class ListWithHeadersMixin(ListModelMixin):
                     cache.set(cache_key_headers, headers, timeout=timeout)
                 return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
             # stats only where a search runs: anywhere else, the list answers as it would without searchStatsOnly
-            if self.only_search_stats() and get(self, 'is_searchable', False) and self.get_search_string():
+            if self.only_search_stats() and search_term and get(self, 'is_searchable', False) and \
+                    self.should_perform_es_search():
                 return Response(
                     self.get_search_stats(
                         get(self, '_source_versions', []), get(self, '_extra_filters', None)))
