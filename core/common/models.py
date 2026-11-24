@@ -1002,18 +1002,17 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
+        from core.collections.models import Expansion
         other_versions = list(self.versions.exclude(id=self.id)) if self.is_head else []
         deleting = {self.id, *(version.id for version in other_versions)}
         export_paths = self.get_export_paths_to_delete(deleting)
         deleted_urls = [self.url]
-        deleted_ids = [self.id]
         canonical_urls = {self.canonical_url}
         if self.is_head:
             for other_version in other_versions:
                 other_version.clear_cache()
                 export_paths += other_version.get_export_paths_to_delete(deleting)
                 deleted_urls.append(other_version.url)
-                deleted_ids.append(other_version.id)
                 canonical_urls.add(other_version.canonical_url)
         elif self.is_latest_version:
             prev_version = self.prev_version
@@ -1023,7 +1022,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.is_latest_version = True
                 prev_version.save()
 
-        registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
+        # before the rows go, while expansions still record these versions and their locks
+        after_delete = Expansion.before_repository_delete(self, [self, *other_versions])
+        registry_entry_ids = self.unlink_url_registry_entries(deleting)
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
 
@@ -1033,6 +1034,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
+        after_delete()
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
         self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})

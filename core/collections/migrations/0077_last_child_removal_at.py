@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('collections', '0073_collection_verification'),
+        ('collections', '0076_expansion_health_checked_at'),
     ]
 
     operations = [

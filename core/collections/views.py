@@ -42,7 +42,8 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER,
+    INCLUDE_HEALTH)
 from core.common.exceptions import Http409, Http405, Http400
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
@@ -55,11 +56,11 @@ from core.common.permissions import (
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
-    canonical_url_param, all_versions_param, include_summary_param
+    canonical_url_param, all_versions_param, include_summary_param, include_health_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param, to_int
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values, to_int
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -72,6 +73,8 @@ from core.repos.mixins import RepoExternalExportMixin, RepoListCSVMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin, IndexingTaskMixin
+from core.collections.reference_conversions import ReferenceConversions, CONVERSIONS, MAX_REFERENCES
+from core.common.tasks import convert_references
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
 from core.toggles.models import Toggle
@@ -707,6 +710,109 @@ class CollectionReferencesPreview(CollectionBaseView):
         return self.get_preview()
 
 
+class CollectionReferenceConversionsBaseView(CollectionBaseView):
+    """HEAD only: a released collection version's references are never converted"""
+    def get_permissions(self):
+        # evaluates many references, and only the collection's editors can convert them
+        return [CanEditConceptDictionary()]
+
+    def get_object(self, queryset=None):
+        instance = self.get_queryset().filter(version=HEAD, is_active=True).first()
+        if not instance:
+            raise Http404(NO_MATCH)
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+
+class CollectionReferenceConversionsPreviewView(CollectionReferenceConversionsBaseView):
+    writes_content = False  # reports what converting would bring in, changes nothing
+
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'ids': openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Items(type=openapi.TYPE_INTEGER),
+                description=f'Reference ids, at most {MAX_REFERENCES}, or "*" for every resource-versioned reference'),
+            'offset': openapi.Schema(
+                type=openapi.TYPE_INTEGER, description=f'With "*": where to start; {MAX_REFERENCES} per page'),
+        }
+    ))
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        collection = self.get_object()
+        ids = request.data.get('ids')
+        try:
+            offset = max(int(request.data.get('offset') or 0), 0)
+        except (TypeError, ValueError):
+            return Response({'offset': ['must be a number']}, status=status.HTTP_400_BAD_REQUEST)
+        if ids == ALL:
+            candidates = ReferenceConversions.get_candidates(collection)
+            total = candidates.count()
+            references = list(candidates[offset:offset + MAX_REFERENCES])
+        elif isinstance(ids, list) and ids and len(ids) <= MAX_REFERENCES:
+            references = list(collection.references.filter(id__in=ids).order_by('id'))
+            total, offset = len(references), 0
+        else:
+            return Response(
+                {'ids': [f'a list of at most {MAX_REFERENCES} reference ids, or "*"']},
+                status=status.HTTP_400_BAD_REQUEST)
+        data = ReferenceConversions(collection, request.user).preview(references)
+        following = offset + len(references)
+        data['summary'].update(total=total, offset=offset, next_offset=following if following < total else None)
+        return Response(data)
+
+
+class CollectionReferenceConversionsView(CollectionReferenceConversionsBaseView, TaskMixin):
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'conversions': openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Items(type=openapi.TYPE_OBJECT),
+                description=f'[{{"id": reference id, "to": one of {", ".join(CONVERSIONS)}, "repo_version": optional, '
+                            'the version the preview showed; a conversion that now resolves elsewhere isn\'t made}]'),
+            'all': openapi.Schema(
+                type=openapi.TYPE_STRING, description='Instead of conversions: convert every resource-versioned '
+                                                      f'reference to this, one of {", ".join(CONVERSIONS)}'),
+        }
+    ))
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        collection = self.get_object()
+        conversions = self.get_conversions(collection)
+        if conversions is None:
+            return Response(
+                {'conversions': [f'a list of {{"id", "to"}} with "to" one of {", ".join(CONVERSIONS)}, or "all"']},
+                status=status.HTTP_400_BAD_REQUEST)
+        result = self.perform_task(convert_references, (request.user.id, collection.id, conversions), queue='default')
+        if isinstance(result, Response):
+            return result
+        if result.get('error'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+        if result.get('refusal') is not None:
+            raise WriteRefused(result['refusal'])
+        return Response(result['results'])
+
+    def get_conversions(self, collection):
+        to_all = self.request.data.get('all')
+        if to_all:
+            if to_all not in CONVERSIONS:
+                return None
+            return [
+                {'id': reference_id, 'to': to_all}
+                for reference_id in ReferenceConversions.get_candidates(collection).values_list('id', flat=True)]
+        conversions = self.request.data.get('conversions')
+        if not isinstance(conversions, list) or not conversions:
+            return None
+        if not all(
+                isinstance(item, dict) and isinstance(item.get('id'), int) and item.get('to') in CONVERSIONS and
+                isinstance(item.get('repo_version') or '', str)
+                for item in conversions):
+            return None
+        # repo_version, optional: the version the preview showed, so a change since then is refused
+        return [
+            {'id': item['id'], 'to': item['to'], **({'repo_version': item['repo_version']} if item.get(
+                'repo_version') else {})}
+            for item in conversions]
+
+
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin, CollectionReferencesMixin):
     is_page_size_capped = True
 
@@ -809,6 +915,8 @@ class CollectionVersionListView(
         queryset = super().get_queryset()
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
+        if not self.request.query_params.get('csv'):  # djqscsv can't write values() that carry annotations
+            queryset = Collection.annotate_expansion_health(queryset)
         return queryset.order_by('-created_at')
 
 
@@ -1063,14 +1171,39 @@ class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseVie
 
 
 class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView, ListWithHeadersMixin):
+    health_resource_type = None
+
     def get_queryset(self):
         expansion = super().get_queryset().first()
 
         if not expansion:
             raise Http404()
 
+        self.expansion = expansion  # pylint: disable=attribute-defined-outside-init
         return expansion
 
+    def serialize_list(self, results, paginator=None):
+        data = super().serialize_list(results, paginator)
+        if self.request.query_params.get(INCLUDE_HEALTH) in get_truthy_values() and Expansion.is_health_on():
+            self.add_member_health(results, data['results'] if isinstance(data, dict) else data)
+        return data
+
+    def add_member_health(self, members, items):
+        """Each member of this page gets its class and the references that judged it, computed for this page"""
+        from core.collections.health import ExpansionHealth
+        members = list(members)
+        classes = ExpansionHealth(self.expansion).classify(self.health_resource_type, [member.id for member in members])
+        references_uri = f'{self.expansion.collection_version.uri}references/'
+        for member, item in zip(members, items):
+            # by the row's own id where it has one; the serializer keeps the page's order, so position matches too
+            member_id = int(item['uuid']) if item.get('uuid') else member.id
+            member_class, reference_ids, _ = classes.get(member_id, (None, [], False))
+            item['health'] = {
+                'class': member_class,
+                'references': [f'{references_uri}{reference_id}/' for reference_id in reference_ids]
+            }
+
+    @swagger_auto_schema(manual_parameters=[include_health_param])
     def get(self, request, *args, **kwargs):
         self.get_queryset()
         return self.list(request, *args, **kwargs)
@@ -1088,6 +1221,8 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
     facet_class = ConceptFacetedSearch
     default_qs_sort_attr = '-id'
 
+    health_resource_type = 'concepts'
+
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
@@ -1103,6 +1238,8 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
     es_fields = Mapping.es_fields
     facet_class = MappingFacetedSearch
     default_qs_sort_attr = '-id'
+
+    health_resource_type = 'mappings'
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
