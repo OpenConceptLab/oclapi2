@@ -633,6 +633,98 @@ class ExpansionVersionListsTest(OCLTestCase):
 
         self.assertFalse(self.rebuild().to_report()['changed'])
 
+    def test_a_public_release_under_a_private_head_is_not_a_candidate(self):
+        source = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = ConceptFactory(parent=source, mnemonic='p1').get_latest_version()
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        member.sources.add(release)
+        self.expansion.concepts.add(member)
+        reference = CollectionReference.objects.create(
+            expression=f'{source.uri}concepts/p1/', collection=self.collection, system=source.uri, code='p1',
+            reference_type='concepts')
+        reference.concepts.set([member])
+
+        lists = self.rebuild()
+
+        # the release keeps its public access, but isn't public while its HEAD is private
+        self.assertNotIn(release.id, self.ids(lists, 'evaluated_source_versions'))
+        self.assertNotIn(source.id, self.ids(lists, 'evaluated_source_versions'))
+
+    def assert_a_second_rebuild_changes_nothing(self):
+        lists = self.rebuild()
+        self.assertTrue(lists.settled)
+        lists.apply()
+        self.assertFalse(self.rebuild().to_report()['changed'])
+        return lists
+
+    def test_value_set_references_of_one_repository_settle_together(self):
+        # one member held by r1 and r2, another only by r2, from the legacy shape explicit {r1}
+        value_set = OrganizationCollectionFactory()
+        releases = []
+        for version in ('v1', 'v2'):
+            release = OrganizationCollectionFactory(
+                mnemonic=value_set.mnemonic, organization=value_set.organization, version=version, released=True)
+            expansion = ExpansionFactory(collection_version=release)
+            release.expansion_uri = expansion.uri
+            release.save()
+            releases.append((release, expansion))
+        other = ConceptFactory(parent=self.source, mnemonic='c2').get_latest_version()
+        self.expansion.concepts.add(other)
+        releases[0][1].concepts.add(self.member)
+        releases[1][1].concepts.add(self.member, other)
+        self.value_set_reference(value_set, [self.member])
+        self.value_set_reference(value_set, [other])
+        self.expansion.explicit_collection_versions.set([releases[0][0]])
+
+        lists = self.assert_a_second_rebuild_changes_nothing()
+
+        self.assertEqual(self.ids(lists, 'evaluated_collection_versions'), {releases[1][0].id})
+        self.assertGreater(lists.passes, 1)
+
+    def test_a_resource_versioned_reference_settles_with_the_lock_the_rebuild_adds(self):
+        # the version-less reference adds a v1 lock, which the resource-versioned one's pick then prefers
+        other = ConceptFactory(parent=self.source, mnemonic='c2').get_latest_version()
+        other.sources.add(self.v1)
+        self.expansion.concepts.add(other)
+        self.reference([self.member], resource_version=self.member.version)
+        versionless = CollectionReference.objects.create(
+            expression=other.uri, collection=self.collection, system=self.source.uri, code='c2',
+            reference_type='concepts')
+        versionless.concepts.set([other])
+        self.expansion.explicit_source_versions.set([self.v1, self.v2])
+
+        lists = self.assert_a_second_rebuild_changes_nothing()
+
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id})
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id})
+
+    def test_a_reference_with_no_recorded_holder_at_first_settles_too(self):
+        # r's members sit in v1 and v2, none recorded; q takes v2 and a named reference v1, which r then reads
+        third = self.release('v3')
+        members = {}
+        for mnemonic, version in (('cm', self.v1), ('co', self.v2), ('cq', self.v2)):
+            member = ConceptFactory(parent=self.source, mnemonic=mnemonic).get_latest_version()
+            member.sources.remove(self.source)
+            member.sources.add(version)
+            self.expansion.concepts.add(member)
+            members[mnemonic] = member
+        split = CollectionReference.objects.create(
+            expression=f'{self.source.uri}concepts/', collection=self.collection, system=self.source.uri,
+            reference_type='concepts')
+        split.concepts.set([members['cm'], members['co']])
+        single = CollectionReference.objects.create(
+            expression=members['cq'].uri, collection=self.collection, system=self.source.uri, code='cq',
+            reference_type='concepts')
+        single.concepts.set([members['cq']])
+        self.reference([self.member], version='v1')
+        self.expansion.explicit_source_versions.set([third])
+
+        lists = self.assert_a_second_rebuild_changes_nothing()
+
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id, self.v2.id})
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id})
+
     def test_command_skip_released_rechecks_a_version_released_after_selection(self):
         released = self.released_expansion()
         out = StringIO()

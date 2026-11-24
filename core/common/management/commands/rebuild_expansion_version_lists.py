@@ -100,6 +100,11 @@ class Command(BaseCommand):
         self.totals['expansions'] += 1
         self.totals[f'expansions_{kind}'] += 1
         self.totals['changed' if report['changed'] else 'unchanged'] += 1
+        if not report['settled']:
+            # a further rebuild would still change its lists: worth a look before the run
+            self.totals['unsettled'] += 1
+        elif report['passes'] > 1:
+            self.totals['settled_after_several_passes'] += 1
         if report['changed']:
             self.totals[f'changed_{kind}'] += 1
         if report['reported_release_changes']:
@@ -113,7 +118,9 @@ class Command(BaseCommand):
             self.totals[f'with_gains_lock_{kind}'] += 1
             if report['is_head'] and report['is_default']:
                 self.totals['with_gains_lock_head'] += 1
-        notes = report['references']
+        self.count_notes(report['references'])
+
+    def count_notes(self, notes):
         if any(note.get('kept') for note in notes):
             self.totals['with_references_kept_as_recorded'] += 1
         if any(note.get('partial_holders') for note in notes):
@@ -123,7 +130,7 @@ class Command(BaseCommand):
         if any('holds none of its members' in note.get('reason', '') for note in notes):
             # its system resolves today to another repository than the one its members came from
             self.totals['with_references_resolving_elsewhere'] += 1
-        if any(len(note.get('holders', [])) > 1 for note in report['references']):
+        if any(len(note.get('holders', [])) > 1 for note in notes):
             self.totals['with_members_in_several_versions'] += 1
 
     def write(self, report):
@@ -135,6 +142,8 @@ class Command(BaseCommand):
             flags = [key for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both') if report[key]]
             if report['collection_version_released']:
                 flags.append('released')
+            if not report['settled']:
+                flags.append('unsettled')
             if report['reported_release_changes']:
                 flags.append(f'reported_release_changes={report["reported_release_changes"]}')
             self.stdout.write(f'{report["expansion"]}: {json.dumps(summary)} {" ".join(flags)}'.rstrip())

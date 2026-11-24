@@ -14,6 +14,7 @@ EVALUATED_SOURCES = 'evaluated_source_versions'
 EXPLICIT_COLLECTIONS = 'explicit_collection_versions'
 EVALUATED_COLLECTIONS = 'evaluated_collection_versions'
 MAX_SETTLE_ROUNDS = 10
+MAX_PASSES = 5
 
 RULE = (
     'A reference naming a repo version records it as explicit. A resource-versioned reference records as explicit the '
@@ -26,7 +27,8 @@ RULE = (
     'recorded version, keeps what the expansion records for its repo, unless the list it reads already holds that '
     'repo. The version-less references of a repo, includes and excludes together, then settle: each moves to the '
     'newest version recorded for the repo that holds all its members, until none moves, so a second rebuild picks '
-    'the same ones. A version both kinds of reference use is in both lists. Members are never changed.')
+    'the same ones. The rebuild is then repeated on its own result until a repeat changes nothing, so a second rebuild '
+    'changes nothing. A version both kinds of reference use is in both lists. Members are never changed.')
 
 
 class ExpansionVersionLists:
@@ -43,7 +45,11 @@ class ExpansionVersionLists:
         self._heads = {}
         self._releases = {}
         self._expansion_ids = {}
+        self._visible = {}
+        self._visible_filters = {}
         self.built_from = None
+        self.passes = 0
+        self.settled = False
 
     @staticmethod
     def newest_first(versions):
@@ -65,30 +71,35 @@ class ExpansionVersionLists:
             self._heads[key] = version.get_head()
         return self._heads[key]
 
-    @cached_property
-    def visible_filter(self):
-        """Repo versions the collection's owner can view: public ones and the owner's own. The lists are shown to
-        anyone who can view the expansion, so a rebuild must not name another owner's private version"""
-        from core.common.models import BaseModel
-        version = self.expansion.collection_version
-        owner = Q(organization_id=version.organization_id) if version.organization_id else Q(user_id=version.user_id)
-        return Q(public_access__in=BaseModel.PUBLIC_ACCESS_VALUES) | owner
+    def get_visible_filter(self, klass):
+        """klass's repo versions the collection's owner can view: publicly viewable ones (their HEAD public too) and
+        the owner's own. The lists are shown to anyone who can view the expansion, so none may name another's
+        private one"""
+        if klass not in self._visible_filters:
+            version = self.expansion.collection_version
+            owner = Q(organization_id=version.organization_id) if version.organization_id else Q(
+                user_id=version.user_id)
+            self._visible_filters[klass] = klass.get_viewable_versions_criteria(None) | owner
+        return self._visible_filters[klass]
 
     def is_visible(self, repo_version):
-        from core.common.models import BaseModel
-        version = self.expansion.collection_version
-        if repo_version.public_access in BaseModel.PUBLIC_ACCESS_VALUES:
-            return True
-        if version.organization_id:
-            return repo_version.organization_id == version.organization_id
-        return repo_version.user_id == version.user_id
+        """The same rule for one version, once per version, as is_publicly_viewable reads its HEAD"""
+        key = (type(repo_version).__name__, repo_version.id)
+        if key not in self._visible:
+            version = self.expansion.collection_version
+            if version.organization_id:
+                owned = repo_version.organization_id == version.organization_id
+            else:
+                owned = repo_version.user_id == version.user_id
+            self._visible[key] = owned or repo_version.is_publicly_viewable
+        return self._visible[key]
 
     def releases_then_head(self, repo_version):
         """Candidates beyond what the expansion records: its releases, then HEAD, that the owner can view"""
         key = (type(repo_version).__name__, drop_version(repo_version.uri))
         if key not in self._releases:
             versions = list(repo_version.active_versions.filter(
-                self.visible_filter, released=True, retired=False).exclude(version=HEAD))
+                self.get_visible_filter(type(repo_version)), released=True, retired=False).exclude(version=HEAD))
             head = self.get_head(repo_version)
             self._releases[key] = [
                 *self.newest_first(versions), *([head] if head and self.is_visible(head) else [])]
@@ -189,9 +200,30 @@ class ExpansionVersionLists:
             'members': self.get_member_summary(),
         }
 
+    @staticmethod
+    def get_ids(lists):
+        return {relation: {version.id for version in (
+            versions.values() if isinstance(versions, dict) else versions)} for relation, versions in lists.items()}
+
     def build(self):
-        self.built_from = {**self.get_state(), 'lists': {
-            relation: {version.id for version in versions} for relation, versions in self.before.items()}}
+        """Rebuilds from the recorded lists, then from its own result, until a pass changes nothing: lists a second
+        rebuild would change again aren't written. Notes are the first pass's, then each later pass's new ones"""
+        self.built_from = {**self.get_state(), 'lists': self.get_ids(self.before)}
+        given, notes = self.before, []
+        for passes in range(1, MAX_PASSES + 1):
+            self.build_pass()
+            notes += self.notes if passes == 1 else [
+                {**note, 'pass': passes} for note in self.notes if note not in notes]
+            self.passes, self.settled = passes, self.get_ids(self.after) == self.get_ids(self.before)
+            if self.settled:
+                break
+            self.before = {relation: list(versions.values()) for relation, versions in self.after.items()}
+        self.before, self.notes = given, notes
+        return self
+
+    def build_pass(self):
+        self.after = {relation: {} for relation in self.RELATIONS}
+        self.notes, self.fallbacks = [], []
         versionless = {}
         for reference in self.references:
             self.add_system_versions(reference, versionless)
@@ -548,6 +580,9 @@ class ExpansionVersionLists:
             'references': self.notes,
             'members': self.get_member_summary(),
             'collection_version_released': bool(collection_version.released),
+            # passes the rebuild took to reach lists a further pass leaves as they are
+            'passes': self.passes,
+            'settled': self.settled,
             'is_head': collection_version.is_head,
             'reported_release_changes': self.count_reported_release_changes() if changes else 0,
             'before': before,
@@ -577,8 +612,8 @@ class ExpansionVersionLists:
     @cached_property
     def live_releases(self):
         from core.sources.models import Source
-        return Source.objects.filter(self.visible_filter, is_active=True, released=True, retired=False).exclude(
-            version=HEAD)
+        return Source.objects.filter(
+            self.get_visible_filter(Source), is_active=True, released=True, retired=False).exclude(version=HEAD)
 
     def get_pinned_holders(self, before, after):
         """Per concept member, the live releases holding it that either set of lists pins"""
