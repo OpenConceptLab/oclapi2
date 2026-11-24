@@ -400,6 +400,9 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         elif should_auto_expand and not self.expansion_uri:
             self.expansion_uri = expansion.uri
             self.save()
+            # a seed that ended before this made it the default stored no health
+            if Expansion.objects.filter(id=expansion.id, is_processing=False, health_is_current__isnull=True).exists():
+                expansion.update_health()
 
         return expansion
 
