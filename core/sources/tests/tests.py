@@ -623,6 +623,15 @@ class SourceTest(OCLTestCase):
         batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
         index_children_async_mock.assert_not_called()  # v0 wasn't the latest release, so no flag changes
 
+        # a failure after the rows are deleted (here, queueing the export cleanup) still reindexes the members
+        batch_index_resources_mock.reset_mock()
+        v3 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v3')
+        v3.concepts.add(concept.get_latest_version())
+        with patch('core.common.models.delete_s3_objects', Mock(apply_async=Mock(side_effect=ConnectionError))), \
+                self.assertRaises(ConnectionError), self.captureOnCommitCallbacks(execute=True):
+            v3.delete(force=True)
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
+
     @patch('core.common.models.delete_s3_objects', Mock())
     @patch('core.common.models.batch_index_resources')
     def test_deleted_version_reindex_tasks_keep_their_arguments(self, batch_index_resources_mock):

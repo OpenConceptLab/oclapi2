@@ -1088,8 +1088,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         was_latest_released = self.is_latest_released
         concept_ids = list(self.concepts.values_list('id', flat=True))
         mapping_ids = list(self.mappings.values_list('id', flat=True))
-        super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
-        transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released), robust=True)
+        try:
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        finally:  # the rows may be gone even if a later step (export cleanup) failed; a rollback drops this
+            transaction.on_commit(
+                lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released), robust=True)
 
     def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False, user=None):
         """
