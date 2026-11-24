@@ -861,15 +861,33 @@ class ExpansionHealthAPITest(OCLAPITestCase):
         self.assertEqual(len(response.data[0]['health']['references']), 1)
 
     def test_member_list_gives_each_row_its_own_class(self):
+        # a member of a release, next to the HEAD member from setUp, so swapped rows would show
         second = ConceptFactory()
-        self.collection.add_expressions({'expressions': [second.uri]}, self.collection.created_by)
+        release = OrganizationSourceFactory(
+            mnemonic=second.parent.mnemonic, organization=second.parent.organization, version='v1', released=True)
+        second.get_latest_version().sources.add(release)
+        self.collection.add_expressions(
+            {'expressions': [f'{release.uri}concepts/{second.mnemonic}/']}, self.collection.created_by)
         classes = ExpansionHealth(self.expansion).classify('concepts')
+        self.assertEqual(len({member_class for member_class, _, _ in classes.values()}), 2)
 
         response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
 
         self.assertEqual(len(response.data), 2)
         for item in response.data:
             self.assertEqual(item['health']['class'], classes[int(item['uuid'])][0])
+
+    @patch('core.common.utils.get_export_service')
+    def test_versions_list_csv_export_carries_no_health_annotation(self, export_service):
+        export_service.return_value.url_for.return_value = 'https://csv-url'
+
+        response = self.client.get(
+            self.collection.uri + 'versions/?csv=true',
+            HTTP_AUTHORIZATION=f'Token {self.collection.created_by.get_token()}')
+
+        # djqscsv writes the queryset's values(), which can't carry the health annotation
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'url': 'https://csv-url'})
 
     def test_member_list_ignores_include_health_with_the_toggle_off(self):
         with patch.object(Expansion, 'is_health_on', return_value=False):

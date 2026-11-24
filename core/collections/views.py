@@ -833,7 +833,9 @@ class CollectionVersionListView(
         queryset = super().get_queryset()
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
-        return Collection.annotate_expansion_health(queryset).order_by('-created_at')
+        if not self.request.query_params.get('csv'):  # djqscsv can't write values() that carry annotations
+            queryset = Collection.annotate_expansion_health(queryset)
+        return queryset.order_by('-created_at')
 
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):

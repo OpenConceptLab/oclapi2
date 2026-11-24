@@ -139,7 +139,8 @@ class CollectionVersionListSerializer(ModelSerializer):
 
     @staticmethod
     def get_expansion_health(obj):
-        return Collection.get_expansion_health(obj)
+        # only rows the versions list annotated: everywhere else the field is dropped, so no lookup per row
+        return Collection.get_expansion_health(obj) if hasattr(obj, 'expansion_health_state') else None
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
