@@ -1,10 +1,14 @@
 import base64
+import mimetypes
 import re
 import time
+from datetime import timedelta
 
-from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix
+from azure.storage.blob import BlobServiceClient, ContentSettings, BlobPrefix, BlobSasPermissions, generate_blob_sas
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.utils import timezone
+from django.utils.http import content_disposition_header
 from pydash import get
 
 from core.services.storages.cloud.core import CloudStorageServiceInterface
@@ -13,6 +17,7 @@ from core.services.storages.cloud.core import CloudStorageServiceInterface
 class BlobStorage(CloudStorageServiceInterface):
     COPY_TIMEOUT_SECONDS = 300
     COPY_POLL_SECONDS = 1
+    SAS_EXPIRY = timedelta(days=7)  # same lifetime as the presigned URLs of S3 and MinIO
     def __init__(self):
         super().__init__()
         self.account_name = settings.AZURE_STORAGE_ACCOUNT_NAME
@@ -23,9 +28,24 @@ class BlobStorage(CloudStorageServiceInterface):
     def public_url_for(self, file_path):
         return f"https://{self.account_name}.blob.core.windows.net/{self.container_name}/{file_path}"
 
-    def url_for(self, file_path, filename=None):  # pylint: disable=unused-argument
-        # an unsigned blob URL can't carry a download name, so filename is ignored
-        return self.public_url_for(file_path)
+    def url_for(self, file_path, filename=None):
+        """
+        Read-only SAS URL, so a private container (the Azure default) can still be fetched over plain HTTP,
+        as the importer does with cached inputs. A connection without an account key cannot sign:
+        it keeps the unsigned URL, which needs a container that allows anonymous reads.
+        """
+        credential = get(self.client, 'credential')
+        account_key = get(credential, 'account_key')
+        if not account_key:
+            return self.public_url_for(file_path)
+
+        sas_token = generate_blob_sas(
+            account_name=credential.account_name, container_name=self.container_name, blob_name=file_path,
+            account_key=account_key, permission=BlobSasPermissions(read=True),
+            expiry=timezone.now() + self.SAS_EXPIRY,
+            content_disposition=content_disposition_header(True, filename) if filename else None
+        )
+        return f"{self.__get_blob_client(file_path).url}?{sas_token}"
 
     def exists(self, key):
         try:
@@ -91,6 +111,16 @@ class BlobStorage(CloudStorageServiceInterface):
 
         return None
 
+    def upload(self, key, file_content, headers=None, metadata=None):
+        """
+        Uploads a file object to key, streaming it instead of loading it in memory.
+        Same contract as S3 and MinIO: returns 204 on success and raises on failure.
+        headers/metadata are only used for the content type, which is the only blob setting callers share.
+        """
+        content_settings = ContentSettings(content_type=self.__content_type(key, headers, metadata))
+        self.__upload_content(self.__get_blob_client(key), content_settings, file_content)
+        return 204  # Success, no content
+
     def upload_file(self, key, file_path=None, headers=None, binary=False, metadata=None):  # pylint: disable=too-many-arguments
         return self._upload(
             blob_name=key,
@@ -142,22 +172,19 @@ class BlobStorage(CloudStorageServiceInterface):
     def _upload(self, blob_name, file_content=None, file_path=None, read_directive=None, metadata=None):  # pylint: disable=too-many-arguments
         if not file_path and not file_content:
             return None
-        try:
-            content_settings = ContentSettings(content_type='application/octet-stream')
-            content_type = get(metadata, 'content-type') or get(metadata, 'ContentType')
-            if content_type and 'application/' in content_type:
-                content_settings.content_encoding = content_type.split('application/')[1]
+        content_settings = ContentSettings(content_type='application/octet-stream')
+        content_type = get(metadata, 'content-type') or get(metadata, 'ContentType')
+        if content_type and 'application/' in content_type:
+            content_settings.content_encoding = content_type.split('application/')[1]
 
-            blob_client = self.__get_blob_client(blob_name)
-            if file_content:
-                self.__upload_content(blob_client, content_settings, file_content)
-            else:
-                with open(file_path, read_directive or 'r') as data:
-                    self.__upload_content(blob_client, content_settings, data)
+        blob_client = self.__get_blob_client(blob_name)
+        if file_content:
+            self.__upload_content(blob_client, content_settings, file_content)
+        else:
+            with open(file_path, read_directive or 'r') as data:
+                self.__upload_content(blob_client, content_settings, data)
 
-            return blob_client.url
-        except:  # pylint: disable=bare-except
-            return None
+        return blob_client.url
 
     def _fetch_blobs(self, prefix, delimiter):
         if delimiter and prefix.endswith(delimiter):
@@ -170,6 +197,16 @@ class BlobStorage(CloudStorageServiceInterface):
 
     def _remove(self, blob_name):
         return self.__get_blob_client(blob_name).delete_blob()
+
+    @staticmethod
+    def __content_type(key, headers, metadata):
+        """
+        Resolves the content type from the headers, then from the S3 style metadata
+        ({'ContentType': ...}) that callers share with S3, then from the key extension.
+        """
+        header_type = next((v for k, v in (headers or {}).items() if k.lower() == 'content-type'), None)
+        return header_type or get(metadata or {}, 'ContentType') or mimetypes.guess_type(key)[0] \
+            or 'application/octet-stream'
 
     @staticmethod
     def __upload_content(blob_client, content_settings, file_content):

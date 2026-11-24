@@ -61,3 +61,11 @@ AUTHORING_CAPABILITY_DEFAULT_LIMITS = {
     IMPORTS_FILE_SIZE_CAPABILITY_ID: 500,
     CLONE_RESOURCES_PER_CALL_CAPABILITY_ID: 100,
 }
+
+# How a write changes the content a capability policy is asked about (CapabilityPolicy.get_write_refusal)
+WRITE_ACTION_EDIT = 'edit'
+WRITE_ACTION_DELETE = 'delete'  # the whole repository or map project
+WRITE_ACTION_PUBLISH = 'publish'  # a private repository, or a private version of one, becomes viewable by others
+# a repository row becomes one others can't view by its own public_access: a new private repository, or a HEAD or
+# version made private
+WRITE_ACTION_MAKE_PRIVATE = 'make_private'

@@ -34,6 +34,7 @@ class ResourceClientConfigsView(BaseAPIView, RetrieveAPIView):
     swagger_schema = None
     serializer_class = ClientConfigSerializer
     edit_permission_class = CanEditConceptDictionary
+    writes_content = False  # a config is how the resource is shown, not its content; ClientConfigView edits one freely
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:

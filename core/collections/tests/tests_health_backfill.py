@@ -6,11 +6,13 @@ from io import StringIO
 from django.core.management import call_command, CommandError
 from mock import patch
 
-from core.collections.health import EMPTY, RULES_VERSION, ExpansionHealth
+from core.collections.health import EMPTY, RULES_VERSION, ExpansionHealth, HEAD_MEMBER, MISMATCH
 from core.collections.models import Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.management.commands.backfill_expansion_health import Command
 from core.common.tests import OCLTestCase
+from core.concepts.tests.factories import ConceptFactory
+from core.mappings.tests.factories import MappingFactory
 
 
 class ExpansionHealthBackfillTest(OCLTestCase):
@@ -37,9 +39,14 @@ class ExpansionHealthBackfillTest(OCLTestCase):
         collection.save()
         return expansion
 
-    def run_command(self, *args, **kwargs):
+    def run_command(self, *args, fails=False, **kwargs):
         out = StringIO()
-        call_command('backfill_expansion_health', *args, stdout=out, **kwargs)
+        if fails:
+            # a run with a failure still reports every expansion, then exits non-zero
+            with self.assertRaises(CommandError):
+                call_command('backfill_expansion_health', *args, stdout=out, **kwargs)
+        else:
+            call_command('backfill_expansion_health', *args, stdout=out, **kwargs)
         return out.getvalue()
 
     def test_dry_run_computes_and_stores_nothing(self):
@@ -86,7 +93,7 @@ class ExpansionHealthBackfillTest(OCLTestCase):
 
         out = self.run_command(all=True, apply=True)
 
-        self.assertIn(f'SKIPPED {self.expansion.uri}: being built', out)
+        self.assertIn(f'SKIPPED {self.expansion.id} {self.expansion.uri}: being built', out)
         self.assertIn('"skipped_being_built": 1', out)
         self.assertEqual(self.stored(self.expansion), (None, None))
 
@@ -95,7 +102,7 @@ class ExpansionHealthBackfillTest(OCLTestCase):
 
         out = self.run_command(self.expansion.uri, apply=True)
 
-        self.assertIn(f'SKIPPED {self.expansion.uri}: being built', out)
+        self.assertIn(f'SKIPPED {self.expansion.id} {self.expansion.uri}: being built', out)
         self.assertEqual(self.stored(self.expansion), (None, None))
 
     def test_all_skips_an_expansion_a_build_made_current_since_the_run_listed_it(self):
@@ -105,7 +112,7 @@ class ExpansionHealthBackfillTest(OCLTestCase):
             out = self.run_command(all=True)
 
         compute.assert_not_called()
-        self.assertIn(f'SKIPPED {current.uri}: now current', out)
+        self.assertIn(f'SKIPPED {current.id} {current.uri}: now current', out)
         self.assertIn('"skipped_now_current": 1', out)
 
     def test_all_resumes_after_an_id_and_stops_at_the_limit(self):
@@ -137,17 +144,17 @@ class ExpansionHealthBackfillTest(OCLTestCase):
         other = self.another_expansion()
         results = [ValueError('boom'), {'state': EMPTY, 'reasons': []}]
         with patch.object(ExpansionHealth, 'compute', side_effect=results):
-            out = self.run_command(self.expansion.uri, other.uri)
+            out = self.run_command(self.expansion.uri, other.uri, fails=True)
 
-        self.assertIn(f'FAILED {self.expansion.uri}: ValueError: boom', out)
+        self.assertIn(f'FAILED {self.expansion.id} {self.expansion.uri}: ValueError: boom', out)
         self.assertIn(f'{other.uri}: ', out)
         self.assertIn('"failed": 1', out)
 
     def test_a_failure_while_applying_leaves_health_not_current(self):
         with patch.object(ExpansionHealth, 'compute', side_effect=ValueError('boom')):
-            out = self.run_command(self.expansion.uri, apply=True)
+            out = self.run_command(self.expansion.uri, apply=True, fails=True)
 
-        self.assertIn(f'FAILED {self.expansion.uri}: computing health failed', out)
+        self.assertIn(f'FAILED {self.expansion.id} {self.expansion.uri}: computing health failed', out)
         self.assertEqual(self.stored(self.expansion), (None, None))
 
     def test_output_has_a_line_per_expansion(self):
@@ -161,6 +168,49 @@ class ExpansionHealthBackfillTest(OCLTestCase):
         self.assertEqual(reports[0]['before'], {'state': None, 'is_current': None, 'rules_version': None})
         self.assertEqual(reports[0]['health']['state'], EMPTY)
         self.assertTrue(reports[0]['is_default'])
+
+    def test_limit_zero_runs_nothing(self):
+        out = self.run_command(all=True, limit=0)
+
+        self.assertNotIn(f'{self.expansion.uri}:', out)
+
+    def test_an_expansion_that_isnt_its_versions_default_is_left_out(self):
+        other = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        self.clear(other)
+
+        self.assertNotIn(f'{other.uri}:', self.run_command(all=True))
+        self.assertIn(f'SKIPPED {other.id} {other.uri}: not a default expansion', self.run_command(other.uri))
+
+    def with_members(self):
+        concept = ConceptFactory()
+        mapping = MappingFactory(parent=concept.parent, from_concept=concept, to_concept=ConceptFactory())
+        self.collection.add_expressions({'expressions': [concept.uri, mapping.uri]}, self.collection.created_by)
+        self.clear(self.expansion)
+        return self.members()
+
+    def members(self):
+        expansion = Expansion.objects.get(id=self.expansion.id)
+        return (sorted(expansion.concepts.values_list('id', flat=True)),
+                sorted(expansion.mappings.values_list('id', flat=True)))
+
+    def test_a_dry_run_on_an_expansion_with_members_changes_nothing(self):
+        members = self.with_members()
+
+        out = self.run_command(self.expansion.uri)
+
+        self.assertIn(f'{self.expansion.uri}: None ->', out)
+        self.assertEqual(self.members(), members)
+        self.assertEqual(self.stored(self.expansion), (None, None))
+
+    def test_apply_on_an_expansion_with_members_changes_only_its_health(self):
+        members = self.with_members()
+
+        self.run_command(self.expansion.uri, apply=True)
+
+        health, is_current = self.stored(self.expansion)
+        self.assertTrue(is_current)
+        self.assertEqual(health['members']['concepts'][HEAD_MEMBER] + health['members']['concepts'][MISMATCH], 1)
+        self.assertEqual(self.members(), members)
 
     def test_needs_uris_or_all(self):
         with self.assertRaises(CommandError):

@@ -17,9 +17,12 @@ from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_AC
     ROLE_MEMBER
 from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.events.models import Event
+from core.collections.models import Collection
+from core.map_projects.models import MapProject
 from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
+from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -1187,6 +1190,39 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+
+class OrganizationResourceListRoutesTest(OCLAPITestCase):
+    def test_the_org_list_routes_under_a_user_create_nothing(self):
+        user = UserProfileFactory(username='batman')
+        token = f'Token {user.get_token()}'
+        OrganizationFactory(mnemonic='gotham').members.add(user)
+        counts = (Source.objects.count(), Collection.objects.count(), MapProject.objects.count())
+        urls = [
+            '/users/batman/orgs/sources/', '/user/orgs/sources/',
+            '/users/batman/orgs/collections/', '/user/orgs/collections/',
+            '/users/batman/orgs/map-projects/',
+        ]
+
+        for url in urls:
+            response = self.client.post(
+                url, {'id': 'side-door', 'name': 'side door'}, HTTP_AUTHORIZATION=token, format='json')
+            self.assertEqual(response.status_code, 405, url)
+            self.assertEqual(response['Allow'], 'GET, HEAD, OPTIONS', url)
+            self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION=token).status_code, 200, url)
+        signed_out_urls = (
+            '/users/batman/orgs/sources/', '/users/batman/orgs/collections/', '/users/batman/orgs/map-projects/')
+        for url in signed_out_urls:
+            # the method is refused before sign-in is checked
+            self.assertEqual(
+                self.client.post(url, {'id': 'side-door', 'name': 'side door'}, format='json').status_code, 405, url)
+        # rendered as negotiated, not by DRF's fallback to its first renderer
+        response = self.client.post(
+            '/user/orgs/sources/', {'id': 'side-door'}, HTTP_AUTHORIZATION=token,
+            HTTP_ACCEPT='application/fhir+json', format='json')
+        self.assertEqual((response.status_code, response['Content-Type']), (405, 'application/fhir+json'))
+
+        self.assertEqual((Source.objects.count(), Collection.objects.count(), MapProject.objects.count()), counts)
 
 
 @tag('es')

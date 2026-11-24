@@ -3,7 +3,7 @@ import time
 from collections import Counter
 
 from django.core.management import BaseCommand, CommandError
-from django.db.models import Q
+from django.db.models import F, Q
 
 from core.collections.constants import EXPANSION_HEALTH_TOGGLE
 from core.collections.health import RULES_VERSION, ExpansionHealth
@@ -47,19 +47,23 @@ class Command(BaseCommand):
         self.stdout.write(f'{mode} done: {json.dumps(totals, sort_keys=True)}')
         if options['output']:
             self.stdout.write(f'Full report: {options["output"]}')
+        if self.totals['failed']:
+            raise CommandError(f'{self.totals["failed"]} expansion(s) failed; rerun picks them up')
 
     def get_expansion_ids(self):
         if not self.options['all']:
             return [self.get_expansion(uri).id for uri in self.options['uris']]
-        # those being built are listed too, so a skipped one shows in the report
+        # those being built are listed too, so a skipped one shows in the report; health is kept for each version's
+        # default expansion only
         expansions = Expansion.objects.filter(
-            is_active=True, collection_version__is_active=True, id__gt=self.options['start_after_id'])
+            is_active=True, collection_version__is_active=True, collection_version__expansion_uri=F('uri'),
+            id__gt=self.options['start_after_id'])
         if not self.options['force']:
             # none yet, not current, or computed with older rules
             expansions = expansions.filter(
                 Q(health__isnull=True) | ~Q(health_is_current=True) | ~Q(health__rules_version=RULES_VERSION))
         ids = expansions.order_by('id').values_list('id', flat=True)
-        return list(ids[:self.options['limit']] if self.options['limit'] else ids)
+        return list(ids[:self.options['limit']] if self.options['limit'] is not None else ids)
 
     @staticmethod
     def get_expansion(uri):
@@ -72,6 +76,10 @@ class Command(BaseCommand):
         return expansion
 
     def backfill(self, expansion_id):
+        # after a computation, waits before reading the next expansion: a build that ends meanwhile isn't overwritten
+        if self.has_computed and self.options['pause']:
+            time.sleep(self.options['pause'])
+        self.has_computed = False
         expansion = Expansion.objects.filter(id=expansion_id).select_related('collection_version').first()
         if not expansion:
             return
@@ -80,9 +88,6 @@ class Command(BaseCommand):
             self.totals[f'skipped_{skipped.replace(" ", "_")}'] += 1
             self.write({'expansion': expansion.uri, 'id': expansion.id, 'skipped': skipped})
             return
-        # waits only between computations: a skip costs nothing
-        if self.has_computed and self.options['pause']:
-            time.sleep(self.options['pause'])
         self.has_computed = True
         before = {'state': (expansion.health or {}).get('state'), 'is_current': expansion.health_is_current,
                   'rules_version': (expansion.health or {}).get('rules_version')}
@@ -92,7 +97,7 @@ class Command(BaseCommand):
         except Exception as ex:  # pylint: disable=broad-except
             health, error = None, f'{type(ex).__name__}: {ex}'
         else:
-            error = None if health else 'computing health failed; see the log'
+            error = None if health else self.get_apply_error(expansion)
         report = {
             'expansion': expansion.uri,
             'id': expansion.id,
@@ -111,7 +116,16 @@ class Command(BaseCommand):
             self.reasons[reason['code']] += 1
         self.write({**report, 'health': health})
 
+    @staticmethod
+    def get_apply_error(expansion):
+        # changed while it computed: the result wasn't stored, and the run the change queued computes it
+        if Expansion.objects.filter(id=expansion.id, health_is_current=False).exists():
+            return 'changed while it computed; a recompute is queued'
+        return 'computing health failed; see the log'
+
     def get_skip_reason(self, expansion):
+        if expansion.collection_version.expansion_uri != expansion.uri:
+            return 'not a default expansion'
         if expansion.is_processing:
             return 'being built'
         is_up_to_date = expansion.health_is_current is True and \
@@ -122,15 +136,17 @@ class Command(BaseCommand):
         return None
 
     def write(self, report):
+        # each line names the id, as --start-after-id resumes by it
         if 'skipped' in report:
-            self.stdout.write(f'SKIPPED {report["expansion"]}: {report["skipped"]}')
+            self.stdout.write(f'SKIPPED {report["id"]} {report["expansion"]}: {report["skipped"]}')
         elif 'error' in report:
-            self.stdout.write(f'FAILED {report["expansion"]}: {report["error"]}')
+            self.stdout.write(f'FAILED {report["id"]} {report["expansion"]}: {report["error"]}')
         else:
             health = report['health']
             reasons = ' '.join(sorted(reason['code'] for reason in health['reasons']))
             self.stdout.write(
-                f'{report["expansion"]}: {report["before"]["state"]} -> {health["state"]} {reasons}'.rstrip())
+                f'{report["id"]} {report["expansion"]}: {report["before"]["state"]} -> {health["state"]} '
+                f'{reasons}'.rstrip())
         if self.options['output']:
             with open(self.options['output'], 'a', encoding='utf-8') as file:
                 file.write(json.dumps(report, default=str) + '\n')
