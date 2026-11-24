@@ -55,7 +55,8 @@ def mark_hard_delete(sender, instance, origin=None, **kwargs):  # pylint: disabl
     it). Each repo is marked once per delete.
     """
     origin_model = origin.model if isinstance(origin, QuerySet) else type(origin)
-    marked = origin.__dict__.setdefault('_child_removal_marked', set())
+    # a collector built without an origin has none to keep the marks on
+    marked = set() if origin is None else origin.__dict__.setdefault('_child_removal_marked', set())
     if origin_model in (Concept, Mapping) and instance.parent_id and ('source', instance.parent_id) not in marked:
         marked.add(('source', instance.parent_id))
         Source.mark_child_removal([instance.parent_id])

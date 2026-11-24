@@ -15,7 +15,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from core.collections.models import Collection
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import HEAD, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
 from core.common.exceptions import BatchIndexingError
@@ -3551,3 +3551,17 @@ class SourceHeadExportKeyTest(OCLTestCase):
         with CaptureQueriesContext(connection) as queries:
             self.get_head().delete()
         self.assertEqual(self.get_marks(queries), [])
+
+    def test_a_delete_without_an_origin_still_marks_the_collections_listing_the_row(self):
+        from django.db.models.deletion import Collector
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.add(self.older)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        collector = Collector(using='default')
+        collector.collect([self.older])
+        collector.delete()
+
+        self.assertIsNotNone(Collection.objects.get(id=collection.id).last_child_removal_at)
