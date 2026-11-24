@@ -533,24 +533,24 @@ def recheck_expansion_health(limit=None):
         is_processing=False, is_active=True, collection_version__is_active=True,
         collection_version__expansion_uri=F('uri')
     ).order_by(F('health_checked_at').asc(nulls_first=True), 'id').values_list(
-        'id', flat=True)[:limit or EXPANSION_HEALTH_RECHECK_LIMIT])
+        'id', flat=True)[:EXPANSION_HEALTH_RECHECK_LIMIT if limit is None else limit])
     if not expansion_ids:
         return 0
-    # tried now, whatever its run does, so tomorrow's batch starts with the others
-    Expansion.objects.filter(id__in=expansion_ids).update(health_checked_at=timezone.now())
     spacing = EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS / len(expansion_ids)
+    queued = 0
     for index, expansion_id in enumerate(expansion_ids):
         if get(settings, 'TEST_MODE', False):
             compute_expansion_health(expansion_id)
-            continue
-        try:
-            compute_expansion_health.apply_async((expansion_id,), queue='default', countdown=int(index * spacing))
-        except Exception:  # pylint: disable=broad-except
-            logger.exception('Could not queue expansion health for %s', expansion_id)
-            # the rest weren't tried, so they go first again tomorrow
-            Expansion.objects.filter(id__in=expansion_ids[index:]).update(health_checked_at=None)
-            return index
-    return len(expansion_ids)
+        else:
+            try:
+                compute_expansion_health.apply_async((expansion_id,), queue='default', countdown=int(index * spacing))
+            except Exception:  # pylint: disable=broad-except
+                logger.exception('Could not queue expansion health for %s', expansion_id)
+                break
+        queued += 1
+    # only those queued count as tried, so the rest keep their place for tomorrow's batch
+    Expansion.objects.filter(id__in=expansion_ids[:queued]).update(health_checked_at=timezone.now())
+    return queued
 
 
 @app.task

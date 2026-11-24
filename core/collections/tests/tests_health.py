@@ -11,6 +11,7 @@ from mock import patch, Mock
 from core.collections.health import (
     ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
+from core.collections.constants import EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
 from core.collections.models import CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
@@ -882,17 +883,31 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertEqual([call.args[0] for call in apply_async.call_args_list], [(id_,) for id_ in ids])
         countdowns = [call.kwargs['countdown'] for call in apply_async.call_args_list]
         self.assertEqual(countdowns, sorted(countdowns))
+        self.assertEqual(countdowns[0], 0)
         self.assertGreater(countdowns[-1], countdowns[0])
+        self.assertLess(countdowns[-1], EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS)
         self.assertFalse(Expansion.objects.filter(id__in=ids, health_checked_at__isnull=True).exists())
 
-    def test_a_nightly_recheck_that_cannot_queue_leaves_them_first_for_the_next(self):
+    def test_a_nightly_recheck_that_cannot_queue_leaves_the_rest_where_they_were(self):
+        other = self.another_default_expansion()
+        tried_at = timezone.now() - timedelta(days=1)
+        Expansion.objects.filter(id__in=[self.expansion.id, other.id]).update(health_is_current=None)
+        Expansion.objects.filter(id=other.id).update(health_checked_at=tried_at)
+
+        with override_settings(TEST_MODE=False), patch(
+                'core.common.tasks.compute_expansion_health.apply_async', side_effect=[None, OSError('down')]):
+            self.assertEqual(recheck_expansion_health(), 1)
+
+        checked_at = dict(Expansion.objects.filter(id__in=[self.expansion.id, other.id]).values_list(
+            'id', 'health_checked_at'))
+        self.assertGreater(checked_at[self.expansion.id], tried_at)
+        self.assertEqual(checked_at[other.id], tried_at)
+
+    def test_a_nightly_recheck_with_a_limit_of_zero_queues_nothing(self):
         Expansion.objects.filter(id=self.expansion.id).update(health_is_current=None)
 
-        with override_settings(TEST_MODE=False), \
-                patch('core.common.tasks.compute_expansion_health.apply_async', side_effect=OSError('down')):
-            self.assertEqual(recheck_expansion_health(), 0)
-
-        self.assertIsNone(Expansion.objects.values_list('health_checked_at', flat=True).get(id=self.expansion.id))
+        self.assertEqual(recheck_expansion_health(limit=0), 0)
+        self.assertIsNone(self.stored()[1])
 
     def test_a_value_set_mark_reads_the_two_through_tables_by_collection_id(self):
         value_set = OrganizationCollectionFactory()
