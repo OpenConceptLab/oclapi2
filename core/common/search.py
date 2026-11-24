@@ -39,8 +39,11 @@ def get_visible_repo_criteria(user):
 
 
 class CustomESFacetedSearch(FacetedSearch):
-    def __init__(self, query=None, filters=None, sort=(), _search=None):  # pylint: disable=dangerous-default-value
+    def __init__(self, query=None, filters=None, sort=(), _search=None, extra_facets=None):  # pylint: disable=dangerous-default-value
+        """extra_facets: facets to compute alongside the class's, by name."""
         self._search = _search
+        if extra_facets:
+            self.facets = {**self.facets, **extra_facets}
         super().__init__(query=query, filters=filters or {}, sort=sort)
 
     @staticmethod

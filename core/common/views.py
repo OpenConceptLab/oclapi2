@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from elasticsearch import RequestError, TransportError
-from elasticsearch_dsl import Q
+from elasticsearch_dsl import Q, TermsFacet
 from pydash import get, compact
 from rest_framework import response, generics, status
 from rest_framework.generics import ListAPIView, RetrieveUpdateDestroyAPIView
@@ -27,7 +27,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER, FACET_SIZE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin
 from core.common.permissions import CanViewConceptDictionary
@@ -68,6 +68,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     collection_facets = ('collection', 'collection_url', 'collection_owner_url')
     max_viewable_collection_urls = 1000
     _viewable_collection_urls = None  # get_viewable_collection_urls's, read once per request and facet value
+    max_collection_facet_names = 3 * FACET_SIZE  # keep_collection_facets_viewable's
+    # the facets that name collection versions or expansions, with the index field holding the URLs they come from
+    collection_url_facets = {'collection': 'collection_url', 'collection_version': 'collection_url',
+                             'expansion': 'expansion_url'}
 
     def get_throttles(self):
         return ThrottleUtil.get_throttles_by_user_plan(self.request.user)
@@ -714,9 +718,14 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             criterion = criteria if criterion is None else criterion | criteria
         return results if criterion is None else results.exclude(criterion)
 
-    def get_facets(self):  # pylint: disable=too-many-branches
+    def get_facets(self, for_requester=True):  # pylint: disable=too-many-branches
+        """
+        The search's facets. Without for_requester, before get_requester_facets: the same for everyone who can run
+        the search, so they can be cached.
+        """
         facets = {}
         parent_repo = None
+        params = {}
 
         if self.facet_class:
             if self.is_user_document():
@@ -724,13 +733,15 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             params = {
                 'query': self.get_search_string(lower=False),
-                '_search': self.__get_search_results(
-                    ignore_retired_filter=True, sort=False, highlight=False, force=True)
+                '_search': self.get_facets_search()
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
             if self.map_codes_release:
                 params['release'] = self.map_codes_release
+            if self.is_source_child_document_model():  # see keep_collection_facets_viewable
+                params['extra_facets'] = {
+                    '_collection_names': TermsFacet(field='collection', size=self.max_collection_facet_names)}
 
             faceted_search = self.facet_class(**params) # pylint: disable=not-callable
             faceted_search.params(request_timeout=ES_REQUEST_TIMEOUT)
@@ -739,8 +750,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 facets = s.facets.to_dict()
             except TransportError as ex:  # pragma: no cover
                 raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
-        if not get(self.request.user, 'is_authenticated'):
-            facets.pop('updatedBy', None)
         if self.should_search_latest_repo() and self.is_source_child_document_model() and 'source_version' in facets:
             facets['source_version'] = [facet for facet in facets['source_version'] if facet[0] != 'HEAD']
         is_global_scope = ('org' not in self.kwargs and 'user' not in self.kwargs and not self.user_is_self)
@@ -769,9 +778,75 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         facets.pop('is_latest_version', None)
 
         if parent_repo and self.is_concept_document():
-            return parent_repo.get_ordered_concept_facets_by_filter_order(facets)
+            facets = parent_repo.get_ordered_concept_facets_by_filter_order(facets)
 
+        return self.get_requester_facets(facets, get(params, '_search')) if for_requester else facets
+
+    def get_facets_search(self):
+        return self.__get_search_results(ignore_retired_filter=True, sort=False, highlight=False, force=True)
+
+    def get_requester_facets(self, facets, search=None):
+        """get_facets(for_requester=False)'s facets as this requester sees them; `search`: get_facets_search's."""
+        if not get(self.request.user, 'is_authenticated'):
+            facets.pop('updatedBy', None)
+        self.keep_collection_facets_viewable(facets, search)
         return facets
+
+    def keep_collection_facets_viewable(self, facets, search=None):
+        """
+        The collection, collection_version and expansion facets name the collection versions and expansions a match
+        is in as the index lists them: those the requester can't view, and those since deleted, too. Here each name
+        counts only the matches in the ones they can view, as the collection filter matches them
+        (get_collection_facet_criterion), in one more request; a name with none is left out. Staff see them as they
+        are. The collections counted are those _collection_names lists: the top max_collection_facet_names among the
+        matches. One past them isn't counted, so its names can be missing, never wrong.
+        """
+        from core.collections.models import Collection
+        collections = [name for name, _, _ in facets.pop('_collection_names', [])]
+        present = {facet: {name for name, _, _ in facets[facet]} for facet in self.collection_url_facets
+                   if facets.get(facet)}
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if not present or viewable is None:
+            return
+        urls = self.get_viewable_collection_facet_urls(present, collections, viewable)
+        counts = {}
+        if urls:
+            search = (search or self.get_facets_search()).extra(size=0).params(request_timeout=ES_REQUEST_TIMEOUT)
+            search.aggs.bucket('viewable', 'filters', filters={
+                str(i): Q('terms', **{self.collection_url_facets[facet]: sorted(values)})
+                for i, ((facet, _), values) in enumerate(urls.items())})
+            try:
+                buckets = search.execute().aggregations.viewable.buckets
+            except TransportError as ex:  # pragma: no cover
+                raise Http400(detail=get(ex, 'info') or get(ex, 'error') or str(ex)) from ex
+            counts = {key: buckets[str(i)].doc_count for i, key in enumerate(urls)}
+        for facet in present:
+            facets[facet] = sorted(
+                [(name, count, False) for (_facet, name), count in counts.items() if _facet == facet and count],
+                key=lambda bucket: (-bucket[1], bucket[0]))[:FACET_SIZE]
+
+    @staticmethod
+    def get_viewable_collection_facet_urls(facets, collections, viewable):
+        """
+        {(facet, name): urls} for these collection facets ({facet: the names it lists}), from these collections'
+        versions the requester can view (`viewable`): their URLs by collection and version name, as the collection
+        filter matches them, and their expansions' URLs by expansion name. A version or expansion name counts only if
+        its facet lists it, so the request stays the facets' size. Names read as the documents read them from their
+        expansions' URIs (to_parent_kwargs_from_uri).
+        """
+        from core.collections.models import Collection, Expansion
+        versions = Collection.objects.filter(viewable, mnemonic__in=collections)
+        urls = {}
+        for uri in versions.values_list('uri', flat=True):
+            parts = uri.strip('/').split('/')
+            for facet, name in [('collection', parts[3]), ('collection_version', parts[4] if len(parts) > 4 else HEAD)]:
+                if facet in facets and (facet == 'collection' or name in facets[facet]):
+                    urls.setdefault((facet, name), set()).add(uri)
+        if 'expansion' in facets:
+            for uri, name in Expansion.objects.filter(
+                    collection_version__in=versions, mnemonic__in=facets['expansion']).values_list('uri', 'mnemonic'):
+                urls.setdefault(('expansion', name), set()).add(uri)
+        return urls
 
     def get_extras_searchable_fields_from_query_params(self):
         query_params = self.request.query_params.dict()

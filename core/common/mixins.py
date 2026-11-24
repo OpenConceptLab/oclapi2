@@ -46,6 +46,7 @@ PER_REQUESTER_LIST_PARAMS = (
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS,
     INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY)
 MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpaginated (ocl_online#230)
+FACETS_CACHE_SUFFIX = '#for-anyone'  # a facetsOnly answer's cache key ends with it
 
 
 class CustomPaginator:
@@ -185,6 +186,9 @@ class ListWithHeadersMixin(ListModelMixin):
         if query_string:
             key_body += '?' + query_string
             key_headers += '?' + query_string
+        if self.only_facets():  # get_facets(for_requester=False)'s, not the answers cached before as one requester's
+            key_body += FACETS_CACHE_SUFFIX
+            key_headers += FACETS_CACHE_SUFFIX
 
         return key_body, cache.get(key_body) or None, key_headers, cache.get(key_headers) or None
 
@@ -235,6 +239,8 @@ class ListWithHeadersMixin(ListModelMixin):
             cache_key_body, data, cache_key_headers, headers = self.__get_cached_data_if_any(request)
             if self.request.query_params.get('_force_cache_clear') in TRUTHY:
                 data = None
+            if data and self.only_facets():  # cached as anyone sees them, so as this requester sees them
+                return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
 
         if not data:
             search_string = query_params.get('type', None)
@@ -245,12 +251,12 @@ class ListWithHeadersMixin(ListModelMixin):
                 return self.get_csv(request)
 
             if self.only_facets():
-                data = {'facets': {'fields': self.get_facets()}}
+                data = {'facets': {'fields': self.get_facets(for_requester=False)}}  # the same for everyone
                 if cache_key_body is not None:
                     timeout = 60 * 60 * 24  # 1 day
                     cache.set(cache_key_body, data, timeout=timeout)
                     cache.set(cache_key_headers, headers, timeout=timeout)
-                return Response(data)
+                return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
             if self.only_search_stats() and search_term:
                 return Response(
                     self.get_search_stats(
