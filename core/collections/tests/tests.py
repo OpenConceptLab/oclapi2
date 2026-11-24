@@ -1,3 +1,4 @@
+import datetime
 import importlib
 import json
 import os
@@ -7292,3 +7293,89 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
 
         self.set_registry_toggle(False)
         self.assertIsNone(Expansion.get_system_version_namespace(self.owner.uri))
+
+
+class CollectionHeadExportKeyTest(OCLTestCase):
+    """A HEAD export is served while a file with its key (last_child_update) exists, so a removal must move the key"""
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = expansion.uri
+        self.collection.save()
+        self.source = OrganizationSourceFactory()
+        self.older = ConceptFactory(parent=self.source)
+        self.newer = ConceptFactory(parent=self.source)
+        self.collection.add_expressions(
+            {'expressions': [self.older.uri, self.newer.uri]}, self.collection.created_by)
+        self.later = self.collection.last_child_update + datetime.timedelta(minutes=1)
+
+    def get_head(self):
+        return Collection.objects.get(id=self.collection.id)
+
+    def get_older_member(self):
+        return self.get_head().expansion.concepts.get(versioned_object_id=self.older.id)
+
+    def later_clock(self):
+        return patch('core.common.models.timezone', **{'now.return_value': self.later})
+
+    @patch('core.common.models.get_export_service')
+    def test_removing_a_member_that_isnt_the_newest_stops_serving_the_head_export(self, export_service_mock):
+        head = self.get_head()
+        stale_key = head.version_export_path
+        export_service_mock.return_value.exists.side_effect = lambda key: key == stale_key
+        self.assertTrue(head.has_export())
+
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([self.older.uri])
+
+        head = self.get_head()
+        self.assertEqual(
+            list(head.expansion.concepts.values_list('versioned_object_id', flat=True)), [self.newer.id])
+        self.assertEqual(head.last_child_update, self.later)
+        self.assertNotEqual(head.version_export_path, stale_key)
+        self.assertFalse(head.has_export())
+
+    def test_removing_a_reference_without_members_moves_the_key(self):
+        self.collection.add_expressions(
+            {'expressions': [f'{self.source.uri}concepts/unknown/']}, self.collection.created_by)
+        head = self.get_head()
+        before = head.last_child_update
+
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([f'{self.source.uri}concepts/unknown/'])
+
+        self.assertEqual(self.get_head().last_child_update, self.later)
+        self.assertGreater(self.later, before)
+
+    def test_removing_members_from_the_expansion_moves_the_key(self):
+        member = self.get_older_member()
+        with self.later_clock():
+            self.get_head().expansion.concepts.remove(member)
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_clearing_a_concept_s_expansions_moves_their_collection_s_key(self):
+        member = self.get_older_member()
+        with self.later_clock():
+            member.expansion_set.clear()
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_hard_deleting_a_member_moves_the_key_of_the_collection_listing_it(self):
+        member = self.get_older_member()
+        with self.later_clock():
+            Concept.objects.filter(id=member.id).delete()
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_switching_the_expansion_moves_the_key(self):
+        head = self.get_head()
+        head.expansion_uri = ExpansionFactory(collection_version=head).uri
+        with patch('core.collections.models.timezone', **{'now.return_value': self.later}):
+            head.save()
+        self.assertEqual(self.get_head().last_child_removal_at, self.later)
+
+    def test_switching_the_expansion_with_update_fields_moves_the_key(self):
+        head = self.get_head()
+        head.expansion_uri = ExpansionFactory(collection_version=head).uri
+        with patch('core.collections.models.timezone', **{'now.return_value': self.later}):
+            head.save(update_fields=['expansion_uri'])
+        self.assertEqual(self.get_head().last_child_removal_at, self.later)

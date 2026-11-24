@@ -824,6 +824,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
     active_mappings = models.IntegerField(null=True, blank=True, default=None)
+    # when a member last left (or a collection's expansion was switched), which no member's updated_at shows
+    last_child_removal_at = models.DateTimeField(null=True, blank=True)
     custom_validation_schema = models.CharField(
         choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
     )
@@ -906,11 +908,22 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @property
     def last_child_update(self):
-        last_concept_update = self.last_concept_update
-        last_mapping_update = self.last_mapping_update
-        if last_concept_update and last_mapping_update:
-            return max(last_concept_update, last_mapping_update)
-        return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
+        """When this version's members last changed: an edit or add (a member's updated_at) or a removal"""
+        updates = [
+            update for update in (self.last_concept_update, self.last_mapping_update, self.last_child_removal_at)
+            if update
+        ]
+        return max(updates) if updates else self.updated_at or timezone.now()
+
+    @classmethod
+    def mark_child_removal(cls, ids):
+        """
+        Records that members left these versions now, so a HEAD export (keyed on last_child_update) that still lists
+        them stops being served. An update, so the version's updated_at and save side effects are left alone.
+        """
+        ids = {_id for _id in ids if _id}
+        if ids:
+            cls.objects.filter(id__in=ids).update(last_child_removal_at=timezone.now())
 
     def get_last_child_update_from_export_url(self, export_url):
         generic_path = self.get_version_export_path(suffix=None)
