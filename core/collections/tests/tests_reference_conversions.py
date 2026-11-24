@@ -118,10 +118,18 @@ class ReferenceConversionsTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         item = response.data['results'][0]
-        self.assertEqual(item['repo_versioned']['members'], [])
-        self.assertFalse(item['repo_versioned']['keeps_members'])
-        # judged as the editor: an unversioned target they can't view isn't offered
+        # judged as the editor: neither target is one they can view, so neither conversion is offered
+        self.assertIsNone(item['repo_versioned'])
         self.assertIsNone(item['unversioned'])
+
+        response = self.client.post(
+            self.url(), {'conversions': [{'id': reference.id, 'to': 'repo_versioned'}]},
+            HTTP_AUTHORIZATION=f'Token {editor.get_token()}', format='json')
+
+        self.assertEqual(
+            (response.data[0]['status'], response.data[0]['reason']),
+            ('not_converted', 'it would name a version you can\'t view'))
+        self.assertTrue(self.head().references.filter(id=reference.id).exists())
 
     def test_repo_versioned_conversion_prefers_a_version_the_expansion_records(self):
         self.old.sources.add(self.v2)

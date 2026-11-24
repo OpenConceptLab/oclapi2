@@ -174,7 +174,10 @@ class ReferenceConversions:
             return None
         if conversion == REPO_VERSIONED:
             picked, chosen_by = self.pick_repo_version(reference, repo_version, references)
-            return (self.build(reference, picked), picked, chosen_by) if picked else None
+            # a named or recorded version is the owner's pick: one the requester can't view can't be offered
+            if not picked or not self.can_requester_view(picked):
+                return None
+            return self.build(reference, picked), picked, chosen_by
         converted = self.build(reference)
         # as adding it resolves: under the collection's lock, else the latest release
         target = converted.resolve_system_version
@@ -275,8 +278,7 @@ class ReferenceConversions:
             reason = self.get_unsupported_reason(reference) if reference else 'not in this collection'
             conversion = None if reason else self.get_conversion(reference, item['to'], all_references)
             if not reason and not conversion:
-                reason = 'no version holds its resource version' if item['to'] == REPO_VERSIONED else \
-                    'its system does not resolve to a version you can view'
+                reason = self.get_unmade_reason(reference, item['to'], all_references)
             if not reason and item.get('repo_version') and item['repo_version'] != conversion[1].uri:  # pylint: disable=unsubscriptable-object
                 # the preview showed another version: a release was published, or a lock changed, since
                 reason = 'changed since the preview'
@@ -295,6 +297,14 @@ class ReferenceConversions:
                 new_references[(converted.expression, converted.include)] = converted
             results.append(result)
         return results, old_ids, new_references
+
+    def get_unmade_reason(self, reference, conversion, references):
+        """Why a conversion the reference supports can't be made"""
+        if conversion == UNVERSIONED:
+            return 'its system does not resolve to a version you can view'
+        repo_version = reference.resolve_expression_system_version
+        picked = self.pick_repo_version(reference, repo_version, references)[0] if repo_version else None
+        return 'it would name a version you can\'t view' if picked else 'no version holds its resource version'
 
     def get_presence(self, converted, ids, new_references):
         """'already_present' when the collection, or this batch, already has the converted reference with the same
