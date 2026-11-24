@@ -47,7 +47,7 @@ class Migration(migrations.Migration):
     atomic = False  # CREATE/DROP INDEX CONCURRENTLY can't run in a transaction
 
     dependencies = [
-        ('mappings', '0062_mappings_head_parent_pub_all'),
+        ('mappings', '0064_mappings_id_incl_to_source'),
     ]
 
     operations = [

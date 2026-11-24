@@ -35,7 +35,8 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
     index_dropped_source_children, try_job_lock, POST_IMPORT_COUNTS_LOCK, POST_IMPORT_COUNTS_REQUEUE_SECONDS
 from core.common.backends import QueueOnceRedisBackend
 from core.common.tests import OCLAPITestCase, OCLTestCase
-from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key
+from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key, \
+    write_export_file
 from core.concepts.documents import ConceptDocument, MappedCodes
 from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory
@@ -2161,6 +2162,33 @@ class BulkImportInlineTest(OCLTestCase):
         ).run()
         self.assertEqual(queued_index_resources(batch_index_resources_mock), ['concept'])
 
+    @override_settings(IMPORT_INDEX_MAX_LINES=1)
+    @patch('core.importers.models.batch_index_resources')
+    def test_seeding_part_over_the_index_limit_reports_the_versions_it_superseded(self, batch_index_resources_mock):
+        """
+        OpenConceptLab/ocl_online#744: for the seed's commit to index them once the version is created
+        (IsolatedVersionCommit), as their documents would still say they're HEAD's latest versions.
+        """
+        source = OrganizationSourceFactory(organization=OrganizationFactory(mnemonic='SeedSupersededOrg'))
+        BulkImportInline(content=None, username='ocladmin', update_if_exists=True, index=True, input_list=[
+            self.concept_line(source, 'Food'), self.concept_line(source, 'Drink')]).run()
+        first_food = Concept.objects.get(parent=source, mnemonic='Food', is_latest_version=True)
+        batch_index_resources_mock.reset_mock()
+
+        result = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, isolated=True, input_list=[
+            self.concept_line(source, 'Food', datatype='Text'), self.concept_line(source, 'Drink'),
+            self.concept_line(source, 'Fruit')]).run()
+
+        first_food.refresh_from_db()
+        self.assertFalse(first_food.is_latest_version)
+        self.assertEqual(result['seen']['superseded'], {'concept': [first_food.id]})
+        batch_index_resources_mock.apply_async.assert_not_called()  # left to the commit
+        self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())  # the deferral still ends
+
+        result = BulkImportInline(content=None, username='ocladmin', update_if_exists=True, isolated=True, index=True,
+                                  input_list=[self.concept_line(source, 'Food', datatype='Numeric')]).run()
+        self.assertEqual(result['seen']['superseded'], {})  # the part indexes them itself
+
     @patch('core.importers.models.batch_index_resources')
     def test_concept_created_or_updated_then_deleted_in_one_part_is_not_left_deferred(
             self, batch_index_resources_mock):
@@ -2538,6 +2566,131 @@ class ImportSearchTest(OCLAPITestCase):
         self.run_queued_indexing(batch_index_resources_mock, index_concepts_mapped_codes_mock)
 
         self.assertEqual([concept['id'] for concept in self.search(concepts_url)], ['Zephyranthes'])
+
+
+@tag('es')
+class ReseededVersionSearchTest(OCLAPITestCase):
+    """
+    OpenConceptLab/ocl_online#744, as LOINC 2.82 on staging: a version is deleted, then seeded again under its name by
+    an import too large to index. Searches of the version, `latest` and HEAD find each code once. A page that holds a
+    code twice has both rows reindexed (CustomESSearch's address_duplicates), so the counts are read one row a page.
+    """
+    def setUp(self):
+        super().setUp()
+        self.token = UserProfile.objects.get(username='ocladmin').get_token()
+        org = OrganizationFactory(mnemonic=f'Reseed{uuid.uuid4().hex[:8]}')  # no documents from earlier runs
+        self.source = OrganizationSourceFactory(organization=org, mnemonic='LOINC')
+        self.owner = {'owner_type': 'Organization', 'owner': org.mnemonic, 'source': self.source.mnemonic}
+        self.queued = {}
+        for target in ('core.importers.models.batch_index_resources',
+                       'core.importers.models.index_concepts_mapped_codes',
+                       'core.sources.models.batch_index_resources'):
+            self.queued[target] = self.start_patch(patch(target))
+        for target in ('core.sources.models.index_source_concepts', 'core.sources.models.index_source_mappings'):
+            self.start_patch(patch(target, Mock(__name__=target.rsplit('.', 1)[-1])))  # the version's own, see seed
+        # parallel_bulk builds the documents on pool threads, whose DB connections can't see this test's rows
+        self.start_patch(patch('core.common.models.parallel_bulk', streaming_bulk))
+        self.start_patch(patch('core.common.models.delete_s3_objects', Mock()))
+
+    def start_patch(self, patcher):
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def run_queued_indexing(self):
+        """Runs the indexing the imports and the delete queued, for real: batch_index_full does nothing in TEST_MODE."""
+        with override_settings(TEST_MODE=False):
+            for target, task in (('core.importers.models.batch_index_resources', batch_index_resources),
+                                 ('core.importers.models.index_concepts_mapped_codes', index_concepts_mapped_codes)):
+                for call_args in self.queued[target].apply_async.call_args_list:
+                    task(*call_args[0][0])
+            for call_args in self.queued['core.sources.models.batch_index_resources'].call_args_list:
+                batch_index_resources(*call_args[0])  # called, not queued, in TEST_MODE
+        for task_mock in self.queued.values():
+            task_mock.reset_mock()
+        ConceptDocument._index.refresh()  # pylint: disable=protected-access
+        MappingDocument._index.refresh()  # pylint: disable=protected-access
+
+    def import_lines(self, lines, isolated_version=False):
+        importer = BulkImportInline(
+            content=None, username='ocladmin', update_if_exists=True, input_list=lines,
+            isolated_version=isolated_version)
+        with self.captureOnCommitCallbacks(execute=True), override_settings(SEED_FROM_IMPORT_LARGE_DROP_MIN=10):
+            importer.run()
+        self.run_queued_indexing()
+        return importer
+
+    def concept(self, code, label):
+        return {'type': 'Concept', 'id': code, 'concept_class': 'Misc', 'datatype': 'None', **self.owner,
+                'names': [{'name': f'Zephyr {code} {label}', 'locale': 'en', 'locale_preferred': True}]}
+
+    def seed_lines(self, label, version='v1'):
+        """A and M1 take the label, B stays the same."""
+        return [
+            self.concept('A', label), self.concept('B', 'unchanged'),
+            {'type': 'Mapping', 'id': 'M1', 'map_type': 'Same As', 'from_concept_url': f'{self.source.uri}concepts/A/',
+             'to_concept_url': f'{self.source.uri}concepts/B/', 'extras': {'label': label}, **self.owner},
+            {'type': 'Source Version', 'id': version, 'description': label, 'released': True, **self.owner},
+        ]
+
+    def seed(self, label):
+        """v1 from an import, indexed as it would be."""
+        self.assertEqual(self.import_lines(self.seed_lines(label), isolated_version=True).failed, [])
+        version = Source.objects.get(organization=self.source.organization, mnemonic='LOINC', version='v1')
+        # as the version's own indexing writes its members' documents
+        ConceptDocument().update(version.concepts.all(), refresh=True)
+        MappingDocument().update(version.mappings.all(), refresh=True)
+
+    def delete_v1(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            Source.objects.get(organization=self.source.organization, mnemonic='LOINC', version='v1').delete(force=True)
+        self.run_queued_indexing()
+
+    def get(self, path):
+        response = self.client.get(f'{self.source.uri}{path}', HTTP_AUTHORIZATION='Token ' + self.token)
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def assert_each_code_once(self):
+        for version in ('v1/', 'latest/', ''):
+            self.assertEqual(int(self.get(f'{version}concepts/?q=Zephyr&limit=1')['num_found']), 2, version)
+            self.assertEqual(int(self.get(f'{version}mappings/?q=M1&limit=1')['num_found']), 1, version)
+            facets = self.get(f'{version}concepts/?q=Zephyr&facetsOnly=true').data['facets']['fields']
+            self.assertEqual(facets['conceptClass'], [('Misc', 2, False)], version)
+            facets = self.get(f'{version}mappings/?q=M1&facetsOnly=true').data['facets']['fields']
+            self.assertEqual(facets['mapType'], [('same as', 1, False)], version)
+
+    def test_the_rows_the_import_superseded_are_found_no_more(self):
+        self.seed('first')
+        self.delete_v1()
+        with override_settings(IMPORT_INDEX_MAX_LINES=1):
+            self.seed('second')
+
+        self.assert_each_code_once()
+
+    def test_a_rejected_seed_leaves_heads_search_as_it_was(self):
+        """The rows it superseded are left to the import's deferral, as are the rows that replaced them."""
+        self.seed('first')
+        invalid = self.concept('C', 'invalid')
+        invalid.pop('concept_class')
+        *content, version_line = self.seed_lines('second', version='v2')
+        with override_settings(IMPORT_INDEX_MAX_LINES=1):
+            importer = self.import_lines([*content, invalid, version_line], isolated_version=True)
+
+        self.assertFalse(Source.objects.filter(organization=self.source.organization, version='v2').exists())
+        self.assertEqual(len(importer.invalid), 1)
+        self.assertEqual(int(self.get('concepts/?q=Zephyr&limit=1')['num_found']), 2)
+        self.assertEqual(int(self.get('v1/concepts/?q=Zephyr&limit=1')['num_found']), 2)
+
+    def test_the_rows_the_deleted_version_held_are_found_no_more(self):
+        """A's row in the deleted v1 had left HEAD before it, so seeding v1 again doesn't supersede it."""
+        self.seed('first')
+        self.import_lines([self.concept('A', 'edited')])
+        self.delete_v1()
+        with override_settings(IMPORT_INDEX_MAX_LINES=1):
+            self.seed('second')
+
+        self.assert_each_code_once()
+
 
 class ResourceImporterModelsTest(OCLTestCase):
     def setUp(self):
@@ -6825,6 +6978,138 @@ class IsolatedVersionImportTest(OCLTestCase):
             {'C'})
         self.assertEqual(concept.parent_concept_urls, ['/orgs/Regen/sources/LOINC/concepts/P2/'])
 
+    @staticmethod
+    def add_duplicate_head(mnemonic):
+        """A second versioned object at the same URL, with a retired latest version, as an old load left some codes."""
+        concept = Concept.objects.get(mnemonic=mnemonic, id=F('versioned_object_id'))
+        duplicate = ConceptFactory(
+            parent=concept.parent, mnemonic=mnemonic, version='duplicate', retired=True, concept_class='LOINC',
+            datatype='N/A')
+        Concept.objects.filter(id=duplicate.id).update(version=str(duplicate.id), uri=concept.uri)
+        return concept, duplicate.get_latest_version()
+
+    @staticmethod
+    def version_hierarchy(concept, relation, version):
+        return set(concept.get_version_hierarchy_queryset(
+            relation, Source.objects.get(mnemonic='LOINC', version=version)).values_list('mnemonic', flat=True))
+
+    def test_isolated_import_links_codes_that_have_two_head_rows(self):
+        self.run_import([
+            self.concept('P'), self.concept('Q'), self.concept('C', parents=['P']), self.version('v1')])
+        child, _ = self.add_duplicate_head('C')
+        parent, parent_duplicate_version = self.add_duplicate_head('Q')
+
+        self.run_import([
+            self.concept('P'), self.concept('Q'), self.concept('C', parents=['Q']), self.concept('D', parents=['Q']),
+            self.concept('E', parent_concept_urls=[parent_duplicate_version.uri]), self.version('v2')])
+
+        for mnemonic in ('C', 'D', 'E'):
+            concept = Concept.objects.filter(mnemonic=mnemonic, id=F('versioned_object_id')).order_by('id').first()
+            self.assertEqual(self.version_hierarchy(concept, 'parent_concepts', 'v2'), {'Q'})
+        self.assertEqual(self.version_hierarchy(parent, 'child_concepts', 'v2'), {'C', 'D', 'E'})
+        self.assertEqual(self.version_hierarchy(child, 'parent_concepts', 'v1'), {'P'})
+        self.assertEqual(
+            sorted(child.parent_concept_urls), ['/orgs/Regen/sources/LOINC/concepts/Q/'])
+
+    def test_isolated_import_keeps_the_version_a_url_names_outside_the_import(self):
+        other = ConceptFactory(
+            parent=OrganizationSourceFactory(organization=self.org, mnemonic='B'), mnemonic='X',
+            concept_class='LOINC', datatype='N/A')
+        duplicate = ConceptFactory(
+            parent=other.parent, mnemonic='X', version='duplicate', concept_class='LOINC', datatype='N/A')
+        Concept.objects.filter(id=duplicate.id).update(version=str(duplicate.id), uri=other.uri)
+        duplicate_version = duplicate.get_latest_version()
+
+        self.run_import([self.concept('C', parent_concept_urls=[duplicate_version.uri]), self.version('v1')])
+
+        child = Concept.objects.get(mnemonic='C', id=F('versioned_object_id'))
+        self.assertEqual(
+            set(child.parent_concepts.values_list('versioned_object_id', flat=True)), {duplicate.id})
+
+    def test_hierarchy_repair_keeps_the_version_a_url_names(self):
+        from core.common.tasks import make_hierarchy
+        self.run_import([self.concept('Q'), self.concept('C'), self.version('v1')])
+        _, duplicate_version = self.add_duplicate_head('Q')
+
+        make_hierarchy({duplicate_version.uri: ['/orgs/Regen/sources/LOINC/concepts/C/']})
+
+        child = Concept.objects.get(mnemonic='C', id=F('versioned_object_id'))
+        self.assertEqual(
+            set(child.parent_concepts.values_list('versioned_object_id', flat=True)),
+            {duplicate_version.versioned_object_id})
+
+    @staticmethod
+    def export_concepts(version):
+        source = Source.objects.get(mnemonic='LOINC', version=version)
+        export_service = Mock(upload_file=Mock(return_value=200), url_for=Mock(return_value='http://export.url'))
+        with patch('core.common.utils.get_export_service', return_value=export_service):
+            write_export_file(
+                source, 'source', 'core.sources.serializers.SourceVersionExportSerializer', Mock(), time.time())
+        with ZipFile(export_service.upload_file.call_args.kwargs['file_path']) as export:
+            return json.loads(export.read('export.json'))['concepts']
+
+    def export_hierarchy(self, version):
+        """Each concept's parent and child codes in the version's export; a URL that isn't the version's row says so."""
+        concepts = self.export_concepts(version)
+        rows = dict(Source.objects.get(mnemonic='LOINC', version=version).concepts.values_list('uri', 'mnemonic'))
+
+        def codes(urls):
+            return sorted(rows.get(url, f'not in {version}: {url}') for url in urls)
+
+        return {
+            concept['id']: {'parents': codes(concept['parent_concept_urls']),
+                            'children': codes(concept['child_concept_urls'])}
+            for concept in concepts}
+
+    def test_version_export_lists_only_its_own_hierarchy(self):
+        concepts = [self.concept('P1'), self.concept('P2')]
+        self.run_import([*concepts, self.concept('C', parents=['P1']), self.version('v1')])
+        v1_before = self.export_hierarchy('v1')
+        other_source_child = ConceptFactory(parent=OrganizationSourceFactory(organization=self.org, mnemonic='B'))
+        other_source_child.parent_concepts.add(Concept.objects.get(mnemonic='P1', is_latest_version=True))
+
+        self.run_import([*concepts, self.concept('C', parents=['P2']), self.version('v2')])
+
+        self.assertEqual(self.export_hierarchy('v1'), v1_before)
+        self.assertEqual(v1_before, {
+            'P1': {'parents': [], 'children': ['C']}, 'P2': {'parents': [], 'children': []},
+            'C': {'parents': ['P1'], 'children': []}})
+        self.assertEqual(self.export_hierarchy('v2'), {
+            'P1': {'parents': [], 'children': []}, 'P2': {'parents': [], 'children': ['C']},
+            'C': {'parents': ['P2'], 'children': []}})
+
+    def test_version_export_lists_children_that_link_an_older_row_of_their_parent(self):
+        self.run_import([self.concept('P'), self.concept('C', parents=['P']), self.version('v1')])
+        self.run_import([self.concept('P', extras={'changed': True}), self.version('v2')], isolated_version=False)
+
+        parent = Concept.objects.get(mnemonic='P', id=F('versioned_object_id'))
+        self.assertEqual(self.version_hierarchy(parent, 'child_concepts', 'v2'), {'C'})
+        self.assertEqual(self.export_hierarchy('v2'), {
+            'P': {'parents': [], 'children': ['C']}, 'C': {'parents': ['P'], 'children': []}})
+
+    def test_version_export_links_every_row_it_holds_and_no_other(self):
+        self.run_import([
+            self.concept('P'), self.concept('C', parents=['P']), self.concept('D', parents=['P']), self.version('v1')])
+        v1 = Source.objects.get(mnemonic='LOINC', version='v1')
+        parent_row = v1.concepts.get(mnemonic='P')
+        second_parent_row = ConceptFactory(
+            parent=parent_row.parent, mnemonic='P', version='second', versioned_object=parent_row.versioned_object,
+            concept_class='LOINC', datatype='N/A')
+        Concept.objects.filter(id=second_parent_row.id).update(
+            version=str(second_parent_row.id), uri=f'/orgs/Regen/sources/LOINC/concepts/P/{second_parent_row.id}/')
+        second_parent_row.refresh_from_db()
+        v1.concepts.add(second_parent_row)
+        Concept.objects.filter(id=v1.concepts.get(mnemonic='D').id).update(is_active=False)
+
+        concepts = self.export_concepts('v1')
+
+        exported = {concept['version_url'] for concept in concepts}
+        self.assertEqual(exported, set(v1.concepts.filter(is_active=True).values_list('uri', flat=True)))
+        child = next(concept for concept in concepts if concept['id'] == 'C')
+        self.assertEqual(set(child['parent_concept_urls']), {parent_row.uri, second_parent_row.uri})
+        for concept in concepts:
+            self.assertTrue(set(concept['parent_concept_urls'] + concept['child_concept_urls']) <= exported)
+
     def test_isolated_import_fails_when_hierarchy_root_is_dropped(self):
         self.run_import([self.concept('ROOT'), self.concept('A', parents=['ROOT']), self.version('v1')])
         head = Source.objects.get(mnemonic='LOINC', version='HEAD')
@@ -6837,6 +7122,30 @@ class IsolatedVersionImportTest(OCLTestCase):
         self.assertIn('hierarchy_root', ex.exception.message_dict)
         self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
         self.assertTrue(Concept.objects.get(mnemonic='ROOT', id=F('versioned_object_id')).is_active)
+
+    @override_settings(IMPORT_INDEX_MAX_LINES=1)
+    def test_seed_over_the_index_limit_indexes_the_versions_it_superseded_once_created(self):
+        """
+        OpenConceptLab/ocl_online#744: their documents would still say they're HEAD's latest versions. A rejected seed
+        leaves them to the import's deferral, as it does the versions that replaced them.
+        """
+        self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
+        a_in_v1 = Concept.objects.get(mnemonic='A', is_latest_version=True)
+        invalid = self.concept('C')
+        invalid.pop('concept_class')
+        with patch('core.sources.models.batch_index_resources') as batch_index_resources_mock:
+            self.run_import([self.concept('A', extras={'x': 1}), self.concept('B'), invalid, self.version('v2')])
+            self.assertFalse(Source.objects.filter(mnemonic='LOINC', version='v2').exists())
+            batch_index_resources_mock.assert_not_called()
+
+            a_in_rejected = Concept.objects.get(mnemonic='A', is_latest_version=True)
+            with patch.object(Source, 'queue_reindex', autospec=True, side_effect=Source.queue_reindex) as reindex_mock:
+                self.run_import([self.concept('A', extras={'x': 2}), self.concept('B'), self.version('v2')])
+            self.assertEqual(reindex_mock.call_args[1]['user'].username, 'ocladmin')  # the importer, who can cancel
+
+        self.assertNotEqual(a_in_rejected.id, a_in_v1.id)
+        # Source.queue_reindex, which calls the task rather than queue it in TEST_MODE
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [a_in_rejected.id]})
 
     def test_isolated_import_skips_version_when_content_fails(self):
         self.run_import([self.concept('A'), self.concept('B'), self.version('v1')])
