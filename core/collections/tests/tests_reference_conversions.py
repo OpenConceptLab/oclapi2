@@ -209,14 +209,18 @@ class ReferenceConversionsTest(OCLAPITestCase):
 
     def test_a_queued_conversion_keeps_its_result_as_json(self):
         results = {'results': [{'id': self.reference.id, 'to': 'repo_versioned', 'status': 'converted'}]}
-        Task.before_start('conversion-task', [], {}, name=convert_references.name)
+        # the record perform_task makes when it queues the conversion, and the task's own arguments, which the
+        # once-lock builds its key from
+        task = Task.new(queue='default', user=self.admin, name=convert_references.name)
+        args = [self.admin.id, self.collection.id, [{'id': self.reference.id, 'to': 'repo_versioned'}]]
+        Task.before_start(task.id, args, {}, name=convert_references.name)
 
         # the hooks a worker runs once the task returns; the once-lock's backend needs a broker CI doesn't have
         with patch('celery_once.tasks.QueueOnce.once_backend', new_callable=PropertyMock, return_value=Mock()):
-            convert_references.on_success(results, 'conversion-task', [], {})
-            convert_references.after_return('SUCCESS', results, 'conversion-task', [], {}, None)
+            convert_references.on_success(results, task.id, args, {})
+            convert_references.after_return('SUCCESS', results, task.id, args, {}, None)
 
-        self.assertEqual(Task.objects.get(id='conversion-task').result_all, results)
+        self.assertEqual(Task.objects.get(id=task.id).result_all, results)
 
     def test_a_conversion_that_resolves_to_head_says_it_follows_head(self):
         unreleased = OrganizationSourceFactory()
