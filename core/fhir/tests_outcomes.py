@@ -199,6 +199,13 @@ class ExceptionHandlerTest(SimpleTestCase):
             [('Content is read-only.', ['detail']), ('content_read_only', ['error_code']), ('0', ['limit']),
              ('3', ['used']), ('None', ['renews_at']), ('First', ['scope']), ('2', ['scope'])])
 
+    def test_a_refusal_message_list_keeps_its_messages_without_the_empty_ones(self):
+        response = self.handle(WriteRefused({'detail': ['First', '', 'Second'], 'notice': {'title': 'Example notice'}}))
+
+        self.assertEqual(
+            [(item['details']['text'], item.get('expression')) for item in response.data['issue']],
+            [('First', ['detail']), ('Second', ['detail'])])
+
     def test_a_refusal_body_listing_objects_makes_issues_only_of_its_messages(self):
         response = self.handle(WriteRefused(['Example message', {'title': 'Example notice'}]))
 

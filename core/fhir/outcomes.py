@@ -142,10 +142,10 @@ def detail_issues(detail, code='invalid', field=None):
 
 
 def is_message(value):
-    """A non-empty string, a number or null, or a list of them: what an error body says, unlike an object it carries."""
+    """A string, number or null, or a list of them: what an error body says, unlike an object it carries."""
     if isinstance(value, (list, tuple)):
         return all(is_message(item) for item in value)
-    return not isinstance(value, Mapping) and value != ''
+    return not isinstance(value, Mapping)
 
 
 def refusal_messages(body):
@@ -157,13 +157,14 @@ def refusal_messages(body):
         return {key: value for key, value in body.items() if is_message(value)}
     if isinstance(body, (list, tuple)):
         return [item for item in body if is_message(item)]
-    return body if is_message(body) else []
+    return body
 
 
 def api_exception_issues(exc, code):
     """The issues of an APIException's detail; a capability refusal's are its messages, else its status."""
-    if isinstance(exc, UsageRefused):  # an OperationOutcome needs an issue
-        return detail_issues(refusal_messages(exc.detail), code) or [issue(code, status_text(exc.status_code))]
+    if isinstance(exc, UsageRefused):  # an issue's text can't be empty, and an OperationOutcome needs an issue
+        issues = [item for item in detail_issues(refusal_messages(exc.detail), code) if item['details']['text']]
+        return issues or [issue(code, status_text(exc.status_code))]
     return detail_issues(exc.detail, code)
 
 
