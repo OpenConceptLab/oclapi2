@@ -321,19 +321,21 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
 
         self.assert_no_marker(lines)
 
-    def test_masks_credential_headers(self):
-        request = self.factory.get(
-            '/orgs/', HTTP_AUTHORIZATION=f'Token {REQUEST_MARKER}', HTTP_X_API_KEY=REQUEST_MARKER,
-            HTTP_COOKIE=f'sessionid={REQUEST_MARKER}', HTTP_X_CSRFTOKEN=REQUEST_MARKER,
-            HTTP_X_AUTH_TOKEN=REQUEST_MARKER)
-        middleware = CustomLoggerMiddleware(lambda req: self.json_response_with_cookies())
-        with self.assertLogs('django.request', level='DEBUG') as logs:
-            middleware(request)
-        lines = [record.getMessage() for record in logs.records]
+    def test_masks_credential_headers_in_every_environment(self):
+        for env in ('production', 'development'):
+            with self.subTest(env=env), override_settings(ENV=env):
+                request = self.factory.get(
+                    '/orgs/', HTTP_AUTHORIZATION=f'Token {REQUEST_MARKER}', HTTP_X_API_KEY=REQUEST_MARKER,
+                    HTTP_COOKIE=f'sessionid={REQUEST_MARKER}', HTTP_X_CSRFTOKEN=REQUEST_MARKER,
+                    HTTP_X_AUTH_TOKEN=REQUEST_MARKER)
+                middleware = CustomLoggerMiddleware(lambda req: self.json_response_with_cookies())
+                with self.assertLogs('django.request', level='DEBUG') as logs:
+                    middleware(request)
+                lines = [record.getMessage() for record in logs.records]
 
-        self.assert_no_marker(lines)
-        self.assertTrue(any('X-Csrftoken' in line and 'Cookie' in line for line in lines))
-        self.assertTrue(any('Set-Cookie' in line for line in lines))
+                self.assert_no_marker(lines)
+                self.assertTrue(any('X-Csrftoken' in line and 'Cookie' in line for line in lines))
+                self.assertTrue(any('Set-Cookie' in line for line in lines))
 
     @staticmethod
     def json_response_with_cookies():

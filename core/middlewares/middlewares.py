@@ -61,14 +61,17 @@ class CustomLoggerMiddleware(LoggingMiddleware):
             super()._log_request_body(request, logging_context, log_level, cached_request_body)
 
     def _log_resp(self, level, response, logging_context):
+        """The library's: a JSON response's headers, now masked, then its body, now only in development."""
+        if not re.match('^application/json', response.get('Content-Type', ''), re.I):
+            return
+        headers = {
+            name: '*****' if name.lower() in AnalyticsEventEmitter.SENSITIVE_HEADERS else value
+            for name, value in response.items()
+        }
+        self.logger.log(level, headers, logging_context)
         if self.log_bodies():
-            super()._log_resp(level, response, logging_context)
-        elif re.match('^application/json', response.get('Content-Type', ''), re.I):  # the library logs their headers
-            headers = {
-                name: '*****' if name.lower() in AnalyticsEventEmitter.SENSITIVE_HEADERS else value
-                for name, value in response.items()
-            }
-            self.logger.log(level, headers, logging_context)
+            body = '(data_stream)' if response.streaming else self._chunked_to_max(response.content)
+            self.logger.log(level, body, logging_context)
 
 
 class FixMalformedLimitParamMiddleware(BaseMiddleware):
