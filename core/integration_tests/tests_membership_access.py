@@ -1,7 +1,8 @@
 import uuid
 from datetime import timedelta
 
-from django.test import tag
+from django.core.cache import cache
+from django.test import tag, override_settings
 
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection
@@ -126,13 +127,8 @@ class SearchMembershipAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertIn(f'{token}map', self.search(f'/mappings/?q={token}map', self.staff)[0])
 
 
-@tag('es')
-class ReleaseLabelAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
-    """
-    Under a public HEAD every revision stays visible, but the source versions named beside it (source_versions,
-    latest_source_version) are only those the requester can view. Here a public v0, older than the private v1, holds
-    the same revisions.
-    """
+class PublicReleaseMixin(SourceVersionReadAccessMixin):
+    """SourceVersionReadAccessMixin's fixture, and a public v0, older than the private v1, holding the same revisions"""
     def setUp(self):
         super().setUp()
         self.public_release = OrganizationSourceFactory(
@@ -142,9 +138,6 @@ class ReleaseLabelAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
         self.add_to_version(self.mapping, self.public_release)
         self.concept.sources.add(self.public_release)
         self.released_revision.sources.add(self.public_release)
-        self.patch_concept_es_mapping_for_ci()
-        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
-        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
         self.former = UserProfileFactory(organizations=[self.org])
         self.former.organizations.remove(self.org)
 
@@ -152,11 +145,44 @@ class ReleaseLabelAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
         """Each requester, and whether they can view the private release."""
         return [(None, False), (self.outsider, False), (self.former, False), (self.member, True), (self.staff, True)]
 
-    def labelled(self, response):
+    @staticmethod
+    def labelled(response):
         """{(id, version): (source_versions, latest_source_version)} of each item `response` serializes."""
         items = response.data if isinstance(response.data, list) else [response.data]
         return {(item['id'], item.get('version')): (item.get('source_versions'), item.get('latest_source_version'))
                 for item in items}
+
+    def labels(self, url, user=None):
+        """The latest_source_version names `url` answers, its embedded concepts' and mappings' included."""
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        names = set()
+
+        def collect(value):
+            if isinstance(value, dict):
+                if 'latest_source_version' in value:
+                    names.add(value['latest_source_version'])
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+        collect(response.data)
+        return names
+
+
+@tag('es')
+class ReleaseLabelAccessTest(PublicReleaseMixin, OCLAPITestCase):
+    """
+    Under a public HEAD every revision stays visible, but the source versions named beside it (source_versions,
+    latest_source_version) are only those the requester can view.
+    """
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
 
     def test_revisions_name_only_the_releases_the_requester_can_view(self):
         concept, mapping = self.concept.uri, self.mapping.uri
@@ -209,3 +235,56 @@ class ReleaseLabelAccessTest(SourceVersionReadAccessMixin, OCLAPITestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(
                     [item['latest_source_version'] for item in response.data], ['v1' if can_view else None])
+
+    def test_concepts_and_mappings_embedded_in_another_name_the_requester_s_releases(self):
+        """A concept's mappings and parents. The parent here, the mapping's other concept, is held by v1 only."""
+        self.concept.parent_concepts.add(self.mapping.to_concept)
+        concept, mapping = self.concept.uri, self.mapping.uri
+        for user, can_view in self.users():
+            for url, field in [(f'{concept}?includeMappings=true', 'mappings'),
+                               (f'{concept}?includeInverseMappings=true', 'mappings'),
+                               (f'{concept}?includeParentConcepts=true', 'parent_concepts'),
+                               (f'{mapping}?lookupConcepts=true', 'to_concept')]:
+                with self.subTest(url=url, user=user):
+                    response = self.request('get', url, user)
+                    self.assertEqual(response.status_code, 200)
+                    embedded = response.data[field]
+                    labels = {item['latest_source_version'] for item in (
+                        embedded if isinstance(embedded, list) else [embedded])}
+                    self.assertTrue(labels)
+                    self.assertEqual('v1' in labels, can_view, labels)
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+class ReleaseLabelCacheTest(PublicReleaseMixin, OCLAPITestCase):
+    """
+    The first page of the latest release's concepts or mappings is cached for anyone, so it's cached only where it
+    names the same source versions for everyone.
+    """
+    def setUp(self):
+        super().setUp()
+        Source.objects.filter(id=self.public_release.id).update(is_latest_version=True)
+        Source.objects.filter(id=self.release.id).update(is_latest_version=False)
+        cache.clear()
+
+    def test_one_requester_s_page_isn_t_served_to_another(self):
+        for path in ['concepts/', 'mappings/', 'mappings/?lookupConcepts=true']:
+            url = self.public_release.uri + path
+            for first, second in [(self.member, None), (None, self.member), (self.staff, self.outsider)]:
+                cache.clear()
+                for user in (first, second):
+                    can_view = user in (self.member, self.staff)
+                    with self.subTest(url=url, first=first, user=user):
+                        labels = self.labels(url, user)
+                        self.assertEqual('v1' in labels, can_view, labels)
+
+    def test_a_page_that_names_only_public_versions_is_cached_for_anyone(self):
+        Source.objects.filter(id=self.release.id).update(public_access=ACCESS_TYPE_VIEW)
+        body_key, _ = self.public_release.get_concepts_cache_keys()
+        self.labels(self.public_release.uri + 'concepts/', self.member)
+        self.assertIsNotNone(cache.get(body_key))
+        cache.clear()
+        self.labels(self.public_release.uri + 'concepts/?includeMappings=true', self.member)
+        self.assertIsNone(cache.get(body_key + '?includeMappings=true'))
+        self.labels(self.public_release.uri + 'concepts/?includeMappings=true')
+        self.assertIsNotNone(cache.get(body_key + '?includeMappings=true'))

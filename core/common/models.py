@@ -1236,6 +1236,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         criteria = cls.get_viewable_versions_criteria(user)
         return queryset if criteria is None else queryset.filter(criteria)
 
+    def has_versions_hidden_from_public(self):
+        """Whether this repository has a version, HEAD aside, the public can't view (get_viewable_versions_criteria)"""
+        versions = self.__class__.objects.filter(
+            mnemonic=self.mnemonic, organization_id=self.organization_id, user_id=self.user_id).exclude(version=HEAD)
+        return versions.exclude(id__in=self.get_viewable(versions, None).values('id')).exists()
+
     @staticmethod
     def get_version_url_kwarg():
         return 'version'

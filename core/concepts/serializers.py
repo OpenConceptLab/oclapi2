@@ -334,7 +334,7 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 ) if is_collection else obj.get_bidirectional_mappings()
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings.order_by('id'), many=True).data
+            return serializer_class(mappings.order_by('id'), many=True, context=self.get_nested_context()).data
         if self.include_direct_mappings:
             if repo_version:
                 mappings = obj.get_version_mappings(repo_version)
@@ -347,20 +347,22 @@ class ConceptAbstractSerializer(SourceVersionFieldMixin, AbstractResourceSeriali
                 mappings = mappings.filter(to_source_url__in=target_repo_urls)
             if not include_retired:
                 mappings = mappings.filter(retired=False)
-            return serializer_class(mappings.order_by('id'), many=True).data
+            return serializer_class(mappings.order_by('id'), many=True, context=self.get_nested_context()).data
 
         return []
 
     def get_child_concepts(self, obj):
         if self.include_child_concepts:
             return ConceptDetailSerializer(get_viewable_concepts(
-                self.get_related_concepts(obj, 'child_concepts'), get(self, 'context.request')), many=True).data
+                self.get_related_concepts(obj, 'child_concepts'), get(self, 'context.request')), many=True,
+                context=self.get_nested_context()).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
             return ConceptDetailSerializer(get_viewable_concepts(
-                self.get_related_concepts(obj, 'parent_concepts'), get(self, 'context.request')), many=True).data
+                self.get_related_concepts(obj, 'parent_concepts'), get(self, 'context.request')), many=True,
+                context=self.get_nested_context()).data
         return None
 
     def get_related_concepts(self, obj, relation):
@@ -825,13 +827,15 @@ class ConceptVersionDetailSerializer(CollectionVersionsMixin, SourceVersionField
     def get_child_concepts(self, obj):
         if self.include_child_concepts:
             return ConceptDetailSerializer(
-                get_viewable_concepts(obj.child_concepts.all(), get(self, 'context.request')), many=True).data
+                get_viewable_concepts(obj.child_concepts.all(), get(self, 'context.request')), many=True,
+                context=self.get_nested_context()).data
         return None
 
     def get_parent_concepts(self, obj):
         if self.include_parent_concepts:
             return ConceptDetailSerializer(
-                get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True).data
+                get_viewable_concepts(obj.parent_concepts.all(), get(self, 'context.request')), many=True,
+                context=self.get_nested_context()).data
         return None
 
 

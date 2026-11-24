@@ -30,7 +30,8 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS, \
-    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY, INDEX_BATCH_SIZE
+    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY, INDEX_BATCH_SIZE, INCLUDE_MAPPINGS_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, \
+    MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_FROM_CONCEPT, MAPPING_LOOKUP_TO_CONCEPT
 from core.common.es import ESScript
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
@@ -47,6 +48,10 @@ TRUTHY = get_truthy_values()
 PER_REQUESTER_LIST_PARAMS = (
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS,
     INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY)
+# list params that embed other repositories' concepts or mappings, whose source version names follow the requester
+EMBEDDING_LIST_PARAMS = (
+    INCLUDE_MAPPINGS_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, MAPPING_LOOKUP_CONCEPTS, MAPPING_LOOKUP_FROM_CONCEPT,
+    MAPPING_LOOKUP_TO_CONCEPT)
 MAX_UNPAGINATED_RESULTS = 1000  # `Compress` lists; above this, users.list_unpaginated (ocl_online#230)
 FACETS_CACHE_SUFFIX = '#for-anyone'  # a facetsOnly answer's cache key ends with it
 
@@ -204,7 +209,19 @@ class ListWithHeadersMixin(ListModelMixin):
                 not self.should_include_facets() and not self.should_include_search_stats() and
                 all(params.get(param) not in TRUTHY for param in PER_REQUESTER_LIST_PARAMS) and
                 not any(to_snake_case(param) in collection_facets for param in params) and
-                get(self, 'parent_resource.is_latest_version', False))
+                get(self, 'parent_resource.is_latest_version', False) and
+                (self.only_facets() or self.__names_the_public_s_source_versions()))
+
+    def __names_the_public_s_source_versions(self):
+        """
+        Whether the page names, for this requester, the source versions it names for the public (source_versions,
+        latest_source_version), so one cached answer serves both: signed out, always; signed in, where nothing on it
+        comes from another repository and its own repository has no version the public can't view.
+        """
+        if not get(self.request.user, 'is_authenticated'):
+            return True
+        return all(self.request.query_params.get(param) not in TRUTHY for param in EMBEDDING_LIST_PARAMS) and \
+            not self.parent_resource.has_versions_hidden_from_public()
 
     def list(self, request, *args, **kwargs):
         """
@@ -774,39 +791,44 @@ class SourceChildMixin(ChecksumModel):
     @classmethod
     def load_latest_source_versions(cls, instances, user=None):
         """
-        Sets each row's _latest_source_version, the latest released source version holding it, and
-        _latest_source_version_name, the name of the latest of them the user can view (get_latest_source_version_name).
-        Two queries, as one for the version alone; one more when a row's latest is one the user can't view.
+        Sets each row's _latest_source_version, the latest source version holding it, HEAD aside, and
+        _latest_source_version_name, the name of the latest of them the user can view (get_latest_source_version_name):
+        two queries for the page, as for the version alone. The first reads, for each row, the latest version the user
+        can view and the latest they can't.
         """
         key = f'{cls._meta.model_name}_id'
-        rows = cls.sources.through.objects.filter(
-            **{f'{key}__in': [instance.id for instance in instances]}).exclude(source__version=HEAD)
-        latest_source_version_ids = dict(
-            rows.order_by(key, '-source__created_at').distinct(key).values_list(key, 'source_id'))
-        source_model = cls._meta.get_field('sources').related_model
-        viewable = source_model.get_viewable_versions_criteria(user)
-        source_versions = (source_model.objects if viewable is None else source_model.objects.annotate(
-            _viewable=models.ExpressionWrapper(viewable, output_field=models.BooleanField()))
-        ).in_bulk(set(latest_source_version_ids.values()))
-        names = {row_id: source_versions[source_id].version for row_id, source_id in latest_source_version_ids.items()
-                 if get(source_versions[source_id], '_viewable', True)}
-        hidden = set(latest_source_version_ids) - set(names)
-        if hidden:  # those rows' latest viewable one, if any
-            names.update(cls.filter_by_viewable_source_version(rows.filter(**{f'{key}__in': hidden}), user).order_by(
-                key, '-source__created_at').distinct(key).values_list(key, 'source__version'))
+        criteria = cls.get_viewable_source_version_criteria(user)
+        is_viewable = models.Value(True) if criteria is None else models.ExpressionWrapper(
+            criteria, output_field=models.BooleanField())
+        latest, names = {}, {}
+        for row_id, is_viewed, source_id, version, created_at in cls.sources.through.objects.filter(
+                **{f'{key}__in': [instance.id for instance in instances]}
+        ).exclude(source__version=HEAD).annotate(_viewable=is_viewable).order_by(
+                key, '_viewable', '-source__created_at').distinct(key, '_viewable').values_list(
+                key, '_viewable', 'source_id', 'source__version', 'source__created_at'):
+            if row_id not in latest or created_at > latest[row_id][1]:
+                latest[row_id] = (source_id, created_at)
+            if is_viewed:
+                names[row_id] = version
+        source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
+            {source_id for source_id, _ in latest.values()})
         for instance in instances:
             # pylint: disable=protected-access
-            instance._latest_source_version = source_versions.get(latest_source_version_ids.get(instance.id))
+            instance._latest_source_version = source_versions.get(latest[instance.id][0]) if (
+                instance.id in latest) else None
             instance._latest_source_version_name = names.get(instance.id)
 
     @classmethod
-    def filter_by_viewable_source_version(cls, rows, user):
-        """Rows of `sources`' through table naming a source version the user can view (has_view_access; staff: all)"""
+    def get_viewable_source_version_criteria(cls, user):
+        """Rows of `sources`' through table naming a source version the user can view (has_view_access); None: all"""
         source_model = cls._meta.get_field('sources').related_model
         viewable = source_model.get_viewable_versions_criteria(user)
-        if viewable is None:
-            return rows
-        return rows.filter(Exists(source_model.objects.filter(viewable, id=OuterRef('source_id'))))
+        return None if viewable is None else Q(source_id__in=source_model.objects.filter(viewable).values('id'))
+
+    @classmethod
+    def filter_by_viewable_source_version(cls, rows, user):
+        criteria = cls.get_viewable_source_version_criteria(user)
+        return rows if criteria is None else rows.filter(criteria)
 
     @classmethod
     def load_previous_version_uris(cls, instances):
@@ -848,34 +870,37 @@ class SourceChildMixin(ChecksumModel):
         expansion recorded (else that its references resolved to), or None when that is HEAD, no source version or
         one the user can't view.
         """
-        expansion = collection.expansion
-        if expansion:
-            cls.load_expansion_source_versions(instances, expansion)
-        else:
-            reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
-            references = cls._meta.get_field('references').related_model.objects.in_bulk(
-                {reference_id for ids in reference_ids.values() for reference_id in ids})
-            resolved = {}
-            for instance in instances:
-                versions = compact(
-                    references[reference_id]._get_resolved_system_version(resolved)  # pylint: disable=protected-access
-                    for reference_id in reference_ids[instance.id]
-                )
-                instance.set_collection_source_version(versions)
-
         source_model = cls._meta.get_field('sources').related_model
         viewable = source_model.get_viewable_versions_criteria(user)
-        named = {get(instance, '_collection_source_version.id') for instance in instances} - {None}
-        if viewable is None or not named:
+        expansion = collection.expansion
+        if expansion:
+            cls.load_expansion_source_versions(instances, expansion, viewable)
             return
-        named -= set(source_model.objects.filter(viewable, id__in=named).values_list('id', flat=True))
+
+        reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
+        references = cls._meta.get_field('references').related_model.objects.in_bulk(
+            {reference_id for ids in reference_ids.values() for reference_id in ids})
+
+        resolved = {}
         for instance in instances:
-            if get(instance, '_collection_source_version.id') in named:
-                instance._collection_source_version = None  # pylint: disable=protected-access
+            versions = compact(
+                references[reference_id]._get_resolved_system_version(resolved)  # pylint: disable=protected-access
+                for reference_id in reference_ids[instance.id]
+            )
+            instance.set_collection_source_version(versions)
+        named = {get(instance, '_collection_source_version.id') for instance in instances} - {None}
+        if viewable is not None and named:
+            named -= set(source_model.objects.filter(viewable, id__in=named).values_list('id', flat=True))
+            for instance in instances:
+                if get(instance, '_collection_source_version.id') in named:
+                    instance._collection_source_version = None  # pylint: disable=protected-access
 
     @classmethod
-    def load_expansion_source_versions(cls, instances, expansion):  # pylint: disable=too-many-locals
-        """The source versions holding each row: those the expansion is locked to, else recorded, else all of them"""
+    def load_expansion_source_versions(cls, instances, expansion, viewable=None):  # pylint: disable=too-many-locals
+        """
+        The source versions holding each row: those the expansion is locked to, else recorded, else all of them; the
+        newest is left out if `viewable` (get_viewable_versions_criteria's) doesn't admit it.
+        """
         recorded_ids = {version.id for version in expansion.recorded_source_versions}
         locked_ids = {version.id for version in expansion.recorded_evaluated_source_versions}
         sources_field = cls._meta.get_field('sources')
@@ -886,14 +911,20 @@ class SourceChildMixin(ChecksumModel):
         source_ids_by_row = {}
         for row_id, source_id in holding:
             source_ids_by_row.setdefault(row_id, []).append(source_id)
-        versions = sources_field.related_model.objects.in_bulk(
+        versions = sources_field.related_model.objects
+        if viewable is not None:
+            versions = versions.annotate(
+                _viewable=models.ExpressionWrapper(viewable, output_field=models.BooleanField()))
+        versions = versions.in_bulk(
             {source_id for source_ids in source_ids_by_row.values() for source_id in source_ids})
         for instance in instances:
-            source_ids = source_ids_by_row.get(instance.id, [])
+            source_ids = [source_id for source_id in source_ids_by_row.get(instance.id, []) if source_id in versions]
             recorded = [source_id for source_id in source_ids if source_id in recorded_ids]
             locked = [source_id for source_id in recorded if source_id in locked_ids]
             instance.set_collection_source_version(
                 [versions[source_id] for source_id in locked or recorded or source_ids])
+            if not get(instance, '_collection_source_version._viewable', True):
+                instance._collection_source_version = None  # pylint: disable=protected-access
 
     def set_collection_source_version(self, versions):
         newest = max(versions, key=lambda version: version.created_at, default=None)

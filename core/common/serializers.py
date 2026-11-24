@@ -309,6 +309,10 @@ class SourceVersionFieldMixin:
         # a $cascade bundle passes its requester as `user`
         return get(self, 'context.request.user') or get(self, 'context.user')
 
+    def get_nested_context(self):
+        """The context of a concept or mapping serialized inside this one: the requester, whose versions it names."""
+        return {'user': self.get_requester()}
+
     def get_source_versions(self, obj):
         return obj.get_source_versions(self.get_requester())
 
