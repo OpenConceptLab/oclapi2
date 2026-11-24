@@ -1,8 +1,10 @@
-from mock import patch
+from mock import patch, PropertyMock, Mock
 
 from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.reference_conversions import ReferenceConversions
 from core.collections.tests.factories import OrganizationCollectionFactory
+from core.common.tasks import convert_references
+from core.tasks.models import Task
 from core.common.constants import ACCESS_TYPE_NONE
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory
@@ -204,6 +206,42 @@ class ReferenceConversionsTest(OCLAPITestCase):
         same = self.convert(
             {'conversions': [{'id': self.reference.id, 'to': 'repo_versioned', 'repo_version': self.v1.uri}]})
         self.assertEqual(same[0]['status'], 'converted')
+
+    def test_a_queued_conversion_keeps_its_result_as_json(self):
+        results = {'results': [{'id': self.reference.id, 'to': 'repo_versioned', 'status': 'converted'}]}
+        Task.before_start('conversion-task', [], {}, name=convert_references.name)
+
+        # the hooks a worker runs once the task returns; the once-lock's backend needs a broker CI doesn't have
+        with patch('celery_once.tasks.QueueOnce.once_backend', new_callable=PropertyMock, return_value=Mock()):
+            convert_references.on_success(results, 'conversion-task', [], {})
+            convert_references.after_return('SUCCESS', results, 'conversion-task', [], {}, None)
+
+        self.assertEqual(Task.objects.get(id='conversion-task').result_all, results)
+
+    def test_a_conversion_that_resolves_to_head_says_it_follows_head(self):
+        unreleased = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=unreleased, mnemonic='u1').get_latest_version()
+        reference = self.add(concept.uri)
+
+        item = self.preview([reference.id])['results'][0]
+
+        self.assertEqual(item['unversioned']['repo_version'], unreleased.uri)
+        self.assertTrue(item['unversioned']['follows_head'])
+        self.assertTrue(item['repo_versioned']['follows_head'])
+        main = self.preview([self.reference.id])['results'][0]
+        self.assertFalse(main['repo_versioned']['follows_head'])
+        self.assertFalse(main['unversioned']['follows_head'])
+
+    def test_the_requester_view_check_runs_once_per_version(self):
+        second = ConceptFactory(parent=self.source, mnemonic='c2').get_latest_version()
+        second.sources.add(self.v1, self.v2)
+        other = self.add(second.uri)
+        source_class = type(self.source)
+
+        with patch.object(source_class, 'has_view_access', autospec=True, return_value=True) as has_view_access:
+            self.preview([self.reference.id, other.id])
+
+        self.assertEqual(len({call.args[0].id for call in has_view_access.call_args_list}), has_view_access.call_count)
 
     def test_a_reference_that_is_not_resource_versioned_is_not_supported(self):
         plain = self.add(f'{self.source.uri}concepts/c1/')

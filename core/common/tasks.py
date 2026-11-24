@@ -207,7 +207,9 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
     return [reference.id for reference in added_references], errors, unresolved
 
 
-@app.task(bind=True)
+# QueueOnce, as export_source: its after_return replaces AsyncTask's, which stores a result as str(), so the
+# task's record keeps this one as JSON for a queued conversion's caller. The same request twice at once gets 409
+@app.task(base=QueueOnceCustomTask, bind=True)
 def convert_references(self, user_id, collection_id, conversions):
     """Swaps a HEAD collection's resource-versioned references for repo-versioned or unversioned ones"""
     from core.users.models import UserProfile

@@ -29,6 +29,7 @@ class ReferenceConversions:
         self._holders = {}
         self._resolved = {}
         self._visible = {}
+        self._viewable_by_requester = {}
 
     @staticmethod
     def get_candidates(collection):
@@ -131,6 +132,12 @@ class ReferenceConversions:
             self._visible[repo_version.id] = owned or repo_version.is_publicly_viewable
         return self._visible[repo_version.id]
 
+    def can_requester_view(self, repo_version):
+        """Once per version: for an org-private one, has_view_access is a membership query"""
+        if repo_version.id not in self._viewable_by_requester:
+            self._viewable_by_requester[repo_version.id] = repo_version.has_view_access(self.user)
+        return self._viewable_by_requester[repo_version.id]
+
     @staticmethod
     def get_chosen_by(version, locked):
         if version.id in {locked_version.id for locked_version in locked}:
@@ -172,7 +179,7 @@ class ReferenceConversions:
         # as adding it resolves: under the collection's lock, else the latest release
         target = converted.resolve_system_version
         # default resolution doesn't check access: a version the requester can't view can't be offered
-        if not target or not target.has_view_access(self.user):
+        if not target or not self.can_requester_view(target):
             return None
         return converted, target, self.get_chosen_by(target, self.get_recorded_versions(target)[1])
 
@@ -215,6 +222,8 @@ class ReferenceConversions:
             would = self.evaluate(converted, version)
             item[conversion] = {
                 'expression': converted.expression, 'repo_version': version.uri, 'chosen_by': chosen_by,
+                # its members move with the next edit in HEAD, whether it names HEAD or HEAD is its lock
+                'follows_head': bool(version.is_head),
                 'keeps_members': would == now, 'members_count': len(would), 'members': would,
                 'added_count': len(would - now), 'added': would - now,
                 'removed_count': len(now - would), 'removed': now - would}
