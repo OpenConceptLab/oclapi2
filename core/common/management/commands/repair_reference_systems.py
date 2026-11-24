@@ -43,10 +43,12 @@ class Command(BaseCommand):
     @staticmethod
     def get_candidates():
         """References with no system and no value set whose expression could name a concept or mapping"""
+        # only what the repair reads: a collection row is wide (its JSON fields), and only its URI is reported
         return CollectionReference.objects.filter(
             Q(system__isnull=True) | Q(system=''), Q(valueset__isnull=True) | Q(valueset=[]),
             Q(expression__contains='/concepts/') | Q(expression__contains='/mappings/'),
-        ).select_related('collection').order_by('id')
+        ).select_related('collection').only(
+            'id', 'expression', 'collection_id', 'collection__uri', *FIELDS).order_by('id')
 
     @staticmethod
     def plan(reference):
