@@ -8,6 +8,12 @@ from core.collections.models import Collection, Expansion
 from core.collections.version_lists import RULE, ExpansionVersionLists
 
 
+# printed even when 0, so a dry run after --apply can show that nothing is left to change
+ZERO_TOTALS = (
+    'expansions', 'changed', 'unchanged', 'changed_released', 'changed_unreleased', 'unsettled',
+    'settled_after_several_passes', 'skipped_unsettled', 'failed', 'with_gains_lock')
+
+
 class Command(BaseCommand):
     help = ('Rebuilds the explicit and evaluated repo version lists of expansions from their references and members. '
             'A dry run unless --apply is given. Members are never changed. Each changed expansion is reported as a '
@@ -30,7 +36,7 @@ class Command(BaseCommand):
         if bool(options['uris']) == options['all']:
             raise CommandError('Pass expansion or collection version URIs, or --all')
         self.options = options
-        self.totals = Counter()
+        self.totals = Counter({key: 0 for key in ZERO_TOTALS})
         mode = 'APPLY' if options['apply'] else 'DRY RUN'
         self.stdout.write(f'{mode}. Rule: {RULE}')
         if options['output']:
@@ -86,7 +92,11 @@ class Command(BaseCommand):
                 lists = ExpansionVersionLists(expansion).build()
                 report = lists.to_report()
                 if self.options['apply'] and report['changed']:
-                    lists.apply()
+                    if report['settled']:
+                        lists.apply()
+                    else:
+                        # its last pass would change again: written, a second run would move it once more
+                        self.totals['skipped_unsettled'] += 1
         except Exception as ex:  # pylint: disable=broad-except
             self.totals['failed'] += 1
             self.write({'id': expansion_id, 'error': f'{type(ex).__name__}: {ex}'})

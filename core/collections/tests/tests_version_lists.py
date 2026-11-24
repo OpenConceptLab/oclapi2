@@ -725,6 +725,35 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v1.id, self.v2.id})
         self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id})
 
+    def test_command_apply_leaves_an_unsettled_expansion_alone(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+        out = StringIO()
+
+        # one pass moves v1 to evaluated, and the cap stops before the pass that confirms it
+        with patch('core.collections.version_lists.MAX_PASSES', 1):
+            call_command('rebuild_expansion_version_lists', self.expansion.uri, apply=True, stdout=out)
+
+        totals = json.loads(out.getvalue().split('APPLY done: ')[1].splitlines()[0])
+        self.assertEqual((totals['unsettled'], totals['skipped_unsettled']), (1, 1))
+        self.assertIn('unsettled', out.getvalue().split(f'{self.expansion.uri}: ')[1].splitlines()[0])
+        self.assertEqual(list(self.expansion.explicit_source_versions.all()), [self.v1])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [])
+
+    def test_command_prints_zero_totals(self):
+        self.reference([self.member])
+        self.expansion.evaluated_source_versions.set([self.v1])
+        out = StringIO()
+
+        call_command('rebuild_expansion_version_lists', self.expansion.uri, stdout=out)
+
+        totals = json.loads(out.getvalue().split('DRY RUN done: ')[1].splitlines()[0])
+        self.assertEqual(
+            {key: totals[key] for key in (
+                'changed', 'changed_released', 'changed_unreleased', 'unsettled', 'settled_after_several_passes')},
+            {'changed': 0, 'changed_released': 0, 'changed_unreleased': 0, 'unsettled': 0,
+             'settled_after_several_passes': 0})
+
     def test_command_skip_released_rechecks_a_version_released_after_selection(self):
         released = self.released_expansion()
         out = StringIO()
