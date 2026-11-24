@@ -4776,9 +4776,16 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
                 expansion.collection_version.uri + 'expansions/', HTTP_AUTHORIZATION='Token ' + token)
             self.assertEqual([item['built_with'] for item in response.data], [choice])
 
-        # an expansion made on its own records no choice
+        # an expansion made on its own records no choice, and a client can't set one: it changes what a rebuild keeps
         response = self.client.get(self.expansion.url, HTTP_AUTHORIZATION='Token ' + token)
         self.assertIsNone(response.data['built_with'])
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e-built-with', 'parameters': {'activeOnly': False}, 'built_with': 'lock'},
+            HTTP_AUTHORIZATION='Token ' + token, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data['built_with'])
+        self.assertIsNone(self.collection.expansions.get(mnemonic='e-built-with').built_with)
 
 
 class CollectionVersionExpansionsViewTest(OCLAPITestCase):
