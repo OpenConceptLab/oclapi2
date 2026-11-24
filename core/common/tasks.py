@@ -468,6 +468,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     # A release request may have left its indexing here: it waits for a rerun, as on a failed seed
                     instance.record_seed_stage(None)
                     raise
+                if instance.released:
+                    # created released, it holds HEAD's members only now, which can change their class
+                    from core.collections.models import Expansion
+                    Expansion.mark_health_not_current_for_repository(instance)
             elif autoexpand:
                 if not seed_from_head:
                     instance.cascade_children_to_expansion(index=True, sync=sync)
@@ -501,6 +505,34 @@ def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False)
     if expansion:
         expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
         expansion.clear_processing(True)
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def compute_expansion_health(expansion_id):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def recheck_expansion_health(limit=None):
+    """Nightly: recomputes, a batch at a time, the default expansions whose health isn't current. A release, retire
+    or delete leaves them so, and a frozen release never gets another change. One with a run queued (False) is taken
+    too, in case that run never came: a duplicate is harmless, as a store checks the revision"""
+    from django.db.models import F
+    from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT
+    from core.collections.models import Expansion
+    if not Expansion.is_health_on():
+        return 0
+    expansion_ids = list(Expansion.objects.exclude(health_is_current=True).filter(
+        is_processing=False, is_active=True, collection_version__is_active=True,
+        collection_version__expansion_uri=F('uri')
+    ).order_by('id').values_list('id', flat=True)[:limit or EXPANSION_HEALTH_RECHECK_LIMIT])
+    for expansion_id in expansion_ids:
+        compute_expansion_health(expansion_id)
+    return len(expansion_ids)
 
 
 @app.task
@@ -1227,6 +1259,8 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
     if expansion and removed_reference_ids:
         reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
         expansion.add_references(reference_to_readd, True, True, False)
+        # re-adding changes members after the removal marked them, so its own recompute may have read them early
+        expansion.mark_health_out_of_date()
         current = Task.objects.filter(id=get(current_task, 'request.id')).first()
         if current:
             current.clear_superseded_readd_references_tasks()
