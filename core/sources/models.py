@@ -1184,9 +1184,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             .values_list('to_source_id', flat=True)
             .distinct()
         )
-        queryset = Source.objects.filter(id__in=mapped_source_ids)
+        queryset = Source.objects.filter(id__in=mapped_source_ids, is_active=True)
         if exclude_self:
-            queryset = queryset.exclude(id=self.id)
+            # mappings point at HEAD, so on a version leave out every version of this source
+            queryset = queryset.exclude(
+                mnemonic=self.mnemonic, organization_id=self.organization_id, user_id=self.user_id)
         return queryset
 
     def clone_resources(self, user, concepts, mappings, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
