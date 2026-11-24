@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from urllib.parse import quote
 
 from celery.result import AsyncResult
+from celery.states import FAILURE
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
@@ -28,13 +29,13 @@ from pydash import get
 from core.capabilities.writes import check_make_private
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
-    delete_s3_objects
+    delete_s3_objects, batch_index_resources
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
-from core.common.utils import to_owner_uri
-from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS
+from core.common.utils import to_owner_uri, chunks
+from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS, REINDEX_CHUNK_SIZE
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
@@ -981,15 +982,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
-        export_paths = self.get_export_paths_to_delete()
+        other_versions = list(self.versions.exclude(id=self.id)) if self.is_head else []
+        deleting = {self.id, *(version.id for version in other_versions)}
+        export_paths = self.get_export_paths_to_delete(deleting)
         deleted_urls = [self.url]
         deleted_ids = [self.id]
         canonical_urls = {self.canonical_url}
         if self.is_head:
-            other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
                 other_version.clear_cache()
-                export_paths += other_version.get_export_paths_to_delete()
+                export_paths += other_version.get_export_paths_to_delete(deleting)
                 deleted_urls.append(other_version.url)
                 deleted_ids.append(other_version.id)
                 canonical_urls.add(other_version.canonical_url)
@@ -1014,6 +1016,29 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
         self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
+
+    def queue_children_reindex(self, concept_ids, mapping_ids, user=None):
+        """
+        Indexes again these concepts and mappings, whose documents name what they belonged to: a deleted version's
+        former members, whose links are gone, or the rows a seed superseded. REINDEX_CHUNK_SIZE a Task on the
+        indexing queue, with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed
+        Task. user: who the Tasks belong to (and can cancel them), by default this repository's last editor.
+        """
+        from core.tasks.models import Task
+        user = user or self.updated_by
+        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
+            for chunk in chunks(sorted(ids), REINDEX_CHUNK_SIZE):
+                args = [resource, {'id__in': chunk}]
+                if get(settings, 'TEST_MODE', False):
+                    batch_index_resources(*args)
+                    continue
+                task = Task.new(queue='indexing', user=user, name=batch_index_resources.name, args=args)
+                try:
+                    batch_index_resources.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+                except Exception as ex:  # pylint: disable=broad-except
+                    task.state = FAILURE
+                    task.finished_at = timezone.now()
+                    task.record_exception(ex)
 
     def unlink_url_registry_entries(self, repo_ids):
         """
@@ -1042,11 +1067,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
-    def get_export_key_prefixes(self):
-        prefix = self.get_version_export_path(suffix=None)
+    def get_export_key_prefixes(self, with_expansion=True, deleting=()):
+        prefix = self.get_version_export_path(suffix=None, with_expansion=with_expansion)
         prefixes = [(prefix, get_export_key_pattern(prefix))]
-        if self.owns_legacy_export_path():
-            legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+        if self.owns_legacy_export_path(with_expansion, deleting):
+            legacy_prefix = self.get_legacy_version_export_path(suffix=None, with_expansion=with_expansion)
             prefixes.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
         return prefixes
 
@@ -1055,9 +1080,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         for prefix, key_pattern in self.get_export_key_prefixes():
             service.delete_objects(prefix, key_pattern=key_pattern)
 
-    def get_export_paths_to_delete(self):
-        return self.get_export_key_prefixes() + [
-            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
+    def get_export_paths_to_delete(self, deleting=()):
+        """
+        Also the prefixes without the default expansion: a version exported before it had one keeps that export.
+        deleting: ids of the versions deleted with this one, as in owns_legacy_export_path.
+        """
+        prefixes = self.get_export_key_prefixes(deleting=deleting)
+        if self.get_version_export_path(suffix=None, with_expansion=False) != prefixes[0][0]:
+            prefixes += self.get_export_key_prefixes(with_expansion=False, deleting=deleting)
+        return prefixes + [(path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
@@ -1624,12 +1655,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
         return self.get_version_export_path(suffix=f"{last_update}.zip")
 
-    def get_version_export_path(self, suffix='*'):
+    def get_version_export_path(self, suffix='*', with_expansion=True):
         owner = self.parent
         owner_type = f'{owner.get_url_kwarg()}s'
         # each dynamic part is one segment, so a version like 'a/b' can't pass for version 'a' with expansion 'b'
         parts = [owner.mnemonic, f'{self.resource_type.lower()}s', self.mnemonic, self.version]
-        expansion = get(self, 'expansion.mnemonic')
+        expansion = get(self, 'expansion.mnemonic') if with_expansion else None
         if expansion:
             parts.append(expansion)
         path = f"{owner_type}/" + '/'.join(quote(part, safe='') for part in parts) + '.'
@@ -1662,17 +1693,19 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
-    def owns_legacy_export_path(self):
+    def owns_legacy_export_path(self, with_expansion=True, deleting=()):
         """
         True when no other source or collection version builds this version's legacy export prefix, so the keys
         under it can only be its own. Underscores in the old format also let a version stand in for an expansion
         (version 'a_b' and version 'a' with expansion 'b'), so every version of the owner whose mnemonic could
-        be part of the prefix is compared, not only this one's name variants.
+        be part of the prefix is compared, not only this one's name variants: with its default expansion and
+        without (an export made before it had one). deleting: ids of this model's versions deleted with this one (a
+        HEAD's), which can't keep a prefix from it.
         """
         from core.sources.models import Source
         from core.collections.models import Collection
 
-        legacy_path = self.get_legacy_version_export_path(suffix=None)
+        legacy_path = self.get_legacy_version_export_path(suffix=None, with_expansion=with_expansion)
         mnemonic = str(self.mnemonic)
         mnemonics = [mnemonic[:i] for i in range(1, len(mnemonic) + 1)]
         mnemonic_criteria = Q(mnemonic__in=mnemonics) | Q(mnemonic__startswith=mnemonic)
@@ -1680,11 +1713,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             candidates = model.objects.filter(
                 mnemonic_criteria, organization_id=self.organization_id, user_id=self.user_id)
             for candidate in candidates:
-                if isinstance(self, model) and candidate.id == self.id:
+                if isinstance(self, model) and (candidate.id == self.id or candidate.id in deleting):
                     continue
-                base = candidate.get_legacy_version_export_path(suffix=None, with_expansion=False).rstrip('.')
-                same_path = candidate.get_legacy_version_export_path(suffix=None) == legacy_path
-                if legacy_path.startswith(base) and same_path:
+                if legacy_path in (candidate.get_legacy_version_export_path(suffix=None, with_expansion=False),
+                                   candidate.get_legacy_version_export_path(suffix=None)):
                     return False
         return True
 

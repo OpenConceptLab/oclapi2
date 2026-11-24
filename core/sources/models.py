@@ -18,8 +18,7 @@ from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, batch_index_resources, \
-    update_active_count
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, update_active_count
 from core.common.utils import split_canonical, to_camel_case, chunks
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
@@ -1089,31 +1088,21 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         was_latest_released = self.is_latest_released
         concept_ids = list(self.concepts.values_list('id', flat=True))
         mapping_ids = list(self.mappings.values_list('id', flat=True))
-        super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
-        transaction.on_commit(lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released))
+        try:
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        finally:  # the rows may be gone even if a later step (export cleanup) failed; a rollback drops this
+            transaction.on_commit(
+                lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released), robust=True)
 
     def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False, user=None):
         """
         Indexes again these concepts and mappings of this repository (its HEAD), from what they belong to now: the rows
-        of a deleted version, whose links are gone, or the ones a seed superseded. DROPPED_CHILDREN_CHUNK_SIZE a Task,
-        with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed Task.
+        of a deleted version, whose links are gone, or the ones a seed superseded (queue_children_reindex).
         was_latest_released: a deleted version was the latest release, so the new one's members are flagged.
         user: who the Tasks belong to (and can cancel them), by default HEAD's last editor.
         """
         user = user or self.updated_by
-        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
-            for chunk in chunks(sorted(ids), DROPPED_CHILDREN_CHUNK_SIZE):
-                args = [resource, {'id__in': chunk}]
-                if get(settings, 'TEST_MODE', False):
-                    batch_index_resources(*args)
-                    continue
-                task = Task.new(queue='indexing', user=user, name=batch_index_resources.name, args=args)
-                try:
-                    batch_index_resources.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
-                except Exception as ex:  # pylint: disable=broad-except
-                    task.state = FAILURE
-                    task.finished_at = timezone.now()
-                    task.record_exception(ex)
+        self.queue_children_reindex(concept_ids, mapping_ids, user)
         latest_released = self.get_latest_released_version() if was_latest_released else None
         if latest_released:
             latest_released.index_children_async(user, {'is_in_latest_source_version': True})
