@@ -851,7 +851,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         user = self.request.user
         named = [facet for facet in self.repo_name_facets if facets.get(facet)]
         if not named or get(user, 'is_staff') or not (
-                self.search_checks_access if search is not None else self.get_search_visibility_criteria() is not None):
+                self.search_checks_access if search is not None else
+                self.get_search_checks_access(self.get_search_visibility_criteria())):
             return
         from core.collections.documents import CollectionDocument
         from core.collections.models import Collection
@@ -1058,6 +1059,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             return self.get_other_members_view_criteria()
         return self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria()
 
+    def get_search_checks_access(self, visibility_criteria):
+        """
+        Whether the hits load through get_viewable_hits: where the search filters by access, and in the requester's own
+        scope too, which admits private content by the owner names the index holds, a renamed user's old one included.
+        An org search in the requester's own scope reads the index's members, so it's checked as well.
+        """
+        if visibility_criteria is not None or self.is_org_document():
+            return True
+        return self.is_user_scope() and not self.request.user.is_staff and 'collection' not in self.kwargs and (
+            self.is_concept_container_document_model() or self.is_source_child_document_model() or
+            self.is_repo_document_model())
+
     def get_scope_owner_criteria(self):
         """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
         source filters match names in any case, and owner names that differ only in case are other owners: their
@@ -1127,8 +1140,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         visibility_criteria = self.get_search_visibility_criteria()
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
-        # an org search in the requester's own scope reads the index's members, so it's checked as well
-        self.search_checks_access = visibility_criteria is not None or self.is_org_document()
+        self.search_checks_access = self.get_search_checks_access(visibility_criteria)
         faceted_criterion = self.get_faceted_criterion()
         if faceted_criterion:
             results = results.filter(faceted_criterion)
@@ -1957,7 +1969,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
         instance.comment = f'Updated extras: {key}={value}.'
-        instance.save()
+        instance.save_keeping_access()
         instance.set_checksums()
         return Response({key: value})
 
@@ -1968,7 +1980,7 @@ class ConceptContainerExtraRetrieveUpdateDestroyView(RetrieveUpdateDestroyAPIVie
         if key in instance.extras:
             del instance.extras[key]
             instance.comment = f'Deleted extra {key}.'
-            instance.save()
+            instance.save_keeping_access()
             instance.set_checksums()
             return Response(status=status.HTTP_204_NO_CONTENT)
 

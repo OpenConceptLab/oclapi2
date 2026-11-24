@@ -138,7 +138,10 @@ class OrganizationDetailSerializer(AbstractResourceSerializer):
         instance.extras = validated_data.get('extras', instance.extras)
         instance.text = validated_data.get('text', instance.text)
         instance.updated_by = request_user
-        instance.save()
+        if 'public_access' in validated_data:
+            instance.save()
+        else:  # a concurrent write's access stays
+            instance.save_keeping_access()
         if instance.id:
             instance.set_checksums()
         return instance

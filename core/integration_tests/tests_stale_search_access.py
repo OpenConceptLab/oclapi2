@@ -5,7 +5,7 @@ from django.test import tag
 
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.views import BaseAPIView
@@ -20,7 +20,7 @@ from core.orgs.models import Organization
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -220,3 +220,63 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
         Concept.objects.filter(parent=self.source).update(public_access=ACCESS_TYPE_NONE)
 
         self.assertNotIn(self.concept.mnemonic, match_ids())
+
+
+@tag('es')
+class RenamedUserSearchAccessTest(OCLAPITestCase):
+    """
+    The index holds a renamed user's content under their old name, as owner and creator. Someone who registers that
+    name searches their own scope, or everything: the renamed user's private content is no hit.
+    """
+    def setUp(self):
+        super().setUp()
+        self.token = 'renamed' + uuid.uuid4().hex[:8]
+        self.old_name = self.token + 'user'
+        self.renamed = UserProfileFactory(username=self.old_name)
+        created = {'created_by': self.renamed, 'updated_by': self.renamed, 'public_access': ACCESS_TYPE_NONE}
+        self.source = UserSourceFactory(user=self.renamed, mnemonic=self.token + 'src', **created)
+        self.collection = UserCollectionFactory(user=self.renamed, mnemonic=self.token + 'coll', **created)
+        self.concept = ConceptFactory(parent=self.source, mnemonic=self.token + 'concept', **created)
+        self.mapping = MappingFactory(
+            parent=self.source, mnemonic=self.token + 'map', from_concept=self.concept, to_concept=self.concept,
+            **created)
+        for model in (Concept, Mapping):  # the factories' latest version rows too
+            model.objects.filter(parent=self.source).update(**created)
+        SourceDocument().update([self.source], refresh=True)
+        CollectionDocument().update([self.collection], refresh=True)
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
+    def searches(self, prefix):
+        """Own-scope searches, then global ones, which admit private content by its creator's name."""
+        token = self.token
+        return [
+            (f'{prefix}sources/?q={token}src', self.source.mnemonic),
+            (f'{prefix}collections/?q={token}coll', self.collection.mnemonic),
+            (f'{prefix}repos/?q={token}src', self.source.mnemonic),
+            (f'/sources/?q={token}src', self.source.mnemonic),
+            (f'/concepts/?q={token}concept', self.concept.mnemonic),
+            (f'/mappings/?q={token}map', self.mapping.mnemonic),
+        ]
+
+    def search_ids(self, url, user):
+        response = self.client.get(url, HTTP_AUTHORIZATION='Token ' + user.get_token())
+        self.assertEqual(response.status_code, 200, url)
+        return [item.get('id') or item.get('short_code') for item in response.data]
+
+    def test_a_renamed_user_s_private_content_is_no_hit_for_whoever_takes_the_old_name(self):
+        for url, _id in self.searches(f'/users/{self.old_name}/'):
+            self.assertIn(_id, self.search_ids(url, self.renamed), url)
+
+        response = self.client.put(
+            f'/users/{self.old_name}/', {'username': self.token + 'new'},
+            HTTP_AUTHORIZATION='Token ' + self.renamed.get_token(), format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.renamed.refresh_from_db()
+        self.assertEqual(self.renamed.username, self.token + 'new')
+        taker = UserProfileFactory(username=self.old_name)
+
+        for prefix in (f'/users/{self.old_name}/', '/user/'):
+            for url, _id in self.searches(prefix):
+                with self.subTest(url=url):
+                    self.assertNotIn(_id, self.search_ids(url, taker))

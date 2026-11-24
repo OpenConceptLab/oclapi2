@@ -13,7 +13,7 @@ from core.code_systems.serializers import CodeSystemDetailSerializer
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
 from core.common.models import CelerySignalProcessor
-from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
+from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, ROLE_ADMIN_ID
 from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImportRequest, ResourceImporter
@@ -32,14 +32,18 @@ INDEX_PATCHES = [
 
 
 class PrivateGatePolicy(GroupLimitPolicy):
-    """Refuses every write that makes a repository private, with `body`, while `refuse` is set. Records questions."""
+    """
+    Refuses every write of `refused_action` (making a repository private) to a repository, with `body`, while `refuse`
+    is set. Records questions.
+    """
     calls = []
     refuse = True
+    refused_action = WRITE_ACTION_MAKE_PRIVATE
     body = {'error_code': 'private_refused', 'detail': 'Not here.', 'code': 3}
 
     def get_write_refusal(self, user, content, action):
         self.calls.append((user, content, action))
-        return dict(self.body) if self.refuse and action == WRITE_ACTION_MAKE_PRIVATE else None
+        return dict(self.body) if self.refuse and action == self.refused_action else None
 
 
 class MakePrivateTestMixin:
@@ -47,6 +51,7 @@ class MakePrivateTestMixin:
         super().setUp()
         PrivateGatePolicy.calls = []
         PrivateGatePolicy.refuse = True
+        PrivateGatePolicy.refused_action = WRITE_ACTION_MAKE_PRIVATE
         self.user = UserProfileFactory()
         self.org = OrganizationFactory()
         self.org.members.add(self.user)
@@ -396,7 +401,7 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
     def test_a_rest_edit_that_sends_no_access_doesn_t_write_the_access_column(self):
         """
         So a concurrent write's access stays whenever it commits, with no row lock: the edit runs under autocommit, as
-        other REST writes do. An edit that sends access writes it.
+        other REST writes do. An edit that sends access writes it, under the lock.
         """
         for repo in (self.source, self.collection):
             table = type(repo)._meta.db_table  # pylint: disable=protected-access
@@ -412,7 +417,8 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                              '"name" = ' in sql and sql.endswith(row)]
                     self.assertEqual(len(saves), 1, saves)
                     self.assertEqual('"public_access" = ' in saves[0], writes)
-                    self.assertEqual([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')], [])
+                    # one that sends an access others can view reads the row for update, for its publish check
+                    self.assertEqual(bool([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')]), writes)
 
     def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
         """Its save leaves the column out, and it answers with the access the row has after it."""
@@ -452,6 +458,110 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                         self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
                         self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
                         type(row).objects.filter(id=row.id).update(public_access='')
+
+
+@override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)
+class ConcurrentMakePrivateTest(MakePrivateTestMixin, OCLAPITestCase):
+    """
+    Writes that load a row at request start, while a concurrent write makes it private before they save: the row
+    stays private. ConcurrentPublishCheckTest covers an edit that sends an access others can view.
+    """
+    def setUp(self):
+        super().setUp()
+        PrivateGatePolicy.refuse = False
+        self.org.members.remove(self.user)
+        self.org.members.add(self.user, through_defaults={'role_id': ROLE_ADMIN_ID})  # org writes need an admin
+
+    @staticmethod
+    def made_private_after(view_class, row):
+        """`view_class`'s get_object, after which a concurrent write makes `row` private."""
+        original = view_class.get_object
+
+        def get_object(view, *args, **kwargs):
+            obj = original(view, *args, **kwargs)
+            type(row).objects.filter(id=row.id).update(public_access=ACCESS_TYPE_NONE)
+            return obj
+        return patch.object(view_class, 'get_object', get_object)
+
+    def assert_kept_private(self, row, response, status=200):
+        self.assertEqual(response.status_code, status, getattr(response, 'data', response))
+        row.refresh_from_db()
+        self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
+
+    def test_an_extras_write_keeps_a_row_made_private_after_it_was_read(self):
+        from core.collections.views import CollectionExtraRetrieveUpdateDestroyView
+        from core.orgs.views import OrganizationExtraRetrieveUpdateDestroyView
+        from core.sources.views import SourceExtraRetrieveUpdateDestroyView
+        for row, view_class in (
+                (self.source, SourceExtraRetrieveUpdateDestroyView),
+                (self.collection, CollectionExtraRetrieveUpdateDestroyView),
+                (self.org, OrganizationExtraRetrieveUpdateDestroyView)):
+            for method, data, status in (('put', {'k': 'v'}, 200), ('delete', None, 204)):
+                type(row).objects.filter(id=row.id).update(public_access=ACCESS_TYPE_VIEW)
+                with self.subTest(uri=row.uri, method=method), self.made_private_after(view_class, row):
+                    self.assert_kept_private(row, self.request(method, row.uri + 'extras/k/', data), status)
+                    self.assertEqual(row.extras.get('k'), 'v' if method == 'put' else None)
+
+    def test_a_logo_upload_keeps_a_row_made_private_while_it_uploads(self):
+        user_source = UserSourceFactory(user=self.user)
+        for row in (self.source, self.collection, user_source, self.org):
+            def upload(*args, _row=row, **kwargs):  # pylint: disable=unused-argument
+                type(_row).objects.filter(id=_row.id).update(public_access=ACCESS_TYPE_NONE)
+                return 'logo/path.png'
+            type(row).objects.filter(id=row.id).update(public_access=ACCESS_TYPE_VIEW)
+            service = Mock(upload_base64=Mock(side_effect=upload), public_url_for=Mock(return_value='https://logo'))
+            with self.subTest(uri=row.uri), patch('core.common.models.get_export_service', return_value=service):
+                self.assert_kept_private(row, self.request('post', row.uri + 'logo/', {'base64': 'abc'}))
+                self.assertEqual(row.logo_path, 'logo/path.png')
+
+    def test_an_org_update_that_sends_no_access_keeps_an_org_made_private_after_it_was_read(self):
+        from core.orgs.views import OrganizationDetailView
+        with self.made_private_after(OrganizationDetailView, self.org):
+            self.assert_kept_private(self.org, self.request('put', self.org.uri, {'name': 'Renamed'}))
+        self.assertEqual(self.org.name, 'Renamed')
+
+        # one that sends an access writes it
+        self.assertEqual(self.request('put', self.org.uri, {'public_access': 'View'}).status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.public_access, ACCESS_TYPE_VIEW)
+
+
+@override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)
+class ConcurrentPublishCheckTest(MakePrivateTestMixin, OCLAPITestCase):
+    """A REST edit that sends an access others can view is asked about publishing the row as stored when it saves."""
+    def setUp(self):
+        super().setUp()
+        PrivateGatePolicy.refused_action = WRITE_ACTION_PUBLISH
+
+    def test_an_edit_sending_view_after_a_concurrent_make_private_is_asked_to_publish(self):
+        """The request read the row as public, so it was asked about an edit; its save is asked about publishing."""
+        repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
+        for repo, factory in repos:
+            model = type(repo)
+            version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
+            for row in (repo, version):
+                model.objects.filter(id__in=(repo.id, version.id)).update(public_access=ACCESS_TYPE_VIEW)
+                self.take_calls()
+                with self.subTest(uri=row.uri), patch.object(
+                        model, 'persist_changes', UpdateToPrivateTest.made_private_first(model, 'persist_changes')):
+                    response = self.request('patch', row.uri, {'name': 'Renamed', 'public_access': 'View'})
+
+                    self.assertEqual(response.status_code, 403, response.data)
+                    self.assertEqual(response.json(), PrivateGatePolicy.body)
+                    self.assertEqual(
+                        [(call[2], call[1].id) for call in self.take_calls()],
+                        [(WRITE_ACTION_EDIT, row.id), (WRITE_ACTION_PUBLISH, row.id)])
+                    row.refresh_from_db()
+                    self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
+                    self.assertNotEqual(row.name, 'Renamed')
+
+    def test_an_edit_sending_view_to_a_row_still_public_is_not_asked_to_publish(self):
+        for repo in (self.source, self.collection):
+            with self.subTest(uri=repo.uri):
+                response = self.request('patch', repo.uri, {'name': 'Renamed', 'public_access': 'View'})
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
 
 
 class SearchIndexOnCommitTest(OCLAPITestCase):
