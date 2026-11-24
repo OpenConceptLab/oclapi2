@@ -6,8 +6,10 @@ from django.db.models import Q
 
 from core.collections.models import CollectionReference
 from core.collections.parsers import CollectionReferenceExpressionStringParser
+from core.common.utils import decode_string
 
 FIELDS = ('system', 'code', 'resource_version', 'reference_type')
+NOT_A_VERSION = 'its expression does not name a concept or mapping version'
 
 
 class Command(BaseCommand):
@@ -16,7 +18,8 @@ class Command(BaseCommand):
             'reference_type are filled in where they are missing or the default disagrees with the expression. Only '
             'reference fields change: no expansion is rebuilt and no member is added or removed, in any collection '
             'version. A dry run unless --apply is given; each reference it would change is listed with its old and new '
-            'fields, and each it leaves alone with why.')
+            'fields, and each it leaves alone for another reason with why. Run it before backfill_expansion_health, '
+            'whose health counts the repaired references as resource-versioned.')
 
     def add_arguments(self, parser):
         parser.add_argument('--apply', action='store_true', help='Save the fields; without it, a dry run')
@@ -51,12 +54,14 @@ class Command(BaseCommand):
         parser = CollectionReferenceExpressionStringParser(expression=reference.expression)
         parser.parse()
         if parser.is_unknown or not (parser.system and parser.code and parser.resource_version):
-            return None, 'its expression does not name a concept or mapping version'
+            return None, NOT_A_VERSION
         if parser.version:
             # a source version and a resource version both named: for a person to judge, not this repair
             return None, 'its expression names a source version too'
         for field in ('code', 'resource_version'):
-            if getattr(reference, field) and getattr(reference, field) != getattr(parser, field):
+            # the parser reads the URL as written: an older save may hold the decoded form
+            if getattr(reference, field) and decode_string(getattr(reference, field)) != decode_string(
+                    getattr(parser, field)):
                 return None, f'its {field} disagrees with its expression'
         changes = {'system': parser.system}
         for field in ('code', 'resource_version'):
@@ -89,11 +94,13 @@ class Command(BaseCommand):
 
     def write(self, report, output):
         if 'left' in report:
-            line = f'LEFT {report["id"]} {report["expression"]}: {report["left"]}'
+            # most candidates name no version at all: counted and in --output, but not one line each here
+            if report['left'] != NOT_A_VERSION:
+                self.stdout.write(f'LEFT {report["id"]} {report["expression"]}: {report["left"]}')
         else:
             changed = {
                 field: report['after'][field] for field in FIELDS if report['after'][field] != report['before'][field]}
-            line = f'{report["id"]} {report["collection_version"]} {report["expression"]}: {json.dumps(changed)}'
-        self.stdout.write(line)
+            self.stdout.write(
+                f'{report["id"]} {report["collection_version"]} {report["expression"]}: {json.dumps(changed)}')
         if output:
             output.write(json.dumps(report, default=str) + '\n')

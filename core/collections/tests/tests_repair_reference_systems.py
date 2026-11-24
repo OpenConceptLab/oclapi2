@@ -42,6 +42,25 @@ class RepairReferenceSystemsTest(OCLTestCase):
         self.assertEqual(
             self.fields(reference), (self.source.uri, '1065', self.concept.version, 'concepts'))
 
+    def test_a_second_run_changes_nothing(self):
+        reference = self.legacy(self.concept.uri)
+        self.run_command(apply=True)
+        repaired = self.fields(reference)
+
+        out = self.run_command(apply=True)
+
+        self.assertNotIn(f'{reference.id} ', out)
+        self.assertNotIn('"repaired"', out)
+        self.assertEqual(self.fields(reference), repaired)
+
+    def test_an_encoded_code_agrees_with_its_decoded_form(self):
+        # the repair only reads the expression, so no concept needs to exist
+        reference = self.legacy(f'{self.source.uri}concepts/A%2FB/7/', code='A/B', resource_version='7')
+
+        self.run_command(apply=True)
+
+        self.assertEqual(self.fields(reference)[:2], (self.source.uri, 'A/B'))
+
     def test_code_and_resource_version_are_filled_in_where_missing(self):
         reference = self.legacy(self.concept.uri)
 
@@ -76,8 +95,9 @@ class RepairReferenceSystemsTest(OCLTestCase):
 
         out = self.run_command(apply=True)
 
-        self.assertIn(f'LEFT {unversioned.id} ', out)
-        self.assertIn('its expression does not name a concept or mapping version', out)
+        # counted, not listed: most candidates are like it
+        self.assertNotIn(f'LEFT {unversioned.id} ', out)
+        self.assertIn('"left: its expression does not name a concept or mapping version": 1', out)
         self.assertIn(f'LEFT {named_source_version.id} ', out)
         self.assertIn('its expression names a source version too', out)
         self.assertIn(f'LEFT {disagreeing.id} ', out)
