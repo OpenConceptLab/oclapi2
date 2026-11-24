@@ -1411,7 +1411,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
         with no lock. A blank access is stored as None instead, so that save writes it, under the lock. A source's
         save, and the cascade of its access and activity to its concepts and mappings, run in one transaction. Outside
-        a caller's transaction, a failed enqueue of the row's search index is raised once the save commits.
+        a caller's transaction, a failed enqueue of the row's search index is raised once the save commits, unless
+        keep_private=True, which only logs it.
         """
         keep_private = kwargs.pop('keep_private', False)
         keep_access = kwargs.pop('keep_access', False)
@@ -2107,9 +2108,8 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                # once committed, so the task reads the row as saved. Deferred in a transaction, it's robust, so a
-                # failed enqueue doesn't stop the transaction's other callbacks (a version's seed task); at once under
-                # autocommit, its error reaches the write, as before. persist_changes raises a REST edit's error itself
+                # once committed. Robust in a transaction, so later callbacks (a version's seed task) still run; under
+                # autocommit the error reaches the write, and persist_changes raises a REST edit's error itself
                 args = (instance.app_name, instance.model_name, instance.id)
                 reaches_write = getattr(instance, '_index_enqueue_reaches_write', False)
 
