@@ -139,7 +139,17 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
 
         for user, hidden in ((AnonymousUser(), {self.source.uri}), (self.outsider, {self.source.uri}),
                              (self.member, set())):
-            self.assertEqual(BaseAPIView.get_hidden_repo_names(user, 'uri', urls, True, [Source]), hidden, user)
+            _, hidden_urls = BaseAPIView.get_repo_names_by_access(user, 'uri', urls, True, [Source])
+            self.assertEqual(hidden_urls, hidden, user)
+
+    def test_a_stale_document_names_no_source_or_owner_that_no_row_has(self):
+        """Such as a source deleted, or renamed, before its concepts were reindexed."""
+        Source.objects.filter(organization=self.org).update(mnemonic=self.token + 'renamed')
+        Organization.objects.filter(id=self.org.id).update(mnemonic=self.token + 'renamedorg')
+
+        facets = self.facet_names(f'/concepts/?q={self.token}concept')
+        self.assertNotIn(self.source.mnemonic.lower(), facets.get('source', set()))
+        self.assertNotIn(self.org.mnemonic.lower(), facets.get('owner', set()))
 
     def test_a_concept_or_mapping_of_a_source_made_private_is_no_hit_before_its_own_row_follows(self):
         """A source made private commits before its save signal makes its concepts and mappings private."""

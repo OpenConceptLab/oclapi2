@@ -841,9 +841,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def keep_repo_facets_viewable(self, facets, search=None):
         """
         The facets that name repositories, or their owners, name them as the index has them: one made private before
-        it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a name is
-        left out if the repositories it names exist and the requester can view none of them (get_hidden_repo_names);
-        a name of none stays, such as a mapping's target outside OCL. Counts stay the index's. A hit kept as its
+        it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a source or
+        owner name stays only if it names a repository the requester can view; a name of a mapping's or concept's
+        target is left out only if the repositories it names exist and the requester can view none of them, so a
+        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. A hit kept as its
         creator's can have its names missing, never wrong. `search`: get_facets_search's, which tells whether the
         search filters by access.
         """
@@ -861,16 +862,18 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             # a concept search's source and owner facets keep the names' case, as the others' facets do but those
             exact = facet not in ('source', 'owner') or self.is_concept_document()
             key = str if exact else lambda name: str(name).lower()
-            hidden = self.get_hidden_repo_names(
+            shown, hidden = self.get_repo_names_by_access(
                 user, self.repo_name_facets[facet], {key(name) for name, _, _ in facets[facet]}, exact,
                 owners if facet == 'owner' else [Source])
-            facets[facet] = [bucket for bucket in facets[facet] if key(bucket[0]) not in hidden]
+            facets[facet] = [bucket for bucket in facets[facet] if (
+                key(bucket[0]) in shown if facet in ('source', 'owner') else key(bucket[0]) not in hidden)]
 
     @staticmethod
-    def get_hidden_repo_names(user, kind, names, exact, repo_models):
+    def get_repo_names_by_access(user, kind, names, exact, repo_models):
         """
         Of these `names` of repositories of `repo_models` (`kind`: their mnemonics, their owners' or their URIs, any
-        version's), those whose repositories `user` can view none of: one query per model, by index when `exact`,
+        version's), those of a repository `user` can view, and those whose existing repositories `user` can view none
+        of; a name of none is in neither. One query per model, by index when `exact`,
         else names are lowercase and match any case (owners that differ only in case are one name then).
         """
         field = {'mnemonic': F('mnemonic'), 'uri': F('uri'),
@@ -885,7 +888,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 model.get_viewable_versions_criteria(user), output_field=models.BooleanField())
             for name, is_viewable in rows.annotate(_viewable=viewable).values_list('_name', '_viewable').distinct():
                 (shown if is_viewable else hidden).add(name)
-        return hidden - shown
+        return shown, hidden - shown
 
     @staticmethod
     def get_viewable_collection_facet_urls(facets, collections, viewable):
