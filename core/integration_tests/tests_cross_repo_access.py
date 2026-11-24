@@ -677,6 +677,14 @@ class FuzzySearchListsTest(CrossRepoAccessBaseTest):
             self.assertEqual([row['id'] for row in self.search(url)], [str(self.mapping.mnemonic)], url)
             self.assertEqual(self.client.get(url + '?fuzzy=true').status_code, 200, url)
 
+    def test_fuzzy_search_with_a_min_score_that_isnt_a_number_answers_400(self):
+        for url in ['/mappings/', self.collection.uri + 'concepts/']:
+            for min_score in ['high', 'nan', 'inf']:
+                response = self.client.get(f'{url}?fuzzy=true&q={self.name}&min_score={min_score}')
+                self.assertEqual(response.status_code, 400, (url, min_score))
+            response = self.client.get(f'{url}?fuzzy=true&q={self.name}&min_score=0.01')
+            self.assertEqual((response.status_code, len(response.data)), (200, 1), url)
+
 
 class CascadeSourceVersionAccessTest(PrivateReleaseOfPublicHeadMixin, CrossRepoAccessBaseTest):
     def setUp(self):
