@@ -428,6 +428,22 @@ class SlowRequestLogMiddlewareTest(SimpleTestCase):
 
         self.assertEqual([(record['view'], record['route']) for record in records], [(None, None)])
 
+    @override_settings(SLOW_REQUEST_LOG_MS=1, FHIR_SUBDOMAIN='fhir', ALLOWED_HOSTS=['*'])
+    def test_a_fhir_request_on_the_fhir_host_answered_before_url_resolution_names_its_view(self):
+        records = self.records(
+            RequestFactory().get('/fhir/metadata/', HTTP_HOST='fhir.example.org'), delay=0.01, status=500,
+            resolved=False)
+
+        self.assertEqual(
+            [(record['view'], record['route']) for record in records], [('CapabilityStatementView', 'fhir/metadata/')])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1, FHIR_SUBDOMAIN='fhir', ALLOWED_HOSTS=['api.example.org'])
+    def test_a_disallowed_host_still_logs_the_slow_request(self):
+        records = self.records(
+            RequestFactory().get(self.path, HTTP_HOST='elsewhere.example.org'), delay=0.01, status=400, resolved=False)
+
+        self.assertEqual([(record['view'], record['status']) for record in records], [(None, 400)])
+
     @override_settings(SLOW_REQUEST_LOG_MS=1)
     def test_an_unresolved_path_has_no_view_or_route(self):
         records = self.records(RequestFactory().get('/no/such/path/'), delay=0.01, status=404, resolved=False)

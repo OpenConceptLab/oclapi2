@@ -6,7 +6,7 @@ from contextlib import suppress
 from django.conf import settings
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
-from django.core.exceptions import SuspiciousOperation
+from django.core.exceptions import DisallowedHost, SuspiciousOperation
 from django.urls import Resolver404, resolve
 from pydash import get
 from request_logging.middleware import LoggingMiddleware
@@ -112,12 +112,11 @@ class SlowRequestLogMiddleware(BaseMiddleware):
     @staticmethod
     def log(request, response, ms):
         match = getattr(request, 'resolver_match', None)
-        # answered before URL resolution, e.g. by a failure in authentication; the FHIR host serves no API view
-        if match is None and not on_fhir_host(request):
-            try:
-                match = resolve(request.path_info, getattr(request, 'urlconf', None))
-            except Resolver404:
-                pass
+        # answered before URL resolution, e.g. by a failure in authentication; the FHIR host serves only FHIR paths
+        if match is None:
+            with suppress(Resolver404, DisallowedHost):
+                if is_fhir_path(request.path) or not on_fhir_host(request):
+                    match = resolve(request.path_info, getattr(request, 'urlconf', None))
         view = getattr(match, 'func', None)
         view = getattr(view, 'view_class', view)
         emit({
