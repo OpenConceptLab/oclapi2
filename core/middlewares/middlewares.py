@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from django.conf import settings
@@ -36,10 +37,28 @@ class BaseMiddleware:
 
 
 class CustomLoggerMiddleware(LoggingMiddleware):
+    """
+    django-request-logging: logs each request's method and path, and its status. Request and response bodies are
+    logged only in development; the library would log them at DEBUG, or at ERROR for a 4xx or 5xx response.
+    """
     def __call__(self, request):
         if request.META.get('HTTP_USER_AGENT', '').startswith('ELB-HealthChecker'):
             return self.get_response(request)
         return super().__call__(request)
+
+    @staticmethod
+    def log_bodies():
+        return settings.ENV == 'development'
+
+    def _log_request_body(self, request, logging_context, log_level, cached_request_body):
+        if self.log_bodies():
+            super()._log_request_body(request, logging_context, log_level, cached_request_body)
+
+    def _log_resp(self, level, response, logging_context):
+        if self.log_bodies():
+            super()._log_resp(level, response, logging_context)
+        elif re.match('^application/json', response.get('Content-Type', ''), re.I):
+            self.logger.log(level, response.headers, logging_context)  # the headers the library logs with the body
 
 
 class FixMalformedLimitParamMiddleware(BaseMiddleware):

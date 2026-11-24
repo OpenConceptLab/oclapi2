@@ -312,6 +312,9 @@ ES_MAPPINGS_REPLICAS = int(os.environ.get('ES_MAPPINGS_REPLICAS', 0))
 # shared indexing worker for hours (and re-embeds every row of a semantic HEAD).
 IMPORT_INDEX_MAX_LINES = int(os.environ.get('IMPORT_INDEX_MAX_LINES', 5000))
 
+# Request headers that request logging (CustomLoggerMiddleware) masks, as Django names them in request.headers.
+REQUEST_LOGGING_SENSITIVE_HEADERS = ['Authorization', 'Proxy-Authorization', 'Cookie', 'X-Api-Key']
+
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
 if ENV and ENV not in ['ci', 'development']:
