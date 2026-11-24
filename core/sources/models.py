@@ -822,16 +822,18 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def index_public_access_async(self, user=None):
         """
         Queues the public_can_view re-index of this source's docs once the change is committed, marking the source
-        processing before the response goes out, and returns its Task. In TEST_MODE it runs inline: returns None.
+        processing before the response goes out, and returns its Task. In TEST_MODE it runs inline: returns None. If
+        it can't be queued, a REST edit gets the error; in another transaction (a FHIR update) it's only logged, as
+        the source's own index enqueue is.
         """
         if get(settings, 'TEST_MODE', False):
             index_source_public_access(self.id)  # pylint: disable=no-value-for-parameter
             return None
         task = Task.new(queue='indexing', user=user or self.updated_by, name=index_source_public_access.__name__)
         self.add_processing(task.id)
-        # robust in a transaction, so the release's mapped-codes rebuild queued after it still goes
         def send():
             index_source_public_access.apply_async((self.id, ), queue='indexing', persist_args=True, task_id=task.id)
+        # robust in a transaction, so the release's mapped-codes rebuild queued after it still goes
         on_commit_reaching_write(self, lambda: self.send_processing_task(task, send))
         return task
 

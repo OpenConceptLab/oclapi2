@@ -1588,7 +1588,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         except Exception as ex:
             from core.tasks.models import Task
             self.remove_processing(task.id)
-            Task.on_failure(ex, task.id, None, None, None)
+            try:
+                Task.on_failure(ex, task.id, None, None, None)
+            except Exception as cleanup_ex:  # pylint: disable=broad-exception-caught
+                ERRBIT_LOGGER.log(cleanup_ex)  # the write gets the enqueue's error, not this one
             raise
 
     def remove_processing(self, process_id):

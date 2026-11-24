@@ -1013,6 +1013,24 @@ class SourceTest(OCLTestCase):
         source_version.refresh_from_db()
         self.assertFalse(source_version._background_process_ids)  # pylint: disable=protected-access
 
+    @override_settings(TEST_MODE=False, ES_SYNC=False)
+    @patch('core.sources.models.index_source_public_access')
+    def test_a_re_index_that_cant_be_queued_in_another_s_transaction_is_logged_and_not_left_processing(
+            self, index_task):
+        """Such as a FHIR update's: the error is only logged, as the source's own index enqueue's is."""
+        index_task.__name__ = 'index_source_public_access'
+        index_task.apply_async.side_effect = ConnectionError('down')
+        source = OrganizationSourceFactory(version=HEAD)
+
+        with self.assertLogs('django.test', 'ERROR'), self.captureOnCommitCallbacks(execute=True):
+            task = source.index_public_access_async()
+
+        index_task.apply_async.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.state, FAILURE)
+        source.refresh_from_db()
+        self.assertFalse(source._background_process_ids)  # pylint: disable=protected-access
+
     @override_settings(TEST_MODE=False)
     @patch('core.common.models.seed_children_to_new_version.apply_async')
     def test_persist_new_version_registers_seed_task_before_enqueue(self, apply_async):
