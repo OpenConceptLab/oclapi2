@@ -6,7 +6,7 @@ import factory
 from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import transaction, connection
 from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock, call
 from rest_framework import status
@@ -25,7 +25,7 @@ from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
 from core.common.tasks import update_validation_schema
 from core.common.tasks import index_source_public_access
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -3458,3 +3458,25 @@ class SourceSupplementsTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data['supplements'], self.ICD10)
+
+
+class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
+    def test_get_mapped_sources_reads_the_target_sources_from_an_index(self):
+        source = OrganizationSourceFactory()
+        version = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(
+            parent=source, from_concept=concept, to_concept=concept, from_source=source, to_source=source)
+        version.mappings.add(mapping)
+        with connection.cursor() as cursor:  # an all-visible table, as in production, lets an index answer alone
+            cursor.execute('vacuum (analyze) mappings')
+            cursor.execute('vacuum (analyze) mappings_sources')
+
+        for repo, index in ((source, 'mappings_head_parent_to_source'), (version, 'mappings_id_incl_to_source')):
+            sql, params = repo.get_mapped_sources(exclude_self=False).query.sql_with_params()
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute('set local enable_seqscan = off; set local enable_bitmapscan = off')
+                cursor.execute(f'explain select count(*) from ({sql}) mapped_sources', params)
+                plan = '\n'.join(row[0] for row in cursor.fetchall())
+
+            self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)
