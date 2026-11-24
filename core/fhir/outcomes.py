@@ -8,6 +8,7 @@ request is answered with a 422 and the issue code `exception`, logged at ERROR a
 (report_server_error), so monitoring still counts it.
 """
 import logging
+from collections.abc import Mapping
 from http import HTTPStatus
 
 from django.core.exceptions import BadRequest, SuspiciousOperation, ValidationError as DjangoValidationError, \
@@ -141,10 +142,10 @@ def detail_issues(detail, code='invalid', field=None):
 
 
 def is_message(value):
-    """A string, number or null, or a list of them: what an error body says, as an object it carries isn't."""
+    """A non-empty string, a number or null, or a list of them: what an error body says, unlike an object it carries."""
     if isinstance(value, (list, tuple)):
         return all(is_message(item) for item in value)
-    return not isinstance(value, dict)
+    return not isinstance(value, Mapping) and value != ''
 
 
 def refusal_messages(body):
@@ -152,11 +153,18 @@ def refusal_messages(body):
     A capability refusal's body without the objects it carries for OCL's apps to show in place of its `detail`: as
     issues, every value in them would be an error of its own.
     """
-    if isinstance(body, dict):
+    if isinstance(body, Mapping):
         return {key: value for key, value in body.items() if is_message(value)}
     if isinstance(body, (list, tuple)):
         return [item for item in body if is_message(item)]
-    return body
+    return body if is_message(body) else []
+
+
+def api_exception_issues(exc, code):
+    """The issues of an APIException's detail; a capability refusal's are its messages, else its status."""
+    if isinstance(exc, UsageRefused):  # an OperationOutcome needs an issue
+        return detail_issues(refusal_messages(exc.detail), code) or [issue(code, status_text(exc.status_code))]
+    return detail_issues(exc.detail, code)
 
 
 def with_tx_issue_types(outcome):
@@ -269,12 +277,7 @@ def outcome_for_exception(exc):
         if getattr(exc, 'wait', None):
             headers['Retry-After'] = str(int(exc.wait))
         status_code = exc.status_code
-        code = status_issue_code(status_code)
-        if isinstance(exc, UsageRefused):  # with no messages left, its status: an OperationOutcome needs an issue
-            issues = detail_issues(refusal_messages(exc.detail), code) or [issue(code, status_text(status_code))]
-        else:
-            issues = detail_issues(exc.detail, code)
-        outcome = operation_outcome(*issues)
+        outcome = operation_outcome(*api_exception_issues(exc, status_issue_code(status_code)))
         if status_code >= 500:
             report_server_error(status_code, exc)
     else:

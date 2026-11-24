@@ -1,3 +1,4 @@
+from collections import UserDict
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError as DjangoValidationError, PermissionDenied as DjangoPermissionDenied
@@ -206,7 +207,11 @@ class ExceptionHandlerTest(SimpleTestCase):
             [('Example message', None)])
 
     def test_a_refusal_body_of_objects_only_is_answered_with_its_status(self):
-        for body in ({'notice': {'title': 'Example notice'}}, [{'title': 'Example notice'}]):
+        bodies = (
+            {'notice': {'title': 'Example notice'}}, [{'title': 'Example notice'}],
+            {'detail': '', 'notice': UserDict({'title': 'Example notice'})}, '',
+        )
+        for body in bodies:
             response = self.handle(WriteRefused(body))
 
             self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'], body)
