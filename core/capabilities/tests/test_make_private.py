@@ -393,30 +393,48 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                                     child.refresh_from_db()
                                     self.assertEqual(child.public_access, concurrent)
 
-    def test_a_rest_edit_that_sends_no_access_reads_its_row_for_update_in_the_transaction_that_saves_it(self):
-        """A concurrent write that changes the row's access waits for the edit's save, so it isn't overwritten."""
+    def test_a_rest_edit_that_sends_no_access_doesn_t_write_the_access_column(self):
+        """
+        So a concurrent write's access stays whenever it commits, with no row lock: the edit runs under autocommit, as
+        other REST writes do. An edit that sends access writes it.
+        """
         for repo in (self.source, self.collection):
             table = type(repo)._meta.db_table  # pylint: disable=protected-access
             row = f'"{table}"."id" = {repo.id}'
-            for data, locks in (({'name': 'Renamed'}, True), ({'name': 'Renamed', 'public_access': 'View'}, False)):
+            for data, writes in (({'name': 'Renamed'}, False), ({'name': 'Renamed', 'public_access': 'View'}, True)):
                 with self.subTest(uri=repo.uri, data=data):
                     with CaptureQueriesContext(connection) as queries:
                         response = self.request('patch', repo.uri, data)
 
                     self.assertEqual(response.status_code, 200, response.data)
                     sqls = [query['sql'] for query in queries.captured_queries]
-                    save = next(index for index, sql in enumerate(sqls) if sql.startswith(f'UPDATE "{table}" SET') and
-                                '"public_access" = ' in sql and sql.endswith(row))
-                    lock = next((index for index, sql in enumerate(sqls[:save]) if sql.startswith('SELECT') and
-                                 f'WHERE {row}' in sql and sql.endswith('FOR NO KEY UPDATE')), None)
-                    self.assertEqual(lock is not None, locks)
-                    if locks:
-                        savepoint = sqls[lock - 1]
-                        self.assertTrue(savepoint.startswith('SAVEPOINT '), savepoint)
-                        self.assertGreater(sqls.index(f'RELEASE {savepoint}'), save)
+                    saves = [sql for sql in sqls if sql.startswith(f'UPDATE "{table}" SET') and
+                             '"name" = ' in sql and sql.endswith(row)]
+                    self.assertEqual(len(saves), 1, saves)
+                    self.assertEqual('"public_access" = ' in saves[0], writes)
+                    self.assertEqual([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')], [])
+
+    def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
+        """Its save leaves the column out, and it answers with the access the row has after it."""
+        for repo in (self.source, self.collection):
+            model = type(repo)
+            model.objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_VIEW)
+            change = Mock(side_effect=lambda *args: model.objects.filter(id=repo.id).update(
+                public_access=ACCESS_TYPE_NONE))
+            with self.subTest(uri=repo.uri), patch('core.common.models.check_make_private', change):
+                response = self.request('patch', repo.uri, {'name': 'Renamed'})
+
+                self.assertEqual(response.status_code, 200, response.data)
+                change.assert_called_once()
+                self.assertEqual(response.data['public_access'], ACCESS_TYPE_NONE)
+                repo.refresh_from_db()
+                self.assertEqual((repo.public_access, repo.name), (ACCESS_TYPE_NONE, 'Renamed'))
 
     def test_an_edit_that_sends_no_access_keeps_a_blank_row_private(self):
-        """A blank access is private (public_can_view): an edit that sends none stores it as None, not View."""
+        """
+        A blank access is private (public_can_view): an edit that sends none stores it as None, not View, reading the
+        row for update first, so a concurrent access change isn't undone, nor passed on wrongly to a source's concepts.
+        """
         repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
         for repo, factory in repos:
             version = factory(organization=self.org, mnemonic=repo.mnemonic, version='v1', released=True)
@@ -424,9 +442,12 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 type(row).objects.filter(id=row.id).update(public_access='')
                 for method in ('put', 'patch'):
                     with self.subTest(uri=row.uri, method=method):
-                        response = self.request(method, row.uri, {'name': 'Renamed'})
+                        with CaptureQueriesContext(connection) as queries:
+                            response = self.request(method, row.uri, {'name': 'Renamed'})
 
                         self.assertEqual(response.status_code, 200, response.data)
+                        self.assertTrue([query for query in queries.captured_queries
+                                         if query['sql'].endswith('FOR NO KEY UPDATE')])
                         row.refresh_from_db()
                         self.assertEqual(row.public_access, ACCESS_TYPE_NONE)
                         self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
@@ -472,6 +493,18 @@ class IndexEnqueueUnderAutocommitTest(OCLAPITransactionTestCase):
             CelerySignalProcessor.handle_save(None, Source, source)
 
         handle_save_task.apply_async.assert_called_once()
+
+
+class RestEditIndexEnqueueTest(MakePrivateTestMixin, OCLAPITransactionTestCase):
+    @patch('core.common.models.handle_save')
+    def test_a_failed_index_enqueue_reaches_a_rest_edit_that_sends_no_access(self, handle_save_task):
+        """The edit runs under autocommit, so the broker's error reaches it rather than being only logged."""
+        handle_save_task.apply_async.side_effect = ConnectionError('broker down')
+
+        for repo in (self.source, self.collection):
+            with self.subTest(uri=repo.uri), override_settings(TEST_MODE=False, ES_SYNC=True):
+                with self.assertRaises(ConnectionError):
+                    self.request('patch', repo.uri, {'name': 'Renamed'})
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)

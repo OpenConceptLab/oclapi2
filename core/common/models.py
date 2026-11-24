@@ -1407,12 +1407,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         Saves `obj` over its stored row. With keep_private=True the save never makes a private row viewable: it reads
         the stored row under a row lock held through the save, and keeps that row's access when it's private, so a
         concurrent write that makes it private isn't overwritten (a FHIR update, whose resource carries no access).
-        keep_access=True keeps the stored row's access whatever it is, under the same lock (a REST edit that sends no
-        access). The tasks the save queues go once its transaction ends.
+        The tasks the save queues go once its transaction ends. keep_access=True keeps the stored row's access whatever
+        it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
+        with no lock, and the save runs under autocommit, as other REST writes do. A blank access is stored as None
+        instead, so that save writes it, under the lock.
         """
         keep_private = kwargs.pop('keep_private', False)
         keep_access = kwargs.pop('keep_access', False)
-        lock = keep_private or keep_access
+        lock = keep_private or (keep_access and cls.objects.filter(id=obj.id, public_access='').exists())
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
@@ -1453,7 +1455,13 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     target_schema = obj.custom_validation_schema
                     obj.custom_validation_schema = original_schema
 
+                if keep_access and not lock:
+                    kwargs['update_fields'] = [
+                        field.name for field in cls._meta.concrete_fields
+                        if not field.primary_key and field.name != 'public_access']
                 obj.save(**kwargs)
+                if keep_access and not lock:  # the access the row has now, which a concurrent write may have changed
+                    obj.refresh_from_db(fields=['public_access'])
 
             if queue_schema_update_task:
                 from core.tasks.models import Task

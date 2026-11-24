@@ -9,6 +9,8 @@ import requests
 from django.conf import settings
 from django.core.mail import EmailMessage
 from django.db import models
+from django.db.models import F
+from django.db.models.functions import Coalesce, Lower
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_yasg import openapi
@@ -795,6 +797,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not get(self.request.user, 'is_authenticated'):
             facets.pop('updatedBy', None)
         self.keep_collection_facets_viewable(facets, search)
+        self.keep_repo_facets_viewable(facets, search)
         return facets
 
     def keep_collection_facets_viewable(self, facets, search=None):
@@ -829,6 +832,63 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             facets[facet] = sorted(
                 [(name, count, False) for (_facet, name), count in counts.items() if _facet == facet and count],
                 key=lambda bucket: (-bucket[1], bucket[0]))[:FACET_SIZE]
+
+    # the facets that name repositories, by what they hold: their names, their owners' names or their URLs
+    repo_name_facets = {
+        'source': 'mnemonic', 'owner': 'owner', 'fromConceptSource': 'mnemonic', 'toConceptSource': 'mnemonic',
+        'fromConceptOwner': 'owner', 'toConceptOwner': 'owner', 'targetRepo': 'uri'}
+
+    def keep_repo_facets_viewable(self, facets, search=None):
+        """
+        The facets that name repositories, or their owners, name them as the index has them: one made private before
+        it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a source or
+        owner name stays only if it names a repository the requester can view; a name of a mapping's or concept's
+        target is left out only if the repositories it names exist and the requester can view none of them, so a
+        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. A hit kept as its
+        creator's can have its names missing, never wrong. `search`: get_facets_search's, which tells whether the
+        search filters by access.
+        """
+        user = self.request.user
+        named = [facet for facet in self.repo_name_facets if facets.get(facet)]
+        if not named or get(user, 'is_staff') or not (
+                self.search_checks_access if search is not None else self.get_search_visibility_criteria() is not None):
+            return
+        from core.collections.documents import CollectionDocument
+        from core.collections.models import Collection
+        from core.sources.models import Source
+        owners = [Collection] if self.document_model == CollectionDocument else (
+            [Source, Collection] if self.is_repo_document_model() else [Source])
+        for facet in named:
+            # a concept search's source and owner facets keep the names' case, as the others' facets do but those
+            exact = facet not in ('source', 'owner') or self.is_concept_document()
+            key = str if exact else lambda name: str(name).lower()
+            shown, hidden = self.get_repo_names_by_access(
+                user, self.repo_name_facets[facet], {key(name) for name, _, _ in facets[facet]}, exact,
+                owners if facet == 'owner' else [Source])
+            facets[facet] = [bucket for bucket in facets[facet] if (
+                key(bucket[0]) in shown if facet in ('source', 'owner') else key(bucket[0]) not in hidden)]
+
+    @staticmethod
+    def get_repo_names_by_access(user, kind, names, exact, repo_models):
+        """
+        Of these `names` of repositories of `repo_models` (`kind`: their mnemonics, their owners' or their URIs, any
+        version's), those of a repository `user` can view, and those whose existing repositories `user` can view none
+        of; a name of none is in neither. One query per model, by index when `exact`,
+        else names are lowercase and match any case (owners that differ only in case are one name then).
+        """
+        field = {'mnemonic': F('mnemonic'), 'uri': F('uri'),
+                 'owner': Coalesce('organization__mnemonic', 'user__username')}[kind]
+        exact_criteria = {'mnemonic': models.Q(mnemonic__in=names), 'uri': models.Q(uri__in=names),
+                          'owner': models.Q(organization__mnemonic__in=names) | models.Q(user__username__in=names)}[kind]
+        hidden, shown = set(), set()
+        for model in repo_models:
+            rows = model.objects.annotate(_name=field if exact else Lower(field))
+            rows = rows.filter(exact_criteria) if exact else rows.filter(_name__in=names)
+            viewable = models.ExpressionWrapper(
+                model.get_viewable_versions_criteria(user), output_field=models.BooleanField())
+            for name, is_viewable in rows.annotate(_viewable=viewable).values_list('_name', '_viewable').distinct():
+                (shown if is_viewable else hidden).add(name)
+        return shown, hidden - shown
 
     @staticmethod
     def get_viewable_collection_facet_urls(facets, collections, viewable):
@@ -992,6 +1052,12 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             self.is_members_view() and username and user.is_authenticated and username != user.username and
             not user.is_staff and not self.is_url_registry_document())
 
+    def get_search_visibility_criteria(self):
+        """The access filter a search applies to the documents it matches; None where it applies none."""
+        if self.is_other_user_members_view():
+            return self.get_other_members_view_criteria()
+        return self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria()
+
     def get_scope_owner_criteria(self):
         """Private content in the requester's own scope (their user, or an org of theirs) is shown, but the owner and
         source filters match names in any case, and owner names that differ only in case are other owners: their
@@ -1058,8 +1124,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if not ignore_retired_filter and self._should_exclude_retired_from_search_results():
             results = results.filter('term', retired=False)
 
-        visibility_criteria = self.get_other_members_view_criteria() if self.is_other_user_members_view() else (
-            self.get_scope_owner_criteria() if self._should_include_private() else self.get_public_criteria())
+        visibility_criteria = self.get_search_visibility_criteria()
         if visibility_criteria is not None:
             results = results.filter(visibility_criteria)
         # an org search in the requester's own scope reads the index's members, so it's checked as well
