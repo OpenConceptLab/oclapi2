@@ -13,6 +13,7 @@ EXPLICIT_SOURCES = 'explicit_source_versions'
 EVALUATED_SOURCES = 'evaluated_source_versions'
 EXPLICIT_COLLECTIONS = 'explicit_collection_versions'
 EVALUATED_COLLECTIONS = 'evaluated_collection_versions'
+MAX_SETTLE_ROUNDS = 10
 
 RULE = (
     'A reference naming a repo version records it as explicit. A resource-versioned reference records as explicit the '
@@ -23,7 +24,9 @@ RULE = (
     'else HEAD. When no one version holds them all, it records the recorded versions that between them hold the most, '
     'its own list first, each adding members the earlier ones lack. A reference with no members, or none held by a '
     'recorded version, keeps what the expansion records for its repo, unless the list it reads already holds that '
-    'repo. A version both kinds of reference use is in both lists. Members are never changed.')
+    'repo. The version-less references of a repo, includes and excludes together, then settle: each moves to the '
+    'newest version recorded for the repo that holds all its members, until none moves, so a second rebuild picks '
+    'the same ones. A version both kinds of reference use is in both lists. Members are never changed.')
 
 
 class ExpansionVersionLists:
@@ -193,8 +196,12 @@ class ExpansionVersionLists:
         for reference in self.references:
             self.add_system_versions(reference, versionless)
             self.add_valueset_versions(reference)
-        for (_, include), (repo_version, references) in versionless.items():
-            self.add_versionless_system_versions(repo_version, references, include)
+        repositories = {}
+        for (parent_id, include), (repo_version, references) in versionless.items():
+            repositories.setdefault(parent_id, []).append(
+                self.add_versionless_system_versions(repo_version, references, include))
+        for groups in repositories.values():
+            self.settle_repository(groups)
         self.keep_fallbacks()
         return self
 
@@ -298,13 +305,19 @@ class ExpansionVersionLists:
                 pending.append(reference)
         recorded = self.recorded_versions_of((EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
         pending, picks = self.pick_versionless(pending, include, parent_id, totals, recorded, repo_version)
-        for version in self.settle(picks, include, parent_id, totals).values():
-            self.record(EVALUATED_SOURCES, version)
+        partial = {}
         for reference in pending:
-            self.record_partial_holders(
-                reference, self.get_covering_versions(
-                    recorded, self.get_held_members(reference, include, parent_id, recorded)),
-                (EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
+            covering = self.get_covering_versions(
+                recorded, self.get_held_members(reference, include, parent_id, recorded))
+            if covering:
+                partial[reference.id] = covering
+            else:
+                self.keep(
+                    reference, (EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri, 'no one version holds all its members')
+        # recorded once the repo's groups have settled together
+        return {
+            'repo_uri': repo_uri, 'parent_id': parent_id, 'include': include, 'totals': totals, 'picks': picks,
+            'partial': partial, 'references': {reference.id: reference for reference in references}}
 
     def pick_versionless(self, pending, include, parent_id, totals, recorded, repo_version):  # pylint: disable=too-many-arguments
         """Each reference's version holding all its members: recorded ones first, then releases and HEAD"""
@@ -328,8 +341,8 @@ class ExpansionVersionLists:
         return held
 
     def record_partial_holders(self, reference, partial, relations, repo_uri):
-        """Members from several versions: recorded ones covering them go in the list it reads, else it keeps what
-        is recorded"""
+        """A value set's members from several versions: recorded ones covering them go in the list it reads, else it
+        keeps what is recorded"""
         for version in partial:
             self.record(relations[0], version)
         if partial:
@@ -358,20 +371,74 @@ class ExpansionVersionLists:
                     chosen_by='HEAD' if holders[0].is_head else chosen_by)
         return left, picks
 
-    def settle(self, picks, include, parent_id, totals):
-        """Each reference moves to the newest picked version holding all its members, until the picks stop changing:
-        the evaluated versions a rebuild records are then the ones a second rebuild would pick again"""
-        while picks:
-            chosen = self.newest_first({version.id: version for version in picks.values()}.values())
-            held = self.count_members(list(picks), include, parent_id, [version.id for version in chosen])
-            settled = {
-                reference_id: next(version for version in chosen if held[(reference_id, version.id)] == totals[
-                    reference_id]) for reference_id in picks}
-            if {key: version.id for key, version in settled.items()} == {
-                    key: version.id for key, version in picks.items()}:
+    def settle_repository(self, groups):
+        """A repo's version-less references, includes and excludes together, settle on the versions a second rebuild
+        would pick: each whole holder the newest of those recorded for the repo holding all its members, each partial
+        one the versions covering its members, read evaluated first. Recorded once nothing moves"""
+        repo_uri, parent_id = groups[0]['repo_uri'], groups[0]['parent_id']
+        recorded_evaluated = self.recorded_versions_of((EVALUATED_SOURCES,), repo_uri)
+        explicit = self.newest_first(
+            [version for version in self.after[EXPLICIT_SOURCES].values() if drop_version(version.uri) == repo_uri])
+        picks = {key: version for group in groups for key, version in group['picks'].items()}
+        coverings = {key: versions for group in groups for key, versions in group['partial'].items()}
+        first_picks = dict(picks)
+        for _ in range(MAX_SETTLE_ROUNDS):
+            evaluated = {version.id: version for version in [*picks.values(), *sum(coverings.values(), [])]}
+            whole_candidates = self.newest_first(
+                {**{version.id: version for version in recorded_evaluated}, **evaluated}.values())
+            partial_candidates = [
+                *self.newest_first(evaluated.values()),
+                *(version for version in explicit if version.id not in evaluated)]
+            settled_picks, settled_coverings = {}, {}
+            for group in groups:
+                settled_picks.update(self.repick(group, parent_id, whole_candidates, picks))
+                settled_coverings.update(self.recover(group, parent_id, partial_candidates, coverings))
+            if self.version_ids(settled_picks) == self.version_ids(picks) and \
+                    self.version_ids(settled_coverings) == self.version_ids(coverings):
                 break
-            picks = settled
-        return picks
+            picks, coverings = settled_picks, settled_coverings
+        self.record_settled(groups, picks, coverings, first_picks)
+
+    def recover(self, group, parent_id, candidates, coverings):
+        """The group's partial holders, each on the candidates covering its members"""
+        return {
+            key: self.get_covering_versions(candidates, self.get_held_members(
+                group['references'][key], group['include'], parent_id, candidates)) or coverings[key]
+            for key in group['partial']}
+
+    def repick(self, group, parent_id, candidates, picks):
+        """The group's whole holders, each on the first candidate holding all its members"""
+        if not group['picks']:
+            return {}
+        held = self.count_members(list(group['picks']), group['include'], parent_id, [
+            version.id for version in candidates])
+        totals = group['totals']
+        return {
+            key: next((version for version in candidates if held[(key, version.id)] == totals[key]), picks[key])
+            for key in group['picks']}
+
+    @staticmethod
+    def version_ids(versions):
+        """Per key its version's id, or its versions' ids: what a settling round compares"""
+        return {
+            key: [version.id for version in value] if isinstance(value, list) else value.id
+            for key, value in versions.items()}
+
+    def record_settled(self, groups, picks, coverings, first_picks):
+        for group in groups:
+            for key in group['picks']:
+                self.record(EVALUATED_SOURCES, picks[key])
+                if picks[key].id != first_picks[key].id:
+                    # its first pick, noted earlier, moved while the repo's references settled
+                    self.note(
+                        group['references'][key], recorded=picks[key].uri, settled_from=first_picks[key].uri,
+                        reason='settled with the other references of its repository')
+            for key in group['partial']:
+                for version in coverings[key]:
+                    self.record(EVALUATED_SOURCES, version)
+                self.note(
+                    group['references'][key], partial_holders=[version.uri for version in coverings[key]],
+                    reason='no one version holds all its members')
 
     def add_valueset_versions(self, reference):
         for valueset in reference.valueset if isinstance(reference.valueset, list) else []:

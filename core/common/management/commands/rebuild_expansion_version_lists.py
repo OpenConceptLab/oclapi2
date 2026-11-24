@@ -41,9 +41,10 @@ class Command(BaseCommand):
         self.stdout.write(f'{mode} done: {json.dumps(dict(self.totals), sort_keys=True)}')
         # gaining a lock changes what a HEAD's next version-less add resolves to: the number to decide the run on
         self.stdout.write(
-            f'Gaining a lock: {self.totals["with_gains_lock"]} expansion(s), '
-            f'{self.totals["with_gains_lock_unreleased"]} of them unreleased collection versions, '
-            f'{self.totals["with_gains_lock_head"]} of those HEAD')
+            f'Gaining a lock: {self.totals["with_gains_lock"]} expansion(s): '
+            f'{self.totals["with_gains_lock_released"]} of released and '
+            f'{self.totals["with_gains_lock_unreleased"]} of unreleased collection versions; '
+            f'{self.totals["with_gains_lock_head"]} of them a HEAD\'s default expansion, whose next add resolves by it')
         if options['output']:
             self.stdout.write(f'Full report: {options["output"]}')
 
@@ -73,8 +74,10 @@ class Command(BaseCommand):
     def rebuild(self, expansion_id):
         try:
             with transaction.atomic():
-                # a dry run takes no lock
-                expansions = Expansion.objects.select_for_update() if self.options['apply'] else Expansion.objects
+                # apply locks the expansion and its collection version, so a release committed meanwhile waits and is
+                # then skipped; a dry run takes no lock
+                expansions = Expansion.objects.select_related('collection_version').select_for_update(
+                    of=('self', 'collection_version')) if self.options['apply'] else Expansion.objects
                 expansion = expansions.get(id=expansion_id)
                 if self.options['skip_released'] and expansion.collection_version.released:
                     # released after it was selected
@@ -100,7 +103,7 @@ class Command(BaseCommand):
         if report['changed']:
             self.totals[f'changed_{kind}'] += 1
         if report['reported_release_changes']:
-            # FHIR $expand and validate-code would report another release for these members
+            # FHIR $expand would report another release for these members
             self.totals[f'with_reported_release_changes_{kind}'] += 1
             self.totals[f'members_with_reported_release_change_{kind}'] += report['reported_release_changes']
         for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both'):
@@ -108,7 +111,7 @@ class Command(BaseCommand):
                 self.totals[f'with_{key}'] += 1
         if report['gains_lock']:
             self.totals[f'with_gains_lock_{kind}'] += 1
-            if report['is_head']:
+            if report['is_head'] and report['is_default']:
                 self.totals['with_gains_lock_head'] += 1
         notes = report['references']
         if any(note.get('kept') for note in notes):

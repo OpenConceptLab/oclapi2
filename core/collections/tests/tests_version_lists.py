@@ -605,6 +605,30 @@ class ExpansionVersionListsTest(OCLTestCase):
 
         lists = self.rebuild()
         self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v2.id})
+        moved = [note for note in lists.notes if note.get('settled_from')]
+        self.assertEqual(
+            [(note['recorded'], note['settled_from']) for note in moved], [(self.v2.uri, self.v1.uri)])
+        lists.apply()
+
+        self.assertFalse(self.rebuild().to_report()['changed'])
+
+    def test_includes_and_excludes_of_a_repository_settle_together(self):
+        # include r1's member is in v1 and v3, exclude r2's only in v3, from the legacy shape explicit {v1}
+        v3 = self.release('v3')
+        included = ConceptFactory(parent=self.source, mnemonic='m1').get_latest_version()
+        included.sources.add(self.v1, v3)
+        excluded = ConceptFactory(parent=self.source, mnemonic='m2').get_latest_version()
+        excluded.sources.add(v3)
+        self.expansion.concepts.add(included)
+        for member, include in ((included, True), (excluded, False)):
+            reference = CollectionReference.objects.create(
+                expression=member.uri, collection=self.collection, system=self.source.uri, code=member.mnemonic,
+                reference_type='concepts', include=include)
+            reference.concepts.set([member])
+        self.expansion.explicit_source_versions.set([self.v1])
+
+        lists = self.rebuild()
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {v3.id})
         lists.apply()
 
         self.assertFalse(self.rebuild().to_report()['changed'])
@@ -639,8 +663,9 @@ class ExpansionVersionListsTest(OCLTestCase):
 
         call_command('rebuild_expansion_version_lists', self.expansion.uri, stdout=out)
 
-        self.assertIn('Gaining a lock: 1 expansion(s), 1 of them unreleased collection versions, 1 of those HEAD',
-                      out.getvalue())
+        self.assertIn(
+            "Gaining a lock: 1 expansion(s): 0 of released and 1 of unreleased collection versions; 1 of them a HEAD's "
+            "default expansion, whose next add resolves by it", out.getvalue())
 
     def test_command_needs_uris_or_all(self):
         with self.assertRaises(CommandError):
