@@ -230,6 +230,44 @@ class CollectionTest(OCLTestCase):
         for prefix in bare + expanded:
             delete_s3_objects_mock.assert_any_call(prefix, get_export_key_pattern(prefix))
 
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_head_clears_an_old_format_export_prefix_only_its_versions_build(self, delete_s3_objects_mock):
+        """Version a with expansion b and version a_b build the same old prefix; deleting HEAD deletes both."""
+        head = OrganizationCollectionFactory()
+        versions = {}
+        for version, expansion in (('a', 'b'), ('a_b', 'c')):
+            versions[version] = OrganizationCollectionFactory(
+                mnemonic=head.mnemonic, organization=head.organization, version=version)
+            versions[version].expansion_uri = ExpansionFactory(
+                collection_version=versions[version], mnemonic=expansion).uri
+            versions[version].save()
+        shared = versions['a'].get_legacy_version_export_path(suffix=None)
+        self.assertEqual(shared, versions['a_b'].get_legacy_version_export_path(suffix=None, with_expansion=False))
+        self.assertFalse(versions['a'].owns_legacy_export_path())
+
+        head.delete(force=True, sync=True)
+
+        delete_s3_objects_mock.assert_any_call(shared, get_export_key_pattern(shared))
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_version_leaves_an_old_format_export_prefix_another_version_builds(self, delete_s3_objects_mock):
+        """The old format has no repo type: source C v1 builds collection C v1's old prefix without its expansion."""
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        shared = v1.get_legacy_version_export_path(suffix=None)
+        v1.expansion_uri = ExpansionFactory(collection_version=v1).uri
+        v1.save()
+        own = [v1.get_version_export_path(suffix=None), v1.get_legacy_version_export_path(suffix=None),
+               v1.get_version_export_path(suffix=None, with_expansion=False)]
+        self.assertNotIn(shared, own)
+
+        v1.delete(force=True, sync=True)
+
+        called = [call_args.args[0] for call_args in delete_s3_objects_mock.call_args_list]
+        self.assertNotIn(shared, called)
+        self.assertLessEqual(set(own), set(called))
+
     def test_add_expressions(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)

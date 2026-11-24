@@ -982,15 +982,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
-        export_paths = self.get_export_paths_to_delete()
+        other_versions = list(self.versions.exclude(id=self.id)) if self.is_head else []
+        deleting = {self.id, *(version.id for version in other_versions)}
+        export_paths = self.get_export_paths_to_delete(deleting)
         deleted_urls = [self.url]
         deleted_ids = [self.id]
         canonical_urls = {self.canonical_url}
         if self.is_head:
-            other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
                 other_version.clear_cache()
-                export_paths += other_version.get_export_paths_to_delete()
+                export_paths += other_version.get_export_paths_to_delete(deleting)
                 deleted_urls.append(other_version.url)
                 deleted_ids.append(other_version.id)
                 canonical_urls.add(other_version.canonical_url)
@@ -1066,10 +1067,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
-    def get_export_key_prefixes(self, with_expansion=True):
+    def get_export_key_prefixes(self, with_expansion=True, deleting=()):
         prefix = self.get_version_export_path(suffix=None, with_expansion=with_expansion)
         prefixes = [(prefix, get_export_key_pattern(prefix))]
-        if self.owns_legacy_export_path(with_expansion):
+        if self.owns_legacy_export_path(with_expansion, deleting):
             legacy_prefix = self.get_legacy_version_export_path(suffix=None, with_expansion=with_expansion)
             prefixes.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
         return prefixes
@@ -1079,11 +1080,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         for prefix, key_pattern in self.get_export_key_prefixes():
             service.delete_objects(prefix, key_pattern=key_pattern)
 
-    def get_export_paths_to_delete(self):
-        """Also the prefixes without the default expansion: a version exported before it had one keeps that export."""
-        prefixes = self.get_export_key_prefixes()
+    def get_export_paths_to_delete(self, deleting=()):
+        """
+        Also the prefixes without the default expansion: a version exported before it had one keeps that export.
+        deleting: ids of the versions deleted with this one, as in owns_legacy_export_path.
+        """
+        prefixes = self.get_export_key_prefixes(deleting=deleting)
         if self.get_version_export_path(suffix=None, with_expansion=False) != prefixes[0][0]:
-            prefixes += self.get_export_key_prefixes(with_expansion=False)
+            prefixes += self.get_export_key_prefixes(with_expansion=False, deleting=deleting)
         return prefixes + [(path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
@@ -1689,13 +1693,14 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
-    def owns_legacy_export_path(self, with_expansion=True):
+    def owns_legacy_export_path(self, with_expansion=True, deleting=()):
         """
         True when no other source or collection version builds this version's legacy export prefix, so the keys
         under it can only be its own. Underscores in the old format also let a version stand in for an expansion
         (version 'a_b' and version 'a' with expansion 'b'), so every version of the owner whose mnemonic could
         be part of the prefix is compared, not only this one's name variants: with its default expansion and
-        without (an export made before it had one).
+        without (an export made before it had one). deleting: ids of this model's versions deleted with this one (a
+        HEAD's), which can't keep a prefix from it.
         """
         from core.sources.models import Source
         from core.collections.models import Collection
@@ -1708,7 +1713,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             candidates = model.objects.filter(
                 mnemonic_criteria, organization_id=self.organization_id, user_id=self.user_id)
             for candidate in candidates:
-                if isinstance(self, model) and candidate.id == self.id:
+                if isinstance(self, model) and (candidate.id == self.id or candidate.id in deleting):
                     continue
                 if legacy_path in (candidate.get_legacy_version_export_path(suffix=None, with_expansion=False),
                                    candidate.get_legacy_version_export_path(suffix=None)):
