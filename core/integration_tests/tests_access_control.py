@@ -4,6 +4,7 @@ import itertools
 import uuid
 import zipfile
 
+from elasticsearch.helpers import streaming_bulk
 from mock import patch, Mock
 
 from django.contrib.auth.models import Group, AnonymousUser
@@ -11,10 +12,11 @@ from django.core.cache import cache
 from django.test import tag, override_settings
 from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
+from core.common.tasks import batch_index_resources
 from core.common.tests import OCLAPITestCase, OCLTestCase, PREVIEW_GROUP_NAME
 from core.common.views import BaseAPIView
 from core.concepts.documents import ConceptDocument
@@ -31,6 +33,7 @@ from core.pins.models import Pin
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.sources.views import SourceListView
 from core.tasks.models import Task
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
 from core.url_registry.models import URLRegistry
@@ -888,6 +891,60 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         # the export is the search's, not the whole list
         self.assertNotIn(unmatched_org.mnemonic, mnemonics)
 
+    def export_rows(self, url, user):
+        """The rows of the CSV export at `url` for `user`, in file order."""
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
+                as zip_file, zip_file.open(zip_file.namelist()[0]) as csv_file:
+            return list(csv.DictReader(io.TextIOWrapper(csv_file, 'utf-8-sig')))
+
+    def assert_repo_list_export(self, label, url, repos):
+        own_private, org_public, outsiders_private = repos
+        headers = [
+            'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
+            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
+        ]
+        self.assertEqual(self.export_columns(url, self.owner), headers)
+
+        uris = [row['URI'] for row in self.export_rows(url, self.owner)]
+        self.assertIn(org_public.uri, uris)
+        self.assertNotIn(outsiders_private.uri, uris)
+        self.assertEqual(uris.count(own_private.uri), 1)
+        rows = {row['URI']: row for row in self.export_rows(url, self.owner)}
+        row = rows[own_private.uri]
+        self.assertEqual(row['Owner'], self.owner.username)
+        self.assertEqual(row[f'{label} ID'], own_private.mnemonic)
+        self.assertEqual(row[f'{label} Name'], own_private.name)
+        self.assertEqual(row['Supported Locales'], 'en,fr')
+        self.assertEqual(row['Updated By'], own_private.updated_by.username)
+        self.assertEqual(rows[org_public.uri]['Owner'], self.org.mnemonic)
+
+        anonymous_uris = [row['URI'] for row in self.export_rows(url, None)]
+        self.assertIn(org_public.uri, anonymous_uris)
+        self.assertNotIn(own_private.uri, anonymous_uris)
+
+    def test_source_list(self):
+        self.assert_repo_list_export('Source', '/sources/?csv=true', (
+            UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserSourceFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
+    def test_repo_list_rows_keep_the_list_order(self):
+        first, second = UserSourceFactory(user=self.owner), UserSourceFactory(user=self.owner)
+        rows = SourceListView().get_csv_rows(Source.objects.filter(id__in=[first.id, second.id]).order_by('-id'))
+
+        self.assertEqual([row['URI'] for row in rows], [second.uri, first.uri])
+
+    def test_collection_list(self):
+        # a signed-in non-staff requester's list is a union of public and own private collections
+        self.assert_repo_list_export('Collection', '/collections/?csv=true', (
+            UserCollectionFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserCollectionFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
     def export_columns(self, url, user):
         response = self.request('get', url, user)
         with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
@@ -1402,6 +1459,22 @@ class CollectionReferenceAccessTest(AccessTestMixin, OCLAPITestCase):
             url = self.get_url(self.outsider_collection) + suffix
             self.assertEqual(self.request('get', url, self.outsider).status_code, 404, url)
 
+    def test_reference_with_an_invalid_id_answers_404(self):
+        reference_id = str(self.reference.id)
+        full_width = ''.join(chr(ord(digit) + 0xFEE0) for digit in reference_id)
+        versioned_url = self.collection.uri + 'HEAD/references/'
+        urls = [
+            *(f'{versioned_url}{spelling}/' for spelling in [
+                'abc', '9' * 30, '9' * 5000, f'+{reference_id}', f'0_{reference_id}', full_width]),
+            *(f'{self.collection.uri}references/{digits}/' for digits in ['9' * 30, '9' * 5000]),
+        ]
+
+        for url in urls:
+            for method in ('get', 'head', 'delete'):
+                self.assertEqual(self.request(method, url, self.member).status_code, 404, (method, url))
+        self.assertTrue(self.reference_exists())
+        self.assertEqual(self.request('get', f'{versioned_url}{reference_id}/', self.member).status_code, 200)
+
     def test_private_collection_references_are_visible_to_members_only(self):
         private = OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_NONE)
         url = private.uri + 'HEAD/references/'
@@ -1636,6 +1709,44 @@ class SourceContentAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.request('get', url, self.outsider).status_code, 403, url)
             self.assertEqual(self.request('get', url).status_code, 401, url)
             self.assertEqual(self.request('get', url, self.member).status_code, 200, url)
+
+
+class DetailHeadAccessTest(AccessTestMixin, OCLAPITestCase):
+    """HEAD on a detail answers as its GET does, where GET is open and where it's refused."""
+    def setUp(self):
+        super().setUp()
+        self.urls = {}
+        for access in [ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE]:
+            source = OrganizationSourceFactory(organization=self.org, public_access=access)
+            concept = ConceptFactory(parent=source, public_access=access)
+            mapping = MappingFactory(
+                parent=source, from_concept=concept, to_concept=ConceptFactory(parent=source, public_access=access),
+                public_access=access)
+            source_version = OrganizationSourceFactory(
+                organization=self.org, mnemonic=source.mnemonic, version='v1', public_access=access)
+            collection = OrganizationCollectionFactory(organization=self.org, public_access=access)
+            collection_version = OrganizationCollectionFactory(
+                organization=self.org, mnemonic=collection.mnemonic, version='v1', public_access=access)
+            self.urls[access] = [
+                concept.uri, mapping.uri, source_version.uri, collection_version.uri,
+                collection_version.uri + 'expansions/']
+
+    def assert_head_answers_as_get(self, url, user, status_code):
+        for method in ('get', 'head'):
+            self.assertEqual(self.request(method, url, user).status_code, status_code, (method, url, user))
+
+    def test_head_on_a_public_detail_answers_as_get(self):
+        for url in self.urls[ACCESS_TYPE_VIEW]:
+            for user in [None, self.outsider, self.member]:
+                self.assert_head_answers_as_get(url, user, 200)
+
+    def test_head_on_a_private_detail_is_refused_as_get_is(self):
+        expansions_url = self.urls[ACCESS_TYPE_NONE][-1]
+        for url in [*self.urls[ACCESS_TYPE_NONE], expansions_url + '?q=%20&searchStatsOnly=true',
+                    expansions_url + '?q=x&searchStatsOnly=true']:
+            self.assert_head_answers_as_get(url, None, 401)
+            self.assert_head_answers_as_get(url, self.outsider, 403)
+            self.assert_head_answers_as_get(url, self.member, 200)
 
 
 class SourceVersionReadAccessMixin(AccessTestMixin):
@@ -2108,7 +2219,8 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
         super().setUp()
         self.patch_concept_es_mapping_for_ci()
         self.tag = f'qc{uuid.uuid4().hex[:6]}'
-        self.source = OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW)
+        self.source = OrganizationSourceFactory(
+            organization=self.org, mnemonic=f'src{self.tag}', public_access=ACCESS_TYPE_VIEW)
         nowhere = ConceptFactory(parent=self.source, mnemonic=f'nowhere{self.tag}')
         self.concepts, self.mappings = {}, {}
         for key in ['inP', 'inQhead', 'inQv1', 'inRv1']:
@@ -2249,6 +2361,37 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             for resource, user in itertools.product(['concepts', 'mappings'], [None, self.outsider, self.member]):
                 self.assertEqual(self.listed(f'/{resource}/?{query}', user, resource), [], (query, user))
 
+    def delete_and_reindex(self, url):
+        """Deletes `url` as staff, then runs the reindex it queued once it committed, for real."""
+        with patch('core.common.models.batch_index_resources') as queued, self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.request('delete', url, self.staff).status_code, 204)
+        self.assertTrue(queued.called)
+        # batch_index does nothing in TEST_MODE; parallel_bulk's pool threads can't see this test's rows
+        with override_settings(TEST_MODE=False), patch('core.common.models.parallel_bulk', streaming_bulk):
+            for call_args in queued.call_args_list:
+                batch_index_resources(*call_args[0])
+        ConceptDocument._index.refresh()  # pylint: disable=protected-access
+        MappingDocument._index.refresh()  # pylint: disable=protected-access
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    def test_deleting_a_collection_indexes_its_members_again(self):
+        """
+        OpenConceptLab/ocl_online#740: staff read the index as it is, and a public collection made under a deleted
+        private one's name would match its former members through its URL.
+        """
+        p_v1_uri = self.p_v1.uri
+        self.assert_lists(f'collection_url={p_v1_uri}', [], ['inP'])
+        self.delete_and_reindex(p_v1_uri)
+        self.assert_lists(f'collection_url={p_v1_uri}', [], [])
+        self.delete_and_reindex(self.p_head.uri)
+        recreated = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.p_head.mnemonic, public_access=ACCESS_TYPE_VIEW)
+        recreated.expansion_uri = ExpansionFactory(collection_version=recreated).uri
+        recreated.save()
+        self.assertEqual(recreated.uri, self.p_head.uri)
+        self.assert_lists(f'collection={self.tag}P', [], [])
+        self.assert_lists(f'collection_url={recreated.uri}', [], [])
+
     def test_inactive_versions_match_nothing(self):
         """A version keeps its access when its HEAD is made private; deactivating its owner leaves both inactive."""
         Collection.objects.filter(id=self.p_v1.id).update(public_access=ACCESS_TYPE_VIEW)
@@ -2271,6 +2414,117 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.listed(url, self.member, 'concepts'), ['inP'], url)
             self.assertEqual(self.listed(url, self.outsider, 'concepts'), [], url)
             self.assertEqual(self.listed(url, None, 'concepts'), [], url)
+        # a cached facetsOnly answer is each requester's own
+        url = f'{release.uri}concepts/'
+        self.assertIn(f'{self.tag}P', self.collection_facet(url, self.member))
+        self.assertIn(f'{self.tag}P', self.collection_facet(url, self.staff))
+        self.assertNotIn(f'{self.tag}P', self.collection_facet(url, self.outsider))
+        self.assertNotIn(f'{self.tag}P', self.collection_facet(url, None))
+        self.assertIn(f'{self.tag}P', self.collection_facet(url, self.member))
+        # nor does it outlast the requester's access
+        self.member.organizations.remove(self.org)
+        self.assertNotIn(f'{self.tag}P', self.collection_facet(url, self.member))
+
+    def facets(self, url, user):
+        """The facets `url` answers (facetsOnly), each a {name: count}."""
+        response = self.request('get', f'{url}{"&" if "?" in url else "?"}facetsOnly=true', user)
+        self.assertEqual(response.status_code, 200, (url, user))
+        return {facet: {bucket[0]: bucket[1] for bucket in buckets}
+                for facet, buckets in response.data['facets']['fields'].items()}
+
+    def collection_facet(self, url, user):
+        """The collection facet `url` answers, this test's collections only."""
+        return {name: count for name, count in self.facets(url, user).get('collection', {}).items()
+                if name.startswith(self.tag)}
+
+    def add_latest_versions_to_heads(self):
+        """P's and Q's HEADs hold their concepts' and mappings' latest versions too, which facets read."""
+        for head, key in [(self.p_head, 'inP'), (self.q_head, 'inQhead')]:
+            head.expansion.concepts.add(self.concepts[key].get_latest_version())
+            head.expansion.mappings.add(self.mappings[key].get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        MappingDocument().update(Mapping.objects.filter(parent=self.source), refresh=True)
+
+    def assert_collection_facets(  # pylint: disable=too-many-arguments
+            self, outsiders, members, resources=('concepts', 'mappings'), staff=None, lists=True):
+        """
+        Signed out and an outsider see the collection facet of this test's source `outsiders`; a member `members`, and
+        staff `staff` (by default `members`). With `lists`, each name counts what its collection filter lists for them
+        (a list filtered by collection reads every version; facets, like the unfiltered list, the latest).
+        """
+        for resource in resources:
+            url = f'/{resource}/?source={self.source.mnemonic}'
+            for user, expected in [(None, outsiders), (self.outsider, outsiders), (self.member, members),
+                                   (self.staff, staff or members)]:
+                facet = self.collection_facet(url, user)
+                self.assertEqual(facet, {f'{self.tag}{name}': count for name, count in expected.items()}, (url, user))
+                for name, count in facet.items() if lists else []:
+                    rows = self.listed(f'{url}&collection={name}', user, resource)
+                    self.assertEqual(len(rows), count, (name, user, resource, rows))
+
+    def test_the_collection_facet_names_only_versions_the_requester_can_view(self):
+        # facets read latest versions: Q's v1 alone holds one, which only members can view
+        self.assert_collection_facets({'R': 1}, {'P': 1, 'Q': 1, 'R': 1}, lists=False)
+        self.add_latest_versions_to_heads()
+        self.assert_collection_facets({'Q': 1, 'R': 1}, {'P': 1, 'Q': 2, 'R': 1})
+        # a private collection of the same name under another owner counts only for those who can view it
+        other = OrganizationFactory()
+        other_q = OrganizationCollectionFactory(
+            organization=other, mnemonic=self.q_head.mnemonic, public_access=ACCESS_TYPE_NONE)
+        ExpansionFactory(collection_version=other_q).concepts.add(
+            *[concept.get_latest_version() for concept in self.concepts.values()])
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        self.assert_collection_facets(
+            {'Q': 1, 'R': 1}, {'P': 1, 'Q': 2, 'R': 1}, ['concepts'], staff={'P': 1, 'Q': 4, 'R': 1})
+
+    def test_the_collection_facet_leaves_out_deleted_versions(self):
+        """The index keeps a deleted version's members until they're indexed again; staff see the index as it is."""
+        self.add_latest_versions_to_heads()
+        Collection.objects.filter(id__in=[self.p_v1.id, self.p_head.id]).delete()
+        for resource in ['concepts', 'mappings']:
+            url = f'/{resource}/?source={self.source.mnemonic}'
+            self.assertEqual(self.collection_facet(url, self.member), {f'{self.tag}Q': 2, f'{self.tag}R': 1})
+            self.assertEqual(self.collection_facet(url, self.staff),
+                             {f'{self.tag}P': 1, f'{self.tag}Q': 2, f'{self.tag}R': 1})
+        # an expansion deleted alone leaves its version's indexed members counted, as the collection filter finds them
+        Expansion.objects.filter(collection_version=self.r_v1).delete()
+        url = f'/concepts/?source={self.source.mnemonic}'
+        self.assertEqual(self.collection_facet(url, None), {f'{self.tag}Q': 1, f'{self.tag}R': 1})
+        self.assertEqual(self.listed(f'{url}&collection={self.tag}R', None, 'concepts'), ['inRv1'])
+
+    def test_collection_version_and_expansion_facets_name_only_versions_the_requester_can_view(self):
+        hidden = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=f'{self.tag}S', version=f'hidden{self.tag}', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        ExpansionFactory(collection_version=hidden, mnemonic=f'hidden{self.tag}').concepts.add(
+            *[concept.get_latest_version() for concept in self.concepts.values()])
+        self.add_latest_versions_to_heads()
+        spaced = OrganizationCollectionFactory(
+            organization=self.org, mnemonic=self.r_head.mnemonic, version='v 2', released=True,
+            public_access=ACCESS_TYPE_VIEW)
+        ExpansionFactory(collection_version=spaced).concepts.add(self.concepts['inRv1'].get_latest_version())
+        ConceptDocument().update(Concept.objects.filter(parent=self.source), refresh=True)
+        url = f'{self.source.uri}concepts/'
+        # a version's name reads as its members' documents have it, for everyone
+        spaced_keys = {key for key in self.facets(url, self.staff)['collection_version'] if key.startswith('v')}
+        self.assertEqual(len(spaced_keys), 2, spaced_keys)
+        for user in [None, self.outsider, self.member]:
+            self.assertLessEqual(spaced_keys, set(self.facets(url, user)['collection_version']), user)
+        for user in [None, self.outsider]:
+            facets = self.facets(url, user)
+            self.assertEqual(self.collection_facet(url, user), {f'{self.tag}Q': 1, f'{self.tag}R': 1}, user)
+            self.assertNotIn(f'hidden{self.tag}', facets['collection_version'], user)
+            self.assertNotIn(f'hidden{self.tag}', facets['expansion'], user)
+            self.assertEqual(facets['collection_version']['v1'], 1, user)
+        for user in [self.member, self.staff]:
+            facets = self.facets(url, user)
+            self.assertEqual(facets['collection_version'][f'hidden{self.tag}'], 4, user)
+            self.assertEqual(facets['expansion'][f'hidden{self.tag}'], 4, user)
+        self.assertEqual(self.facets(url, self.member)['collection_version']['v1'], 3)
+        # neither facet is a query-string filter: naming one of their buckets lists the scope as it is
+        everything = self.listed(url, self.outsider, 'concepts')
+        for query in ['collectionVersion=v1', f'collectionVersion=hidden{self.tag}', f'expansion=hidden{self.tag}']:
+            self.assertEqual(self.listed(f'{url}?{query}', self.outsider, 'concepts'), everything, query)
 
     def test_a_prefix_matching_too_many_versions_answers_400(self):
         url = f'/concepts/?collection={self.tag}*'

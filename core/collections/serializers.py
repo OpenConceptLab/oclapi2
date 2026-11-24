@@ -241,7 +241,9 @@ class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelS
         if self._errors:
             return collection
         user = self.context['request'].user
-        errors = Collection.persist_changes(collection, user, original_schema)
+        # an edit that sends no access keeps the row's current access, not the one read before a concurrent change
+        errors = Collection.persist_changes(
+            collection, user, original_schema, keep_access='public_access' not in validated_data)
         self._errors.update(errors)
         return collection
 
