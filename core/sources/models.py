@@ -18,7 +18,8 @@ from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, batch_index_resources
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, batch_index_resources, \
+    update_active_count
 from core.common.utils import split_canonical, to_camel_case, chunks
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
@@ -368,8 +369,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
             if older_ids := Concept.get_unreleased_older_ids(from_concept_ids):
                 Concept.index_mapped_codes(Concept.objects.filter(id__in=older_ids))
-        if recount:
-            self.update_children_counts(sync=True)
+        if recount:  # with the count tasks' lock, as the post-import count takes it, so neither saves an older total
+            for field in ('active_concepts', 'active_mappings'):
+                update_active_count(self.__class__, self.id, field)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
         from core.mappings.models import Mapping

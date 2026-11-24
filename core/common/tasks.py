@@ -1,5 +1,6 @@
 import json
 import time
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -15,7 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DatabaseError, connection, transaction
+from django.db import DEFAULT_DB_ALIAS, connection, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -1092,31 +1093,77 @@ def vacuum_and_analyze_db():
     conn.set_isolation_level(old_isolation_level)
 
 
-@app.task(ignore_result=True)
+# Each finished parallel import asks for the post-import count job, and one copy runs at a time
+# (OpenConceptLab/ocl_online#635). As with the count tasks below, a copy releases its QueueOnce lock as it starts, so a
+# copy asked for while one runs is queued, and only one copy waits in the queue. A copy that starts while another runs
+# doesn't wait on a worker: it queues itself again, so the job holds at most one worker, and each import is followed by
+# a pass that starts after it ended. The queue lock expires after 10 minutes, so a copy lost after taking it (a failed
+# publish) blocks later requests no longer than that; an extra copy queued after a longer wait is harmless.
+POST_IMPORT_COUNTS_ONCE = {'unlock_before_run': True, 'graceful': True, 'timeout': 600}
+POST_IMPORT_COUNTS_LOCK = 'post_import_update_resource_counts'
+POST_IMPORT_COUNTS_REQUEUE_SECONDS = 60
+
+
+@contextmanager
+def try_job_lock(name):
+    """
+    Yields whether this process got the advisory lock `name`, which it holds until the block ends. The lock is taken
+    in a transaction on a connection of its own: pgbouncer's transaction pooling keeps a session lock on no one server
+    connection, and the open transaction pins it there. It's released when the connection closes, a dead worker's too.
+    """
+    from django.db import connections
+    lock_connection = connections.create_connection(DEFAULT_DB_ALIAS)
+    try:
+        lock_connection.set_autocommit(False)
+        with lock_connection.cursor() as cursor:
+            cursor.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))', [name])
+            yield cursor.fetchone()[0]
+    finally:
+        lock_connection.close()
+
+
+@app.task(base=QueueOnceCustomTask, once=POST_IMPORT_COUNTS_ONCE, ignore_result=True, reject_on_worker_lost=True)
 def post_import_update_resource_counts():
+    with try_job_lock(POST_IMPORT_COUNTS_LOCK) as acquired:
+        if acquired:
+            count_uncounted_resources()
+            return
+    # the copy that's counting may have read its sources before this copy's import ended
+    post_import_update_resource_counts.apply_async(queue='default', countdown=POST_IMPORT_COUNTS_REQUEUE_SECONDS)
+
+
+def count_uncounted_resources():
+    """
+    One pass of the post-import count job: recounts the concepts or mappings of each source with rows not yet counted,
+    and marks those rows counted. Both lists of sources are read as the pass starts.
+    """
     from core.sources.models import Source
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
 
-    uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
-    sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
-    for source in sources:
-        try:
-            source.update_concepts_count(sync=True)
-            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-        except DatabaseError as ex:  # source may have been deleted since the query
-            logger.warning('Skipping concepts count for source %s: %s', source.id, ex)
+    to_count = [
+        (model, field, list(Source.objects.filter(
+            id__in=model.objects.filter(_counted__isnull=True).values('parent_id')).only('id')))
+        for model, field in ((Concept, 'active_concepts'), (Mapping, 'active_mappings'))
+    ]
+    for model, field, sources in to_count:
+        for source in sources:
+            count_source_resources(source, model, field)
 
-    uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
-    sources = Source.objects.filter(
-        id__in=uncounted_mappings.values_list('parent_id', flat=True))
 
-    for source in sources:
-        try:
-            source.update_mappings_count(sync=True)
-            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
-        except DatabaseError as ex:  # source may have been deleted since the query
-            logger.warning('Skipping mappings count for source %s: %s', source.id, ex)
+def count_source_resources(source, model, field):
+    # The rows are marked, then counted with the count tasks' lock (update_active_count), so the total includes every
+    # marked row; a row added after the mark waits for the next pass. Marking and counting are separate steps, so no
+    # row lock is held while another is awaited: one transaction would deadlock with hard deletes (source, then rows)
+    # or organization deletes (rows, then source). If the count fails, a row is set uncounted again for the next pass.
+    try:
+        model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
+        update_active_count(source.__class__, source.id, field)
+    except Exception as ex:  # pylint: disable=broad-except
+        logger.warning('Skipping %s count for source %s: %s', field, source.id, ex)
+        with suppress(Exception):
+            one_row = model.objects.filter(parent_id=source.id).values('id')[:1]
+            model.objects.filter(id__in=one_row).update(_counted=None)
 
 
 @app.task(ignore_result=True)
