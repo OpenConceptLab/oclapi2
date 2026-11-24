@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from contextlib import suppress
 
 from django.conf import settings
 from django.http.response import JsonResponse
@@ -104,10 +105,8 @@ class SlowRequestLogMiddleware(BaseMiddleware):
         response = self.get_response(request)
         ms = int((time.monotonic() - start) * 1000)
         if settings.SLOW_REQUEST_LOG_MS and ms >= settings.SLOW_REQUEST_LOG_MS:
-            try:
+            with suppress(Exception):  # a log line never fails the request it describes
                 self.log(request, response, ms)
-            except Exception:  # noqa: BLE001 - a log line never fails the request it describes
-                pass
         return response
 
     @staticmethod
