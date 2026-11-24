@@ -423,7 +423,7 @@ class ConceptRetrieveUpdateDestroyView(ConceptHierarchyMixin, ConceptBaseView, R
         return instance
 
     def get_permissions(self):
-        if self.request.method in ['GET']:
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewParentDictionary(), ]
 
         # async/db hard deletes are power operations reserved for repo admins (the dictionary's
@@ -1151,6 +1151,8 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             es_search = CustomESSearch(search[start:end], ConceptDocument)
             name = row.get('name') or row.get('Name') if reranker else None
             es_search.to_queryset(False, True, False, name, encoder_model)
+            if visible_repo_criteria:  # as the database has them now, so a stale index document can't show
+                es_search.queryset = self.get_viewable_hits(es_search.queryset)
             print(f"[{cid}] ES Search (including reranker={reranker}) executed in {time.time() - start_time} seconds")
             start_time = time.time()
             result = {'row': row, 'results': [], 'map_config': map_config, 'filter': original_filters}

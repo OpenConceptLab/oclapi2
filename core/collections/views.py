@@ -69,7 +69,7 @@ from core.concepts.views import ConceptCascadeView
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
-from core.repos.mixins import RepoExternalExportMixin
+from core.repos.mixins import RepoExternalExportMixin, RepoListCSVMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin, IndexingTaskMixin
@@ -162,7 +162,9 @@ class CollectionVersionBaseView(CollectionBaseView):
         return super().get_filter_params(default_version_to_head)
 
 
-class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
+class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_label = 'Collection'
+    csv_type_field = 'collection_type'
     serializer_class = CollectionListSerializer
     is_searchable = True
     es_fields = Collection.es_fields
@@ -206,35 +208,6 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     )
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
-
-    def get_csv_rows(self, queryset=None):  # pragma: no cover
-        if not queryset:
-            queryset = self.get_queryset()
-
-        values = queryset.values('mnemonic', 'name', 'full_name', 'collection_type', 'description', 'default_locale',
-                                 'supported_locales', 'website', 'external_id', 'updated_at', 'updated_by', 'uri')
-
-        for value in values:
-            value['Owner'] = Collection.objects.get(uri=value['uri']).parent.mnemonic
-            value['Collection ID'] = value.pop('mnemonic')
-            value['Collection Name'] = value.pop('name')
-            value['Collection Full Name'] = value.pop('full_name')
-            value['Collection Type'] = value.pop('collection_type')
-            value['Description'] = value.pop('description')
-            value['Default Locale'] = value.pop('default_locale')
-            value['Supported Locales'] = ",".join(value.pop('supported_locales'))
-            value['Website'] = value.pop('website')
-            value['External ID'] = value.pop('external_id')
-            value['Last Updated'] = value.pop('updated_at')
-            value['Updated By'] = value.pop('updated_by')
-            value['URI'] = value.pop('uri')
-
-        values.field_names.extend([
-            'Owner', 'Collection ID', 'Collection Name', 'Collection Full Name', 'Collection Type', 'Description',
-            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
-        ])
-        del values.field_names[0:12]
-        return values
 
 
 class CollectionLogoView(CollectionBaseView, BaseLogoView):
@@ -295,6 +268,20 @@ class CollectionRetrieveUpdateDestroyView(
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def get_reference_or_404(collection, reference_id):
+    """
+    The collection version's reference with this ID. A reference the version doesn't hold, or an ID no reference can
+    have, answers 404: versioned routes take any string, and IDs are ASCII digits only.
+    """
+    reference_id = str(reference_id)
+    reference = collection.references.filter(id=to_int(reference_id, None)).first() if (
+        reference_id.isascii() and reference_id.isdigit()) else None
+    if not reference:
+        raise Http404()
+
+    return reference
+
+
 class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = CollectionReferenceDetailSerializer
 
@@ -315,11 +302,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
         self.check_object_permissions(self.request, collection)
 
-        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
-        if not reference:
-            raise Http404()
-
-        return reference
+        return get_reference_or_404(collection, self.kwargs.get('reference'))
 
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         reference = self.get_object()
@@ -342,13 +325,7 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference_id = str(self.kwargs.get('reference'))  # versioned routes take any string; IDs are ASCII digits only
-        reference = collection.references.filter(id=to_int(reference_id, None)).first() if (
-            reference_id.isascii() and reference_id.isdigit()) else None
-        if not reference:
-            raise Http404()
-
-        return reference
+        return get_reference_or_404(collection, self.kwargs.get('reference'))
 
     def get_queryset(self):
         return self.get_reference()
@@ -881,7 +858,7 @@ class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPI
     writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         return [CanEditConceptDictionaryVersion()]
 
@@ -938,7 +915,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         return ExpansionSerializer
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
         # a new expansion changes what the version resolves to: an edit of it
         return [CanEditConceptDictionaryVersion()]
@@ -1041,23 +1018,27 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
         self.request.instance = version
         return version.expansions.filter(mnemonic=self.kwargs.get('expansion'))
 
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        """Every DELETE of an expansion leaves its version's default expansion in place."""
+        expansion = self.get_object()
+        if expansion.is_default:
+            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
+        self.perform_destroy(expansion)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (CanViewConceptDictionary, )
-
-    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        obj = self.get_object()
-        if obj.is_default:
-            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CollectionVersionExpansionResolvedRepoUpdatesView(
     CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (HasAccessToVersionedObject, )
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()

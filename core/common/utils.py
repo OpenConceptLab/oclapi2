@@ -1,4 +1,5 @@
 # pylint: disable=cyclic-import # only occurring in dev env
+import csv
 import hashlib
 import json
 import mimetypes
@@ -11,7 +12,9 @@ import time
 import uuid
 import zipfile
 from collections.abc import MutableMapping  # pylint: disable=no-name-in-module,deprecated-class
-from datetime import timedelta
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from typing import NamedTuple, Optional
 from threading import local
 from urllib import parse
 
@@ -19,6 +22,7 @@ import requests
 from celery_once import AlreadyQueued, QueueOnce
 from dateutil import parser
 from django.conf import settings
+from django.db import transaction
 from django.urls import NoReverseMatch, reverse, get_resolver
 from django.utils import timezone
 from djqscsv import csv_file_for
@@ -44,12 +48,42 @@ def cd_temp():
     return cwd
 
 
-def write_csv_to_s3(data, requester, **kwargs):
-    """Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL."""
+def csv_cell(value, serializer=None):
+    if value is None:
+        return ''
+    if serializer:
+        return serializer(value)
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
+def write_rows_to_csv(rows, headers, filename=None, field_serializer_map=None):
+    """Writes dict rows under `headers` to a CSV file in the current directory, with a BOM for Excel."""
+    field_serializer_map = field_serializer_map or {}
+    filename = filename or 'export'
+    if not filename.endswith('.csv'):
+        filename += '.csv'
+    with open(filename, 'w', encoding='utf-8', newline='') as csv_file:
+        csv_file.write('\ufeff')
+        writer = csv.DictWriter(csv_file, headers)
+        writer.writeheader()
+        writer.writerows(
+            {key: csv_cell(value, field_serializer_map.get(key)) for key, value in row.items()} for row in rows)
+    return csv_file
+
+
+def write_csv_to_s3(data, requester, headers=None, **kwargs):
+    """
+    Uploads `data` as a zipped CSV to the requester's own downloads folder and returns its URL. `data` is a values
+    queryset, or dict rows when `headers` is given. The temp files are removed even when the upload raises.
+    """
     cwd = cd_temp()
+    tmp_dir_path = os.getcwd()
     try:
-        csv_file = csv_file_for(data, **kwargs)
-        csv_file.close()
+        if headers is None:
+            csv_file = csv_file_for(data, **kwargs)
+            csv_file.close()
+        else:
+            csv_file = write_rows_to_csv(data, headers, kwargs.get('filename'), kwargs.get('field_serializer_map'))
         zip_file_name = csv_file.name + '.zip'
         with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.write(csv_file.name)
@@ -61,6 +95,7 @@ def write_csv_to_s3(data, requester, **kwargs):
         )
     finally:
         os.chdir(cwd)  # an upload that raises must not leave the process inside the temp directory
+        shutil.rmtree(tmp_dir_path, ignore_errors=True)
     return get_export_service().url_for(key)
 
 
@@ -185,6 +220,93 @@ def get_class(kls):
     return _module
 
 
+EXPORT_BATCH_SIZE = 1000
+
+
+class HeadExportSnapshot(NamedTuple):
+    """What a HEAD export lists, as of one point in time (take_head_export_snapshot). Ids in export order (-id)."""
+    concept_ids: list
+    mapping_ids: list
+    reference_ids: list
+    prev_version_uris: Optional[dict]
+    last_child_update: datetime
+
+
+@contextmanager
+def one_snapshot():
+    """
+    A read-only transaction whose queries all see the database as it was at its first one (REPEATABLE READ). Inside a
+    transaction that's already open (as in tests) its queries run in that one.
+    """
+    connection = transaction.get_connection()
+    outermost = not connection.in_atomic_block
+    with transaction.atomic():
+        if outermost:
+            with connection.cursor() as cursor:
+                cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+        yield
+
+
+def take_head_export_snapshot(version, concept_ids, mapping_ids, filters):
+    """
+    The members of a HEAD version (a source's active latest versions, from its member ids; a collection's expansion
+    members and references) and their previous versions' uris (a source's), all as of one point in time, in a short
+    transaction. The export then reads their rows at its own pace while the repo is edited. Members, and their previous
+    versions, are looked up a page at a time, as the export's pages read them, so no query here can become a scan of
+    the concept or mapping table. The version's last child update is read just before, so the export's key is never
+    newer than its content: an edit in between makes the export look stale, not current.
+    """
+    from core.concepts.models import Concept
+    from core.mappings.models import Mapping
+    is_source = version.resource_type == 'Source'
+    last_child_update = version.last_child_update
+
+    def members(model, ids):
+        """
+        (id, versioned_object_id) of each member, in export order. A source lists one version of each: if earlier
+        concurrent edits left two flagged latest, the newest, as repair_duplicate_latest_versions keeps. A row
+        without a versioned object is listed as it is.
+        """
+        rows = []
+        for batch in chunks(list(ids), EXPORT_BATCH_SIZE):
+            rows += model.objects.filter(id__in=batch, **filters).values_list('id', 'versioned_object_id')
+        if is_source:
+            rows = list({
+                (versioned_object_id or f'row {row_id}'): (row_id, versioned_object_id)
+                for row_id, versioned_object_id in sorted(rows)
+            }.values())
+        return sorted(rows, reverse=True)
+
+    with one_snapshot():
+        concepts = members(Concept, concept_ids)
+        mappings = members(Mapping, mapping_ids)
+        reference_ids = [] if is_source else list(version.references.order_by('-id').values_list('id', flat=True))
+        prev_version_uris = None
+        if is_source:
+            prev_version_uris = {}
+            for batch in chunks([versioned_object_id for _, versioned_object_id in concepts], EXPORT_BATCH_SIZE):
+                prev_version_uris.update(Concept.objects.filter(
+                    versioned_object_id__in=batch, is_active=True, is_latest_version=False,
+                ).order_by('versioned_object_id', '-created_at').distinct(
+                    'versioned_object_id'
+                ).values_list('versioned_object_id', 'uri'))
+    return HeadExportSnapshot(
+        [concept_id for concept_id, _ in concepts], [mapping_id for mapping_id, _ in mappings], reference_ids,
+        prev_version_uris, last_child_update)
+
+
+def offset_id_batches(queryset, id_field, batch_size):
+    """A released version's member ids, a page at a time by offset: its membership doesn't change during an export"""
+    start = 0
+    while True:
+        batch_ids = list(
+            queryset.order_by(f'-{id_field}')[start:start + batch_size].values_list(id_field, flat=True))
+        if not batch_ids:
+            return
+        yield batch_ids
+        start += batch_size
+
+
 def write_export_file(
         version, resource_type, resource_serializer_type, logger, start_time
 ):
@@ -207,6 +329,11 @@ def write_export_file(
 def _write_export_file(
         version, resource_type, resource_serializer_type, logger, start_time
 ):  # pylint: disable=too-many-statements,too-many-locals,too-many-branches
+    """
+    A HEAD export lists its version as it was at a snapshot taken when it starts (take_head_export_snapshot), however
+    the repo is edited while it runs, and its key names that point in time. A released version's export pages its
+    members by offset.
+    """
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
 
@@ -218,7 +345,7 @@ def _write_export_file(
     resource_string = json.dumps(data, cls=encoders.JSONEncoder)
     logger.info('Done serializing attributes.')
 
-    batch_size = 1000
+    batch_size = EXPORT_BATCH_SIZE
     is_collection = resource_type == 'collection'
 
     concepts_qs = Concept.objects.none()
@@ -244,7 +371,23 @@ def _write_export_file(
         if version.is_head:
             filters['is_latest_version'] = True
 
-    resource_name = resource_type.title()
+    snapshot = take_head_export_snapshot(
+        version, concepts_qs.values_list(concept_id_field, flat=True),
+        mappings_qs.values_list(mapping_id_field, flat=True), filters
+    ) if version.is_head else None
+    if snapshot is not None:
+        # the snapshot settled which rows are listed: a row of it that's been edited since is still listed as it was
+        row_filters = {}
+        concept_batches = chunks(snapshot.concept_ids, batch_size)
+        mapping_batches = chunks(snapshot.mapping_ids, batch_size)
+        all_prev_version_uris = snapshot.prev_version_uris
+    else:
+        row_filters = filters
+        concept_batches = offset_id_batches(concepts_qs, concept_id_field, batch_size)
+        mapping_batches = offset_id_batches(mappings_qs, mapping_id_field, batch_size)
+        all_prev_version_uris = None
+    # every row of a source HEAD's snapshot was its latest version then
+    as_latest_version = snapshot is not None and not is_collection
 
     with open('export.json', 'w') as out:
         out.write(f'{resource_string[:-1]}, "concepts": [')
@@ -254,41 +397,21 @@ def _write_export_file(
         hierarchy = ['parent_concepts'] if is_source_version else [
             'parent_concepts', 'child_concepts',
             'versioned_object__parent_concepts', 'versioned_object__child_concepts']
-        if version.is_head and not is_collection:
-            all_versioned_object_ids = list(
-                Concept.objects.filter(
-                    id__in=concepts_qs.values(concept_id_field)).filter(**filters
-                ).values_list('versioned_object_id', flat=True)
-            )
-            all_prev_version_uris = dict(
-                Concept.objects.filter(
-                    versioned_object_id__in=all_versioned_object_ids,
-                    is_active=True, is_latest_version=False,
-                ).order_by('versioned_object_id', '-created_at').distinct(
-                    'versioned_object_id'
-                ).values_list('versioned_object_id', 'uri')
-            )
-        else:
-            all_prev_version_uris = None
         written_concepts = False
         start = 0
-        while True:
-            batch_ids = list(
-                concepts_qs.order_by(f'-{concept_id_field}')[start:start + batch_size].values_list(
-                    concept_id_field, flat=True
-                )
-            )
-            if not batch_ids:
-                break
+        for batch_ids in concept_batches:
             logger.info(f'Serializing concepts {start + 1:d} - {start + len(batch_ids):d}...')
             queryset = Concept.objects.filter(
-                id__in=batch_ids).filter(**filters).select_related(
+                id__in=batch_ids).filter(**row_filters).select_related(
                 'parent', 'parent__organization', 'parent__user', 'created_by', 'updated_by', 'versioned_object'
             ).prefetch_related(
                 'names', 'descriptions', *hierarchy
             ).order_by('-id')
             concept_versions = list(queryset)
             if concept_versions:
+                if as_latest_version:
+                    for concept_version in concept_versions:
+                        concept_version.is_latest_version = True
                 if written_concepts:
                     out.write(', ')
                 context = {'prev_version_uris': all_prev_version_uris}
@@ -306,25 +429,28 @@ def _write_export_file(
 
         if is_collection:
             references_qs = version.references
-            total_references = references_qs.count()
 
             out.write('], "references": [')
-            if total_references:
-                logger.info(
-                    f'{resource_name} has {total_references:d} references. '
-                    f'Getting them in batches of {batch_size:d}...'
-                )
-                reference_serializer_class = get_class(
-                    'core.collections.serializers.CollectionReferenceDetailSerializer')
-                for ref_start in range(0, total_references, batch_size):
-                    ref_end = min(ref_start + batch_size, total_references)
-                    logger.info(f'Serializing references {ref_start + 1:d} - {ref_end:d}...')
-                    references = references_qs.order_by('-id').filter()[ref_start:ref_end]
+            reference_serializer_class = get_class(
+                'core.collections.serializers.CollectionReferenceDetailSerializer')
+            if snapshot is not None:
+                reference_batches = chunks(snapshot.reference_ids, batch_size)
+            else:
+                reference_batches = offset_id_batches(references_qs, 'id', batch_size)
+            written_references = False
+            start = 0
+            for batch_ids in reference_batches:
+                logger.info(f'Serializing references {start + 1:d} - {start + len(batch_ids):d}...')
+                references = list(references_qs.filter(id__in=batch_ids).order_by('-id'))
+                if references:
+                    if written_references:
+                        out.write(', ')
                     reference_serializer = reference_serializer_class(references, many=True)
                     reference_string = json.dumps(reference_serializer.data, cls=encoders.JSONEncoder)
                     out.write(reference_string[1:-1])
-                    if ref_end != total_references:
-                        out.write(', ')
+                    written_references = True
+                start += batch_size
+            if written_references:
                 logger.info('Done serializing references.')
 
         out.write('], "mappings": [')
@@ -332,17 +458,10 @@ def _write_export_file(
         mapping_serializer_class = get_class('core.mappings.serializers.MappingVersionExportSerializer')
         written_mappings = False
         start = 0
-        while True:
-            batch_ids = list(
-                mappings_qs.order_by(f'-{mapping_id_field}')[start:start + batch_size].values_list(
-                    mapping_id_field, flat=True
-                )
-            )
-            if not batch_ids:
-                break
+        for batch_ids in mapping_batches:
             logger.info(f'Serializing mappings {start + 1:d} - {start + len(batch_ids):d}...')
             queryset = Mapping.objects.filter(
-                id__in=batch_ids).filter(**filters).select_related(
+                id__in=batch_ids).filter(**row_filters).select_related(
                 'parent', 'parent__organization', 'parent__user',
                 'from_source', 'from_source__organization', 'from_source__user',
                 'to_source', 'to_source__organization', 'to_source__user',
@@ -352,6 +471,9 @@ def _write_export_file(
             ).prefetch_related('from_concept__names', 'to_concept__names').order_by('-id')
             mapping_versions = list(queryset)
             if mapping_versions:
+                if as_latest_version:
+                    for mapping_version in mapping_versions:
+                        mapping_version.is_latest_version = True
                 if written_mappings:
                     out.write(', ')
                 data = mapping_serializer_class(mapping_versions, many=True).data
@@ -375,7 +497,8 @@ def _write_export_file(
     logger.info(file_path)
     logger.info('Done compressing.  Uploading...')
 
-    s3_key = version.version_export_path
+    s3_key = version.get_version_export_path_at(snapshot.last_child_update) if snapshot is not None else \
+        version.version_export_path
     export_service = get_export_service()
     if version.is_head:
         version.delete_export_keys()

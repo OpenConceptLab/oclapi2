@@ -587,7 +587,7 @@ class SourceTest(OCLTestCase):
 
     @patch('core.common.models.delete_s3_objects', Mock())
     @patch.object(Source, 'index_children_async', autospec=True)
-    @patch('core.sources.models.batch_index_resources')
+    @patch('core.common.models.batch_index_resources')
     def test_deleting_a_version_indexes_its_former_members_again(
             self, batch_index_resources_mock, index_children_async_mock):
         """OpenConceptLab/ocl_online#744: their documents would keep the deleted version's name."""
@@ -623,8 +623,17 @@ class SourceTest(OCLTestCase):
         batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
         index_children_async_mock.assert_not_called()  # v0 wasn't the latest release, so no flag changes
 
+        # a failure after the rows are deleted (here, queueing the export cleanup) still reindexes the members
+        batch_index_resources_mock.reset_mock()
+        v3 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v3')
+        v3.concepts.add(concept.get_latest_version())
+        with patch('core.common.models.delete_s3_objects', Mock(apply_async=Mock(side_effect=ConnectionError))), \
+                self.assertRaises(ConnectionError), self.captureOnCommitCallbacks(execute=True):
+            v3.delete(force=True)
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
+
     @patch('core.common.models.delete_s3_objects', Mock())
-    @patch('core.sources.models.batch_index_resources')
+    @patch('core.common.models.batch_index_resources')
     def test_deleted_version_reindex_tasks_keep_their_arguments(self, batch_index_resources_mock):
         """The version and its links are gone, so a failed chunk can only be rerun from its saved arguments."""
         batch_index_resources_mock.name = 'core.common.tasks.batch_index_resources'
@@ -3473,10 +3482,13 @@ class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
             cursor.execute('vacuum (analyze) mappings_sources')
 
         for repo, index in ((source, 'mappings_head_parent_to_source'), (version, 'mappings_id_incl_to_source')):
-            sql, params = repo.get_mapped_sources(exclude_self=False).query.sql_with_params()
+            # tiny tables let the planner read mappings by the plain to_source_id index; hide it, then roll back
+            sql, params = repo.get_mapped_source_ids().query.sql_with_params()
             with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute('drop index mappings_to_source_id_ee5ed6f2')
                 cursor.execute('set local enable_seqscan = off; set local enable_bitmapscan = off')
-                cursor.execute(f'explain select count(*) from ({sql}) mapped_sources', params)
+                cursor.execute(f'explain {sql}', params)
                 plan = '\n'.join(row[0] for row in cursor.fetchall())
+                transaction.set_rollback(True)
 
             self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)

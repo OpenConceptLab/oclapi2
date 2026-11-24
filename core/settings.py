@@ -39,6 +39,9 @@ SECRET_KEY = '=q1%fd62$x!35xzzlc3lix3g!s&!2%-1d@5a=rm!n4lu74&6)p'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG') == 'TRUE'
 ENV = os.environ.get('ENVIRONMENT', 'development')
+# Request and response bodies, and GraphQL query text, reach the logs only in development with DEBUG on, so a
+# deployment that leaves ENVIRONMENT unset doesn't log them.
+LOG_REQUEST_BODIES = DEBUG and ENV == 'development'
 
 ES_SYNC = True
 
