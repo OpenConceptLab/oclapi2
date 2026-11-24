@@ -9,6 +9,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, OperationalError
 from django.db.models import UniqueConstraint, F, QuerySet, Max
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
 from pydash import get, compact, find
@@ -516,7 +517,10 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             expansion = Expansion(
                 mnemonic=mnemonic, collection_version=self, parameters=parameters,
                 built_with=VERSION_EXPANSION_LOCK if lock else VERSION_EXPANSION_LATEST,
-                created_by_id=self.created_by_id, updated_by_id=self.created_by_id)
+                created_by_id=self.created_by_id, updated_by_id=self.created_by_id,
+                # built under HEAD's locks, so it stands on HEAD's deleted ones too
+                deleted_locked_repo_versions=list(get(head_expansion, 'deleted_locked_repo_versions') or [])
+                if lock else [])
             expansion.clean()
             expansion.full_clean()
             expansion.save()
@@ -1689,6 +1693,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     # bumped by every mark, so a computation that started before a change can't store its result as current
     health_revision = models.IntegerField(default=0)
     HEALTH_FIELDS = ('health', 'health_is_current', 'health_revision')
+    # the locked repo versions deleted since it was built, recorded at delete time: the delete drops the lock itself
+    deleted_locked_repo_versions = ArrayField(models.JSONField(), default=list, null=True, blank=True)
+    SEPARATELY_WRITTEN_FIELDS = (*HEALTH_FIELDS, 'deleted_locked_repo_versions')
 
     @property
     def is_head(self):
@@ -2206,6 +2213,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             # only what this add found: a whole-row save from a copy loaded during a build would restore is_processing
             self.save(update_fields=['unresolved_repo_versions', 'updated_at'])
         self.dedupe_resources()
+        if force_reevaluate and is_adding_all:
+            # rebuilt without the deleted locks, so it no longer stands on them; cleared only once that's done
+            self.deleted_locked_repo_versions = []
+            Expansion.objects.filter(id=self.id).update(deleted_locked_repo_versions=[])
         if index:
             member_concept_ids = set(self.concepts.values_list('id', flat=True))
             member_mapping_ids = set(self.mappings.values_list('id', flat=True))
@@ -2623,10 +2634,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
         if update_fields is None and not force_insert and not self._state.adding:
-            # health is written only by its own updates, so a save from an older copy can't undo them
+            # these are written only by their own updates, so a save from an older copy can't undo them
             update_fields = [
                 field.name for field in self._meta.concrete_fields
-                if not field.primary_key and field.name not in self.HEALTH_FIELDS]
+                if not field.primary_key and field.name not in self.SEPARATELY_WRITTEN_FIELDS]
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
 
@@ -2695,6 +2706,52 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 health_revision=F('health_revision') + 1, health_is_current=models.Case(
                     models.When(health_is_current=False, then=models.Value(False)), default=models.Value(None),
                     output_field=models.BooleanField(null=True)))
+
+    @classmethod
+    def before_repository_delete(cls, repo_version, versions):
+        """Marks the expansions that recorded the repository not current and plans the deleted-lock records, while
+        the rows still exist. Returns what to run once the delete has succeeded: write the records, and mark the same
+        expansions again on commit, whatever their flag, so a recompute that ran meanwhile isn't left current"""
+        expansion_ids = cls.mark_health_not_current_for_repository(repo_version)
+        deleted_locks = cls.plan_deleted_locks(versions)
+
+        def after_delete():
+            cls.record_deleted_locks(deleted_locks)
+            transaction.on_commit(lambda: cls.mark_health_not_current(expansion_ids))
+        return after_delete
+
+    @classmethod
+    def plan_deleted_locks(cls, repo_versions):
+        """[(ids of the expansions locked to a version, its record)] for versions about to be deleted. Read before
+        the delete, while the locks and the version's HEAD still exist"""
+        deleted_at = timezone.now().isoformat()
+        plan = []
+        for version in repo_versions:
+            kind = 'collection' if isinstance(version, Collection) else 'source'
+            through = getattr(cls, f'evaluated_{kind}_versions').through
+            expansion_ids = list(through.objects.filter(**{f'{kind}_id': version.id}).values_list(
+                'expansion_id', flat=True).distinct())
+            if expansion_ids:
+                plan.append((expansion_ids, {
+                    'url': version.uri, 'repo_url': drop_version(version.uri), 'version': version.version,
+                    'type': version.resource_type, 'deleted_at': deleted_at, 'owner_url': version.parent_url,
+                    # health names it only where it was visible, as the version is gone by the time anyone asks
+                    'public': version.is_publicly_viewable}))
+        return plan
+
+    @classmethod
+    def record_deleted_locks(cls, plan):
+        """Writes the planned records once the delete has succeeded, and recomputes each expansion's health, so the
+        warning shows now rather than at its next change, which a frozen release never gets"""
+        entries = ArrayField(models.JSONField())
+        expansion_ids = set()
+        for locked_ids, entry in plan:
+            cls.objects.filter(id__in=locked_ids).update(deleted_locked_repo_versions=models.Func(
+                Coalesce(models.F('deleted_locked_repo_versions'), models.Value([], output_field=entries)),
+                models.Value([entry], output_field=entries), function='array_cat', output_field=entries))
+            expansion_ids.update(locked_ids)
+        for expansion in cls.objects.filter(id__in=expansion_ids):
+            expansion.mark_health_out_of_date()
 
     @classmethod
     def mark_health_not_current_for_repository(cls, repo_version):
