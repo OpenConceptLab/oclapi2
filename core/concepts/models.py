@@ -1412,6 +1412,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 'doc': mapped_codes.get_fields(concept),
             }
 
+    @staticmethod
+    def get_latest_flags_fields(instances):
+        """
+        The mapped codes prepare() gives these rows now, by row id (MappedCodes), release_map_codes included: once a row
+        isn't the latest, its own codes come from its public releases rather than HEAD, and so do the releases listed.
+        """
+        from core.concepts.documents import MappedCodes
+        mapped_codes = MappedCodes(instances)
+        return {instance.id: mapped_codes.get_fields(instance) for instance in instances}
+
     @classmethod
     def get_unreleased_older_ids(cls, versioned_object_ids):
         """

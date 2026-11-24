@@ -27,3 +27,16 @@ class ESScript:
             }
         }
     """
+
+    # script: set is_latest_version, put HEAD in source_version or take it out (params.in_head), leaving the other
+    # versions as they are, and set the other fields in params.fields.
+    # Use case: the documents of the versions an import superseded (OpenConceptLab/ocl_online#268)
+    LATEST_FLAGS_SCRIPT = """
+        ctx._source.is_latest_version = params.is_latest_version;
+        def versions = ctx._source.source_version;
+        if (versions == null) { versions = []; } else if (!(versions instanceof List)) { versions = [versions]; }
+        versions.removeIf(version -> version == 'HEAD');
+        if (params.in_head) { versions.add('HEAD'); }
+        ctx._source.source_version = versions;
+        for (entry in params.fields.entrySet()) { ctx._source[entry.getKey()] = entry.getValue(); }
+    """

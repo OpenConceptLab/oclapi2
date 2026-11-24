@@ -107,9 +107,12 @@ update_if_exists_param = openapi.Parameter(
 )
 index_param = openapi.Parameter(
     'index', openapi.IN_QUERY, type=openapi.TYPE_STRING,
-    description="Index the imported concepts and mappings for search as the import finishes: true | false. "
-                f"When omitted, imports of up to {settings.IMPORT_INDEX_MAX_LINES:,} lines are indexed and larger "
-                "ones aren't"
+    description="true | false. true indexes the imported concepts and mappings for search as the import finishes. "
+                "false leaves that to an off-peak job, which indexes them in its next window "
+                f"({settings.IMPORT_INDEX_WINDOW} UTC); until then they may be missing from search or show their "
+                "previous versions. When omitted, imports of up to "
+                f"{settings.IMPORT_INDEX_MAX_LINES:,} lines are indexed as they finish and larger ones are left to "
+                "that job"
 )
 seed_from_import_param = openapi.Parameter(
     'seed_from_import', openapi.IN_QUERY, type=openapi.TYPE_STRING, default='false',
