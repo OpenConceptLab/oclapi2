@@ -1669,8 +1669,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @cached_property
     def version_export_path(self):
-        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
-        return self.get_version_export_path(suffix=f"{last_update}.zip")
+        return self.get_version_export_path_at(self.last_child_update)
+
+    def get_version_export_path_at(self, last_child_update):
+        """The key of this version's export of its content as of last_child_update"""
+        return self.get_version_export_path(suffix=f"{last_child_update.strftime('%Y-%m-%d_%H%M%S')}.zip")
 
     def get_version_export_path(self, suffix='*', with_expansion=True):
         owner = self.parent
