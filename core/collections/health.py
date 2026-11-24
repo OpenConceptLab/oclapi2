@@ -53,7 +53,6 @@ class ExpansionHealth:
         self._resolved = {}
         self._pinned_versions = {}
         self._repo_versions = {}
-        self._visible = {}
         self._system_version_cache, self._valueset_version_cache = {}, {}
 
     @cached_property
@@ -90,30 +89,21 @@ class ExpansionHealth:
         """{include reference id: the repo versions it resolved to}, for all of them"""
         return self.resolve(list(self.include_references))
 
-    def is_visible(self, repo_version):
-        """Whether the collection's owner can view it: publicly viewable (its HEAD public too) or the owner's own.
-        Once per version, as is_publicly_viewable reads the HEAD"""
-        if repo_version.id not in self._visible:
-            version = self.collection_version
-            if version.organization_id:
-                owned = repo_version.organization_id == version.organization_id
-            else:
-                owned = repo_version.user_id == version.user_id
-            self._visible[repo_version.id] = owned or repo_version.is_publicly_viewable
-        return self._visible[repo_version.id]
-
     def get_pinned_versions(self, reference_id):
-        """The active versions of a resource-versioned reference's repository its owner can view: its members are
-        judged by which of them hold them, as any member is. Looked up once per repository"""
+        """The active versions of a resource-versioned reference's repository its owner can view: publicly viewable
+        (their HEAD public too) or the owner's own. Its members are judged by which of them hold them, as any member
+        is. One query per repository, whichever version a reference names"""
         from core.sources.models import Source
         if reference_id not in self._pinned_versions:
             reference = self.include_references[reference_id]
-            key = (reference.system, reference.resolution_namespace, reference.version)
+            key = (reference.system, reference.resolution_namespace)
             if key not in self._repo_versions:
                 repo_version, _ = Source.resolve_reference_expression(*key) if reference.system else (None, None)
-                self._repo_versions[key] = [
-                    version for version in repo_version.active_versions if self.is_visible(version)
-                ] if repo_version and repo_version.id else []
+                version = self.collection_version
+                owner = Q(organization_id=version.organization_id) if version.organization_id else Q(
+                    user_id=version.user_id)
+                self._repo_versions[key] = list(repo_version.active_versions.filter(
+                    Source.get_viewable_versions_criteria(None) | owner)) if repo_version and repo_version.id else []
             self._pinned_versions[reference_id] = self._repo_versions[key]
         return self._pinned_versions[reference_id]
 
@@ -161,20 +151,39 @@ class ExpansionHealth:
                     self.version_key(version): version for version in self.get_pinned_versions(reference_id)})
         return versions
 
-    def get_containments(self, resource_type, members, reference_ids):
-        """{member id: keys of the repo versions these references resolved to, or are pinned in, that hold it}"""
-        resource, klass, _ = self.get_resource_models(resource_type)
+    def get_containments(self, resource_type, members, reference_ids, pinned_member_ids):
+        """{member id: keys of the repo versions these references resolved to, or are pinned in, that hold it}. A pinned
+        repository's other versions are read only for the members a pinned reference judges: an unchanged concept or
+        mapping version sits in every version of its source"""
         versions = self.get_candidate_versions(reference_ids)
-        source_ids = [version_id for kind, version_id in versions if kind == 'source']
+        resolved_ids = {
+            version.id for resolved in self.resolve(reference_ids).values() for version in resolved
+            if self.version_key(version)[0] == 'source'}
+        pinned_ids = {version_id for kind, version_id in versions if kind == 'source'} - resolved_ids \
+            if pinned_member_ids else set()
         containments = {}
-        if source_ids:
-            rows = klass.sources.through.objects.filter(
-                source_id__in=source_ids, **{f'{resource}_id__in': members.values('id')}
-            ).values_list(f'{resource}_id', 'source_id')
-            for member_id, source_id in rows:
-                containments.setdefault(member_id, set()).add(('source', source_id))
+        self.add_source_containments(resource_type, resolved_ids, members.values('id'), containments)
+        for start in range(0, len(pinned_member_ids), self.RELEASED_OR_HEAD_BATCH_SIZE):
+            self.add_source_containments(
+                resource_type, pinned_ids, pinned_member_ids[start:start + self.RELEASED_OR_HEAD_BATCH_SIZE],
+                containments)
         self.add_value_set_containments(resource_type, members, versions, containments)
         return containments
+
+    def add_source_containments(self, resource_type, source_ids, member_ids, containments):
+        resource, klass = self.get_resource_models(resource_type)[:2]
+        if source_ids:
+            for member_id, source_id in klass.sources.through.objects.filter(
+                    source_id__in=list(source_ids), **{f'{resource}_id__in': member_ids}
+            ).values_list(f'{resource}_id', 'source_id'):
+                containments.setdefault(member_id, set()).add(('source', source_id))
+
+    def get_pinned_member_ids(self, member_rows, attributions):
+        """Members some resource-versioned reference judges"""
+        pinned = {reference.id for reference in self.include_references.values() if reference.is_resource_versioned}
+        return [
+            member_id for member_id, versioned_object_id in member_rows
+            if pinned & attributions.get(versioned_object_id, set())]
 
     @staticmethod
     def add_value_set_containments(resource_type, members, versions, containments):
@@ -286,7 +295,8 @@ class ExpansionHealth:
             return {}
         attributions = self.get_attributions(resource_type, members)
         containments = self.get_containments(
-            resource_type, members, sorted(set().union(*attributions.values()) if attributions else set()))
+            resource_type, members, sorted(set().union(*attributions.values()) if attributions else set()),
+            self.get_pinned_member_ids(member_rows, attributions))
         released_or_head_ids = self.get_released_or_head_member_ids(
             resource_type, self.get_unheld_member_ids(member_rows, attributions, containments))
         classes = {}
