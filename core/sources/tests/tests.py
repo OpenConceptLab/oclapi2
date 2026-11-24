@@ -3547,7 +3547,8 @@ class SourceHeadExportKeyTest(OCLTestCase):
             Concept.objects.filter(parent_id=self.source.id).delete()
         self.assertEqual(len(self.get_marks(queries)), 1)
 
-    def test_deleting_a_source_doesn_t_mark_it_for_each_member(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_a_source_doesn_t_mark_it_for_each_member(self, _):
         with CaptureQueriesContext(connection) as queries:
             self.get_head().delete()
         self.assertEqual(self.get_marks(queries), [])

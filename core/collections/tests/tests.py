@@ -7363,7 +7363,8 @@ class CollectionHeadExportKeyTest(OCLTestCase):
         self.assertEqual(head.version_export_path, self.get_head().version_export_path)
         self.assertNotEqual(head.version_export_path, stale_key)
 
-    def test_deleting_another_repo_s_source_moves_the_key_of_the_collection_listing_its_concepts(self):
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_another_repo_s_source_moves_the_key_of_the_collection_listing_its_concepts(self, _):
         with self.later_clock():
             self.source.delete(force=True)
         self.assertEqual(self.get_head().last_child_update, self.later)
