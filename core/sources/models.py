@@ -1167,13 +1167,11 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             ).order_by('-updated_at').values_list('updated_at', flat=True).first()
         return self.get_max_mapping_attribute('updated_at')
 
+    def get_mapped_source_ids(self):
+        return self.get_mappings_queryset().values_list('to_source_id', flat=True).distinct()
+
     def get_mapped_sources(self, exclude_self=True):
-        mapped_source_ids = (
-            self.get_mappings_queryset()
-            .values_list('to_source_id', flat=True)
-            .distinct()
-        )
-        queryset = Source.objects.filter(id__in=mapped_source_ids, is_active=True)
+        queryset = Source.objects.filter(id__in=self.get_mapped_source_ids(), is_active=True)
         if exclude_self:
             # mappings point at HEAD, so on a version leave out every version of this source
             queryset = queryset.exclude(
