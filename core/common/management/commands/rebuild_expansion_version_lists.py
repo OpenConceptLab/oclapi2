@@ -33,9 +33,17 @@ class Command(BaseCommand):
         self.totals = Counter()
         mode = 'APPLY' if options['apply'] else 'DRY RUN'
         self.stdout.write(f'{mode}. Rule: {RULE}')
+        if options['output']:
+            # a bad path fails here, before anything is written
+            open(options['output'], 'a', encoding='utf-8').close()  # pylint: disable=consider-using-with
         for expansion_id in self.get_expansion_ids():
             self.rebuild(expansion_id)
         self.stdout.write(f'{mode} done: {json.dumps(dict(self.totals), sort_keys=True)}')
+        # gaining a lock changes what a HEAD's next version-less add resolves to: the number to decide the run on
+        self.stdout.write(
+            f'Gaining a lock: {self.totals["with_gains_lock"]} expansion(s), '
+            f'{self.totals["with_gains_lock_unreleased"]} of them unreleased collection versions, '
+            f'{self.totals["with_gains_lock_head"]} of those HEAD')
         if options['output']:
             self.stdout.write(f'Full report: {options["output"]}')
 
@@ -68,6 +76,10 @@ class Command(BaseCommand):
                 # a dry run takes no lock
                 expansions = Expansion.objects.select_for_update() if self.options['apply'] else Expansion.objects
                 expansion = expansions.get(id=expansion_id)
+                if self.options['skip_released'] and expansion.collection_version.released:
+                    # released after it was selected
+                    self.totals['skipped_released'] += 1
+                    return
                 lists = ExpansionVersionLists(expansion).build()
                 report = lists.to_report()
                 if self.options['apply'] and report['changed']:
@@ -94,6 +106,10 @@ class Command(BaseCommand):
         for key in ('gains_lock', 'loses_lock', 'changes_lock', 'in_both'):
             if report[key]:
                 self.totals[f'with_{key}'] += 1
+        if report['gains_lock']:
+            self.totals[f'with_gains_lock_{kind}'] += 1
+            if report['is_head']:
+                self.totals['with_gains_lock_head'] += 1
         notes = report['references']
         if any(note.get('kept') for note in notes):
             self.totals['with_references_kept_as_recorded'] += 1
@@ -101,6 +117,9 @@ class Command(BaseCommand):
             self.totals['with_references_from_several_versions'] += 1
         if any('does not resolve' in note.get('reason', '') for note in notes):
             self.totals['with_unresolved_references'] += 1
+        if any('holds none of its members' in note.get('reason', '') for note in notes):
+            # its system resolves today to another repository than the one its members came from
+            self.totals['with_references_resolving_elsewhere'] += 1
         if any(len(note.get('holders', [])) > 1 for note in report['references']):
             self.totals['with_members_in_several_versions'] += 1
 

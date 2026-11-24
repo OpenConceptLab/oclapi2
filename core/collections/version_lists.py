@@ -56,9 +56,11 @@ class ExpansionVersionLists:
         return list(versions.values())
 
     def get_head(self, version):
-        if version.id not in self._heads:
-            self._heads[version.id] = version.get_head()
-        return self._heads[version.id]
+        # Source and Collection ids come from separate tables
+        key = (type(version).__name__, version.id)
+        if key not in self._heads:
+            self._heads[key] = version.get_head()
+        return self._heads[key]
 
     @cached_property
     def visible_filter(self):
@@ -163,6 +165,17 @@ class ExpansionVersionLists:
                 reference.__dict__['resolution_namespace'] = namespace
         return references
 
+    @cached_property
+    def member_repos(self):
+        """Per reference, the repos its members belong to, two queries for all of them"""
+        repos = {}
+        reference_ids = [reference.id for reference in self.references]
+        for through, field in ((ReferencedConcept, 'concept'), (ReferencedMapping, 'mapping')):
+            for reference_id, repo_uri in through.objects.filter(reference_id__in=reference_ids).values_list(
+                    'reference_id', f'{field}__parent__uri').distinct():
+                repos.setdefault(reference_id, set()).add(repo_uri)
+        return repos
+
     def get_state(self):
         """What the rebuild is computed from, so apply can tell when it changed"""
         return {
@@ -191,6 +204,8 @@ class ExpansionVersionLists:
         from core.sources.models import Source
         relation = EXPLICIT_SOURCES if self.is_explicit(reference) else EVALUATED_SOURCES
         version = self.resolve(Source, reference.system, reference.resolution_namespace, reference.version)
+        if self.keep_member_repos(reference, version, relation):
+            return
         parameter_versions = [
             parameter_version for parameter_version in self.parameter_system_versions
             if version and reference.can_compute_against_other_system_version and
@@ -201,9 +216,7 @@ class ExpansionVersionLists:
                 self.record(
                     EVALUATED_SOURCES if reference.is_versionless_expression else EXPLICIT_SOURCES, parameter_version)
             return
-        if not version:
-            self.note(reference, kept=[], reason='its system does not resolve')
-        elif reference.can_resolve_to_repo_version_with_resource_version:
+        if reference.can_resolve_to_repo_version_with_resource_version:
             self.add_resource_versioned_system_version(reference, version)
         elif relation == EXPLICIT_SOURCES:
             self.record(relation, version)
@@ -211,6 +224,21 @@ class ExpansionVersionLists:
             head = self.get_head(version)
             key = (head.id if head else version.id, reference.include)
             versionless.setdefault(key, (version, []))[1].append(reference)
+
+    def keep_member_repos(self, reference, version, relation):
+        """A system that doesn't resolve today, or resolves to a repo holding none of the reference's members: the
+        versions its members came from are kept as recorded, not dropped as unused. Whether it was handled"""
+        repos = self.member_repos.get(reference.id, set())
+        if version and (not repos or drop_version(version.uri) in repos):
+            return False
+        reason = 'its system resolves to a repository that holds none of its members' if version else \
+            'its system does not resolve'
+        if not repos:
+            self.note(reference, kept=[], reason=reason)
+        relations = (relation, EXPLICIT_SOURCES if relation == EVALUATED_SOURCES else EVALUATED_SOURCES)
+        for repo_uri in sorted(repos):
+            self.keep(reference, relations, repo_uri, reason)
+        return True
 
     @staticmethod
     def is_explicit(reference):
@@ -224,7 +252,8 @@ class ExpansionVersionLists:
         locked = self.recorded_versions_of((EVALUATED_SOURCES,), repo_uri)
         picked = CollectionReference.pick_repo_version_with_resource_version(
             [holder for holder in holders if holder.id in recorded_ids], locked
-        ) or CollectionReference.pick_repo_version_with_resource_version(holders, locked)
+        ) or CollectionReference.pick_repo_version_with_resource_version(
+            [holder for holder in holders if self.is_visible(holder)], locked)
         if picked:
             self.record(EXPLICIT_SOURCES, picked)
         else:
@@ -268,16 +297,25 @@ class ExpansionVersionLists:
             else:
                 pending.append(reference)
         recorded = self.recorded_versions_of((EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
-        for chosen_by in ('recorded', 'release'):
-            if not pending:
-                break
-            candidates = recorded if chosen_by == 'recorded' else self.releases_then_head(repo_version)
-            pending = self.pick_holders(pending, include, parent_id, totals, candidates, chosen_by)
+        pending, picks = self.pick_versionless(pending, include, parent_id, totals, recorded, repo_version)
+        for version in self.settle(picks, include, parent_id, totals).values():
+            self.record(EVALUATED_SOURCES, version)
         for reference in pending:
             self.record_partial_holders(
                 reference, self.get_covering_versions(
                     recorded, self.get_held_members(reference, include, parent_id, recorded)),
                 (EVALUATED_SOURCES, EXPLICIT_SOURCES), repo_uri)
+
+    def pick_versionless(self, pending, include, parent_id, totals, recorded, repo_version):  # pylint: disable=too-many-arguments
+        """Each reference's version holding all its members: recorded ones first, then releases and HEAD"""
+        picks = {}
+        for chosen_by in ('recorded', 'release'):
+            if not pending:
+                break
+            candidates = recorded if chosen_by == 'recorded' else self.releases_then_head(repo_version)
+            pending, found = self.pick_holders(pending, include, parent_id, totals, candidates, chosen_by)
+            picks.update(found)
+        return pending, picks
 
     def get_held_members(self, reference, include, parent_id, versions):
         """Per version, the reference's members it holds"""
@@ -302,23 +340,38 @@ class ExpansionVersionLists:
             self.keep(reference, relations, repo_uri, 'no one version holds all its members')
 
     def pick_holders(self, references, include, parent_id, totals, candidates, chosen_by):  # pylint: disable=too-many-arguments
-        """Records for each reference the first candidate holding all its members; returns those none holds"""
+        """For each reference the first candidate holding all its members: (those none holds, {reference id: it})"""
         if not candidates:
-            return references
+            return references, {}
         held = self.count_members(
             [reference.id for reference in references], include, parent_id, [version.id for version in candidates])
-        left = []
+        left, picks = [], {}
         for reference in references:
             holders = [version for version in candidates if held[(reference.id, version.id)] == totals[reference.id]]
             if not holders:
                 left.append(reference)
                 continue
-            self.record(EVALUATED_SOURCES, holders[0])
+            picks[reference.id] = holders[0]
             if len(holders) > 1 or chosen_by != 'recorded':
                 self.note(
                     reference, recorded=holders[0].uri, holders=[holder.uri for holder in holders],
                     chosen_by='HEAD' if holders[0].is_head else chosen_by)
-        return left
+        return left, picks
+
+    def settle(self, picks, include, parent_id, totals):
+        """Each reference moves to the newest picked version holding all its members, until the picks stop changing:
+        the evaluated versions a rebuild records are then the ones a second rebuild would pick again"""
+        while picks:
+            chosen = self.newest_first({version.id: version for version in picks.values()}.values())
+            held = self.count_members(list(picks), include, parent_id, [version.id for version in chosen])
+            settled = {
+                reference_id: next(version for version in chosen if held[(reference_id, version.id)] == totals[
+                    reference_id]) for reference_id in picks}
+            if {key: version.id for key, version in settled.items()} == {
+                    key: version.id for key, version in picks.items()}:
+                break
+            picks = settled
+        return picks
 
     def add_valueset_versions(self, reference):
         for valueset in reference.valueset if isinstance(reference.valueset, list) else []:
@@ -338,7 +391,7 @@ class ExpansionVersionLists:
         recorded = self.recorded_versions_of(relations, repo_uri)
         total = self.count_members([reference.id], reference.include)[reference.id]
         if not total:
-            if recorded:
+            if recorded or not self.is_visible(version):
                 self.keep(reference, relations, repo_uri, 'it has no members')
             else:
                 self.record(EVALUATED_COLLECTIONS, version)
@@ -428,15 +481,18 @@ class ExpansionVersionLists:
             'references': self.notes,
             'members': self.get_member_summary(),
             'collection_version_released': bool(collection_version.released),
+            'is_head': collection_version.is_head,
             'reported_release_changes': self.count_reported_release_changes() if changes else 0,
             'before': before,
             'after': after,
         }
 
     def count_reported_release_changes(self):
-        """How many concept members FHIR $expand and validate-code would report from another release after the
-        rebuild. They report the live release holding the member: explicit pin first, then evaluated, then the newest
-        (by id). Judged as the collection's owner is shown, as a viewer's view can only narrow it"""
+        """How many concept members FHIR $expand would report from another release after the rebuild. It reports the
+        live release holding the member: explicit pin first, then evaluated, then the newest (by id). $validate-code
+        picks the same way among the releases the coding's system names, so it can differ only for a code system whose
+        releases carry canonical URLs of their own. Judged as the collection's owner is shown, as a viewer's view can
+        only narrow it"""
         before = {relation: {version.id for version in self.before[relation]} for relation in self.RELATIONS}
         after = {relation: set(self.after[relation]) for relation in self.RELATIONS}
         changed, unpinned = 0, {}

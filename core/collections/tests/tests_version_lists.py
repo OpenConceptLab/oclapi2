@@ -532,6 +532,116 @@ class ExpansionVersionListsTest(OCLTestCase):
         self.assertIn(f'{released.uri}: ', out.getvalue())
         self.assertIn('released', out.getvalue().split(f'{released.uri}: ')[1].splitlines()[0])
 
+    def test_a_resource_versioned_reference_never_picks_another_owners_private_release(self):
+        private = OrganizationSourceFactory(public_access=ACCESS_TYPE_NONE)
+        member = ConceptFactory(parent=private, mnemonic='p1').get_latest_version()
+        release = OrganizationSourceFactory(
+            mnemonic=private.mnemonic, organization=private.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        member.sources.add(release)
+        reference = CollectionReference.objects.create(
+            expression=member.uri, collection=self.collection, system=private.uri, code='p1',
+            resource_version=member.version, reference_type='concepts')
+        reference.concepts.set([member])
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'explicit_source_versions') & {release.id, private.id}, set())
+
+    def test_a_value_set_reference_without_members_never_records_another_owners_private_version(self):
+        value_set = OrganizationCollectionFactory(public_access=ACCESS_TYPE_NONE)
+        OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=value_set.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.value_set_reference(value_set, [])
+
+        self.assertEqual(self.rebuild().after['evaluated_collection_versions'], {})
+
+    def reference_with_system(self, system):
+        reference = CollectionReference.objects.create(
+            expression=self.concept.uri, collection=self.collection, system=system, code=self.concept.mnemonic,
+            reference_type='concepts')
+        reference.concepts.set([self.member])
+        return reference
+
+    def test_a_system_that_no_longer_resolves_keeps_the_versions_its_members_came_from(self):
+        self.reference_with_system('/orgs/gone/sources/gone/')
+        self.expansion.explicit_source_versions.set([self.v1])
+
+        lists = self.rebuild()
+
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id})
+        self.assertEqual(
+            (lists.notes[0]['kept'], lists.notes[0]['reason']), ([self.v1.uri], 'its system does not resolve'))
+        self.assertFalse(lists.to_report()['changed'])
+
+    def test_a_system_resolving_to_another_repository_keeps_the_versions_its_members_came_from(self):
+        elsewhere = OrganizationSourceFactory()
+        self.reference_with_system(elsewhere.uri)
+        self.expansion.explicit_source_versions.set([self.v1])
+        out = StringIO()
+
+        lists = self.rebuild()
+        call_command('rebuild_expansion_version_lists', self.expansion.uri, stdout=out)
+
+        self.assertEqual(self.ids(lists, 'explicit_source_versions'), {self.v1.id})
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), set())
+        self.assertEqual(
+            lists.notes[0]['reason'], 'its system resolves to a repository that holds none of its members')
+        self.assertIn('"with_references_resolving_elsewhere": 1', out.getvalue())
+
+    def test_a_second_rebuild_picks_the_same_evaluated_versions(self):
+        # r1's member is in v1 and v2, r2's only in v2: both settle on v2, as a second rebuild would pick
+        other = ConceptFactory(parent=self.source, mnemonic='c2').get_latest_version()
+        other.sources.add(self.v2)
+        self.expansion.concepts.add(other)
+        self.reference([self.member])
+        second = CollectionReference.objects.create(
+            expression=other.uri, collection=self.collection, system=self.source.uri, code='c2',
+            reference_type='concepts')
+        second.concepts.set([other])
+        self.expansion.evaluated_source_versions.set([self.v1])
+        self.expansion.explicit_source_versions.set([self.v2])
+
+        lists = self.rebuild()
+        self.assertEqual(self.ids(lists, 'evaluated_source_versions'), {self.v2.id})
+        lists.apply()
+
+        self.assertFalse(self.rebuild().to_report()['changed'])
+
+    def test_command_skip_released_rechecks_a_version_released_after_selection(self):
+        released = self.released_expansion()
+        out = StringIO()
+
+        with patch(
+                'core.common.management.commands.rebuild_expansion_version_lists.Command.get_expansion_ids',
+                return_value=[released.id]):
+            call_command('rebuild_expansion_version_lists', all=True, skip_released=True, apply=True, stdout=out)
+
+        self.assertIn('"skipped_released": 1', out.getvalue())
+        self.assertEqual(list(released.explicit_source_versions.all()), [self.v1])
+
+    def test_command_fails_on_a_bad_output_path_before_writing_anything(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+
+        with self.assertRaises(OSError):
+            call_command(
+                'rebuild_expansion_version_lists', self.expansion.uri, apply=True,
+                output='/no-such-directory/report.jsonl', stdout=StringIO())
+
+        self.assertEqual(list(self.expansion.explicit_source_versions.all()), [self.v1])
+
+    def test_command_says_how_many_expansions_gain_a_lock(self):
+        self.reference([self.member])
+        self.expansion.explicit_source_versions.set([self.v1])
+        out = StringIO()
+
+        call_command('rebuild_expansion_version_lists', self.expansion.uri, stdout=out)
+
+        self.assertIn('Gaining a lock: 1 expansion(s), 1 of them unreleased collection versions, 1 of those HEAD',
+                      out.getvalue())
+
     def test_command_needs_uris_or_all(self):
         with self.assertRaises(CommandError):
             call_command('rebuild_expansion_version_lists', stdout=StringIO())
