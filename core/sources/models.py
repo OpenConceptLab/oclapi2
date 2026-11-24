@@ -13,12 +13,13 @@ from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
 
+from core.collections.constants import HEALTH_RELEVANT_VERSION_FIELDS
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
 from core.common.models import ConceptContainerModel
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
-    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children
+    sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, update_active_count
 from core.common.utils import split_canonical, to_camel_case, chunks
 from core.common.validators import validate_non_negative
 from core.concepts.models import ConceptName, Concept, HierarchicalConcepts
@@ -368,10 +369,12 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 Q(id__in=from_concept_ids) | Q(versioned_object_id__in=from_concept_ids, is_latest_version=True)))
             if older_ids := Concept.get_unreleased_older_ids(from_concept_ids):
                 Concept.index_mapped_codes(Concept.objects.filter(id__in=older_ids))
-        if recount:
-            self.update_children_counts(sync=True)
+        if recount:  # with the count tasks' lock, as the post-import count takes it, so neither saves an older total
+            for field in ('active_concepts', 'active_mappings'):
+                update_active_count(self.__class__, self.id, field)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+        from core.collections.models import Expansion
         from core.mappings.models import Mapping
         to_index = {Concept: [], Mapping: []}
         with transaction.atomic():
@@ -393,6 +396,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                         source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
                     if model is Concept:
                         HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
+                    # they left HEAD, which changes their class in the expansions that hold them
+                    Expansion.mark_health_out_of_date_for_members(
+                        f'{model.__name__.lower()}s', [*chunk, *latest_ids])
                     to_index[model] += [*chunk, *latest_ids]
 
         if to_index[Concept] or to_index[Mapping]:
@@ -1015,6 +1021,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         if self.id and 'canonical_url' in dirty_fields:
             self.resolve_url_registry_entries_later()
+        if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
+            from core.collections.models import Expansion
+            Expansion.mark_health_not_current_for_repository(self)
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):
@@ -1073,6 +1082,38 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             PostgresQL.create_seq(
                 self.mappings_external_id_seq_name, 'sources.uri', 0, self.autoid_mapping_external_id_start_from
             )
+
+    def delete(self, using=None, keep_parents=False, force=False, sync=False):
+        """
+        A version's concepts and mappings keep its name in their search documents until they're indexed again, so a
+        later version of the same name would find them (OpenConceptLab/ocl_online#744). Once the delete commits, they
+        are indexed again, and if it was the latest release, the new latest release's members are flagged as such.
+        """
+        if self.is_head:
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+            return
+        head = self.head
+        was_latest_released = self.is_latest_released
+        concept_ids = list(self.concepts.values_list('id', flat=True))
+        mapping_ids = list(self.mappings.values_list('id', flat=True))
+        try:
+            super().delete(using=using, keep_parents=keep_parents, force=force, sync=sync)
+        finally:  # the rows may be gone even if a later step (export cleanup) failed; a rollback drops this
+            transaction.on_commit(
+                lambda: head.queue_reindex(concept_ids, mapping_ids, was_latest_released), robust=True)
+
+    def queue_reindex(self, concept_ids, mapping_ids, was_latest_released=False, user=None):
+        """
+        Indexes again these concepts and mappings of this repository (its HEAD), from what they belong to now: the rows
+        of a deleted version, whose links are gone, or the ones a seed superseded (queue_children_reindex).
+        was_latest_released: a deleted version was the latest release, so the new one's members are flagged.
+        user: who the Tasks belong to (and can cancel them), by default HEAD's last editor.
+        """
+        user = user or self.updated_by
+        self.queue_children_reindex(concept_ids, mapping_ids, user)
+        latest_released = self.get_latest_released_version() if was_latest_released else None
+        if latest_released:
+            latest_released.index_children_async(user, {'is_in_latest_source_version': True})
 
     def post_delete_actions(self):
         if self.is_head:
@@ -1134,15 +1175,15 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             ).order_by('-updated_at').values_list('updated_at', flat=True).first()
         return self.get_max_mapping_attribute('updated_at')
 
+    def get_mapped_source_ids(self):
+        return self.get_mappings_queryset().values_list('to_source_id', flat=True).distinct()
+
     def get_mapped_sources(self, exclude_self=True):
-        mapped_source_ids = (
-            self.get_mappings_queryset()
-            .values_list('to_source_id', flat=True)
-            .distinct()
-        )
-        queryset = Source.objects.filter(id__in=mapped_source_ids)
+        queryset = Source.objects.filter(id__in=self.get_mapped_source_ids(), is_active=True)
         if exclude_self:
-            queryset = queryset.exclude(id=self.id)
+            # mappings point at HEAD, so on a version leave out every version of this source
+            queryset = queryset.exclude(
+                mnemonic=self.mnemonic, organization_id=self.organization_id, user_id=self.user_id)
         return queryset
 
     def clone_resources(self, user, concepts, mappings, **kwargs):  # pylint: disable=too-many-locals,too-many-branches

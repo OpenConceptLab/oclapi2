@@ -1,5 +1,6 @@
 import json
 import time
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from json import JSONDecodeError
 
@@ -15,7 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage
 from django.core.management import call_command
 from django.core.paginator import Paginator
-from django.db import DatabaseError, connection, transaction
+from django.db import DEFAULT_DB_ALIAS, connection, transaction
 from django.db.models import Exists, OuterRef
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -102,8 +103,7 @@ def delete_collection(collection_id):
     try:
         logger.info('Found collection %s.  Beginning purge...', collection.mnemonic)
         collection.references.all().delete()
-        collection.expansions.all().delete()
-        collection.delete(force=True)
+        collection.delete(force=True)  # its expansions go with it; their members are indexed again
         logger.info('Delete complete!')
         return True
     except Exception as ex:
@@ -205,6 +205,32 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
         [reference.id, reference.unresolved_reason] for reference in added_references
         if reference.include and reference.unresolved_reason]
     return [reference.id for reference in added_references], errors, unresolved
+
+
+# QueueOnce, as export_source: its after_return replaces AsyncTask's, which stores a result as str(), so the
+# task's record keeps this one as JSON for a queued conversion's caller. The same request twice at once gets 409
+@app.task(base=QueueOnceCustomTask, bind=True)
+def convert_references(self, user_id, collection_id, conversions):
+    """Swaps a HEAD collection's resource-versioned references for repo-versioned or unversioned ones"""
+    from core.users.models import UserProfile
+    from core.collections.models import Collection
+    from core.collections.reference_conversions import ReferenceConversions
+    from core.capabilities.constants import WRITE_ACTION_EDIT
+    from core.capabilities.writes import get_write_refusal, get_write_target
+    user = UserProfile.objects.get(id=user_id)
+    collection = Collection.objects.filter(id=collection_id).first()
+    if not collection:
+        return {'error': 'Collection not found'}
+    refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
+    if refusal is not None:  # writable when queued, the collection may be read-only by now
+        return {'refusal': refusal}
+    if not collection.has_edit_access(user):  # an editor when queued may not be one by now
+        return {'error': 'You no longer have edit access to this collection'}
+    collection.add_processing(self.request.id)
+    try:
+        return {'results': ReferenceConversions(collection, user).convert(conversions, user)}
+    finally:
+        collection.remove_processing(self.request.id)
 
 
 def __handle_save(instance):
@@ -468,6 +494,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     # A release request may have left its indexing here: it waits for a rerun, as on a failed seed
                     instance.record_seed_stage(None)
                     raise
+                if instance.released:
+                    # created released, it holds HEAD's members only now, which can change their class
+                    from core.collections.models import Expansion
+                    Expansion.mark_health_not_current_for_repository(instance)
             elif autoexpand:
                 if not seed_from_head:
                     instance.cascade_children_to_expansion(index=True, sync=sync)
@@ -501,6 +531,51 @@ def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False)
     if expansion:
         expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
         expansion.clear_processing(True)
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def compute_expansion_health(expansion_id):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def recheck_expansion_health(limit=None):
+    """Nightly: queues, a batch at a time, a recompute of each default expansion whose health isn't current. A
+    release, retire or delete leaves them so, and a frozen release never gets another change. One with a run queued
+    (False) is taken too, in case that run never came: a duplicate is harmless, as a store checks the revision.
+    The ones tried longest ago, or never, go first, so rows that fail every night don't starve the rest; the runs are
+    spread over a window, one task each. Returns how many were queued"""
+    from django.db.models import F
+    from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT, EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
+    from core.collections.models import Expansion
+    if not Expansion.is_health_on():
+        return 0
+    expansion_ids = list(Expansion.objects.exclude(health_is_current=True).filter(
+        is_processing=False, is_active=True, collection_version__is_active=True,
+        collection_version__expansion_uri=F('uri')
+    ).order_by(F('health_checked_at').asc(nulls_first=True), 'id').values_list('id', flat=True)[
+        :EXPANSION_HEALTH_RECHECK_LIMIT if limit is None else min(limit, EXPANSION_HEALTH_RECHECK_LIMIT)])
+    if not expansion_ids:
+        return 0
+    spacing = EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS / len(expansion_ids)
+    queued = 0
+    for index, expansion_id in enumerate(expansion_ids):
+        if get(settings, 'TEST_MODE', False):
+            compute_expansion_health(expansion_id)
+        else:
+            try:
+                compute_expansion_health.apply_async((expansion_id,), queue='default', countdown=int(index * spacing))
+            except Exception:  # pylint: disable=broad-except
+                logger.exception('Could not queue expansion health for %s', expansion_id)
+                break
+        queued += 1
+    # only those queued count as tried, so the rest keep their place for tomorrow's batch
+    Expansion.objects.filter(id__in=expansion_ids[:queued]).update(health_checked_at=timezone.now())
+    return queued
 
 
 @app.task
@@ -1102,31 +1177,77 @@ def vacuum_and_analyze_db():
     conn.set_isolation_level(old_isolation_level)
 
 
-@app.task(ignore_result=True)
+# Each finished parallel import asks for the post-import count job, and one copy runs at a time
+# (OpenConceptLab/ocl_online#635). As with the count tasks below, a copy releases its QueueOnce lock as it starts, so a
+# copy asked for while one runs is queued, and only one copy waits in the queue. A copy that starts while another runs
+# doesn't wait on a worker: it queues itself again, so the job holds at most one worker, and each import is followed by
+# a pass that starts after it ended. The queue lock expires after 10 minutes, so a copy lost after taking it (a failed
+# publish) blocks later requests no longer than that; an extra copy queued after a longer wait is harmless.
+POST_IMPORT_COUNTS_ONCE = {'unlock_before_run': True, 'graceful': True, 'timeout': 600}
+POST_IMPORT_COUNTS_LOCK = 'post_import_update_resource_counts'
+POST_IMPORT_COUNTS_REQUEUE_SECONDS = 60
+
+
+@contextmanager
+def try_job_lock(name):
+    """
+    Yields whether this process got the advisory lock `name`, which it holds until the block ends. The lock is taken
+    in a transaction on a connection of its own: pgbouncer's transaction pooling keeps a session lock on no one server
+    connection, and the open transaction pins it there. It's released when the connection closes, a dead worker's too.
+    """
+    from django.db import connections
+    lock_connection = connections.create_connection(DEFAULT_DB_ALIAS)
+    try:
+        lock_connection.set_autocommit(False)
+        with lock_connection.cursor() as cursor:
+            cursor.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))', [name])
+            yield cursor.fetchone()[0]
+    finally:
+        lock_connection.close()
+
+
+@app.task(base=QueueOnceCustomTask, once=POST_IMPORT_COUNTS_ONCE, ignore_result=True, reject_on_worker_lost=True)
 def post_import_update_resource_counts():
+    with try_job_lock(POST_IMPORT_COUNTS_LOCK) as acquired:
+        if acquired:
+            count_uncounted_resources()
+            return
+    # the copy that's counting may have read its sources before this copy's import ended
+    post_import_update_resource_counts.apply_async(queue='default', countdown=POST_IMPORT_COUNTS_REQUEUE_SECONDS)
+
+
+def count_uncounted_resources():
+    """
+    One pass of the post-import count job: recounts the concepts or mappings of each source with rows not yet counted,
+    and marks those rows counted. Both lists of sources are read as the pass starts.
+    """
     from core.sources.models import Source
     from core.concepts.models import Concept
     from core.mappings.models import Mapping
 
-    uncounted_concepts = Concept.objects.filter(_counted__isnull=True)
-    sources = Source.objects.filter(id__in=uncounted_concepts.values_list('parent_id', flat=True))
-    for source in sources:
-        try:
-            source.update_concepts_count(sync=True)
-            uncounted_concepts.filter(parent_id=source.id).update(_counted=True)
-        except DatabaseError as ex:  # source may have been deleted since the query
-            logger.warning('Skipping concepts count for source %s: %s', source.id, ex)
+    to_count = [
+        (model, field, list(Source.objects.filter(
+            id__in=model.objects.filter(_counted__isnull=True).values('parent_id')).only('id')))
+        for model, field in ((Concept, 'active_concepts'), (Mapping, 'active_mappings'))
+    ]
+    for model, field, sources in to_count:
+        for source in sources:
+            count_source_resources(source, model, field)
 
-    uncounted_mappings = Mapping.objects.filter(_counted__isnull=True)
-    sources = Source.objects.filter(
-        id__in=uncounted_mappings.values_list('parent_id', flat=True))
 
-    for source in sources:
-        try:
-            source.update_mappings_count(sync=True)
-            uncounted_mappings.filter(parent_id=source.id).update(_counted=True)
-        except DatabaseError as ex:  # source may have been deleted since the query
-            logger.warning('Skipping mappings count for source %s: %s', source.id, ex)
+def count_source_resources(source, model, field):
+    # The rows are marked, then counted with the count tasks' lock (update_active_count), so the total includes every
+    # marked row; a row added after the mark waits for the next pass. Marking and counting are separate steps, so no
+    # row lock is held while another is awaited: one transaction would deadlock with hard deletes (source, then rows)
+    # or organization deletes (rows, then source). If the count fails, a row is set uncounted again for the next pass.
+    try:
+        model.objects.filter(parent_id=source.id, _counted__isnull=True).update(_counted=True)
+        update_active_count(source.__class__, source.id, field)
+    except Exception as ex:  # pylint: disable=broad-except
+        logger.warning('Skipping %s count for source %s: %s', field, source.id, ex)
+        with suppress(Exception):
+            one_row = model.objects.filter(parent_id=source.id).values('id')[:1]
+            model.objects.filter(id__in=one_row).update(_counted=None)
 
 
 @app.task(ignore_result=True)
@@ -1191,6 +1312,8 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
     if expansion and removed_reference_ids:
         reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
         expansion.add_references(reference_to_readd, True, True, False)
+        # re-adding changes members after the removal marked them, so its own recompute may have read them early
+        expansion.mark_health_out_of_date()
         current = Task.objects.filter(id=get(current_task, 'request.id')).first()
         if current:
             current.clear_superseded_readd_references_tasks()

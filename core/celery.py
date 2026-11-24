@@ -29,6 +29,10 @@ app.conf.CELERYBEAT_SCHEDULE = {
         'task': 'core.common.tasks.vacuum_and_analyze_db',
         'schedule': crontab(0, 1),  # Run at 1 am
     },
+    'recheck-expansion-health': {
+        'task': 'core.common.tasks.recheck_expansion_health',
+        'schedule': crontab(0, 2),  # Run at 2 am
+    },
     'expire-celery-tasks': {
         'task': 'core.common.tasks.expire_old_celery_tasks',
         'schedule': crontab(0, 1),  # Run at 1 am

@@ -14,7 +14,7 @@ from django.http import QueryDict
 from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from django.db import OperationalError, connection, transaction
-from mock import patch, Mock
+from mock import patch, Mock, call
 from mock.mock import ANY
 from rest_framework import status
 from rest_framework.response import Response
@@ -38,13 +38,14 @@ from core.collections.utils import is_mapping, is_concept, is_version_specified,
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     RETIRED_ACCESS_TYPE_EDIT
-from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion
+from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion, \
+    delete_collection
 from core.common.tasks import update_collection_active_concepts_count
 from core.common.tasks import update_collection_active_mappings_count
 from core.common.tasks import update_source_active_concepts_count, update_source_active_mappings_count, \
     update_active_count
 from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
-from core.common.utils import to_owner_uri, get_falsy_values, drop_version
+from core.common.utils import to_owner_uri, get_falsy_values, drop_version, get_export_key_pattern
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept, HierarchicalConcepts
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -122,6 +123,70 @@ class CollectionTest(OCLTestCase):
         # once for HEAD itself (post_delete_actions) and once each for v1 and v2
         self.assertEqual(clear_cache_mock.call_count, 3)
 
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.common.models.batch_index_resources')
+    def test_deleting_a_collection_indexes_its_former_members_again(self, batch_index_resources_mock):
+        """OpenConceptLab/ocl_online#740: their documents would keep the deleted version's name and URLs."""
+        source = OrganizationSourceFactory()
+        in_head, in_v1, in_v1_other = [ConceptFactory(parent=source) for _ in range(3)]
+        mapping = MappingFactory(parent=source)
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        ExpansionFactory(collection_version=head).concepts.add(in_head)
+        expansion = ExpansionFactory(collection_version=v1)
+        expansion.concepts.add(in_v1, in_v1.get_latest_version())
+        expansion.mappings.add(mapping)
+        ExpansionFactory(collection_version=v1).concepts.add(in_v1_other)  # v1's other expansion
+
+        with self.captureOnCommitCallbacks(execute=True):
+            v1.delete(force=True)
+            batch_index_resources_mock.assert_not_called()  # the rows still belong to v1 until the delete commits
+
+        self.assertEqual(batch_index_resources_mock.call_args_list, [
+            call('concept', {'id__in': sorted({in_v1.id, in_v1.get_latest_version().id, in_v1_other.id})}),
+            call('mapping', {'id__in': [mapping.id]}),
+        ])
+
+        # the API's delete takes HEAD and every version left, with their expansions
+        batch_index_resources_mock.reset_mock()
+        v2 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v2')
+        ExpansionFactory(collection_version=v2).mappings.add(mapping)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertTrue(delete_collection(head.id))
+
+        self.assertFalse(Collection.objects.filter(mnemonic=head.mnemonic, organization=head.organization).exists())
+        self.assertEqual(batch_index_resources_mock.call_args_list, [
+            call('concept', {'id__in': [in_head.id]}), call('mapping', {'id__in': [mapping.id]})])
+
+        # a failure after the rows are deleted (here, queueing the export cleanup) still reindexes the members
+        batch_index_resources_mock.reset_mock()
+        head = OrganizationCollectionFactory()
+        ExpansionFactory(collection_version=head).concepts.add(in_head)
+        with patch('core.common.models.delete_s3_objects', Mock(apply_async=Mock(side_effect=ConnectionError))), \
+                self.assertRaises(ConnectionError), self.captureOnCommitCallbacks(execute=True):
+            head.delete(force=True)
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [in_head.id]})
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.common.models.batch_index_resources')
+    def test_deleting_an_organization_indexes_its_collections_former_members_again(self, batch_index_resources_mock):
+        """Organization.delete deletes every collection row in one transaction, so the reindex follows its commit."""
+        concept = ConceptFactory()  # another owner's, which outlives the organization
+        org = OrganizationFactory()
+        head = OrganizationCollectionFactory(organization=org)
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=org, version='v1')
+        ExpansionFactory(collection_version=head).concepts.add(concept)
+        ExpansionFactory(collection_version=v1).concepts.add(concept.get_latest_version())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            org.delete()
+            batch_index_resources_mock.assert_not_called()
+
+        self.assertEqual(
+            {id_ for call_args in batch_index_resources_mock.call_args_list for id_ in call_args[0][1]['id__in']},
+            {concept.id, concept.get_latest_version().id})
+        self.assertEqual({call_args[0][0] for call_args in batch_index_resources_mock.call_args_list}, {'concept'})
+
     @patch('core.common.models.delete_s3_objects')
     def test_delete_head_clears_export_and_external_export_s3_objects_for_all_versions(
             self, delete_s3_objects_mock
@@ -148,6 +213,60 @@ class CollectionTest(OCLTestCase):
 
         called_paths = sorted(call.args[0] for call in delete_s3_objects_mock.call_args_list)
         self.assertEqual(called_paths, expected_paths)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_version_clears_its_exports_with_and_without_its_default_expansion(self, delete_s3_objects_mock):
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        bare = [  # where an export made before it had an expansion went
+            v1.get_version_export_path(suffix=None), v1.get_legacy_version_export_path(suffix=None)]
+        v1.expansion_uri = ExpansionFactory(collection_version=v1).uri
+        v1.save()
+        expanded = [v1.get_version_export_path(suffix=None), v1.get_legacy_version_export_path(suffix=None)]
+        self.assertFalse(set(expanded) & set(bare))
+
+        v1.delete(force=True, sync=True)
+
+        for prefix in bare + expanded:
+            delete_s3_objects_mock.assert_any_call(prefix, get_export_key_pattern(prefix))
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_head_clears_an_old_format_export_prefix_only_its_versions_build(self, delete_s3_objects_mock):
+        """Version a with expansion b and version a_b build the same old prefix; deleting HEAD deletes both."""
+        head = OrganizationCollectionFactory()
+        versions = {}
+        for version, expansion in (('a', 'b'), ('a_b', 'c')):
+            versions[version] = OrganizationCollectionFactory(
+                mnemonic=head.mnemonic, organization=head.organization, version=version)
+            versions[version].expansion_uri = ExpansionFactory(
+                collection_version=versions[version], mnemonic=expansion).uri
+            versions[version].save()
+        shared = versions['a'].get_legacy_version_export_path(suffix=None)
+        self.assertEqual(shared, versions['a_b'].get_legacy_version_export_path(suffix=None, with_expansion=False))
+        self.assertFalse(versions['a'].owns_legacy_export_path())
+
+        head.delete(force=True, sync=True)
+
+        delete_s3_objects_mock.assert_any_call(shared, get_export_key_pattern(shared))
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_delete_version_leaves_an_old_format_export_prefix_another_version_builds(self, delete_s3_objects_mock):
+        """The old format has no repo type: source C v1 builds collection C v1's old prefix without its expansion."""
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        shared = v1.get_legacy_version_export_path(suffix=None)
+        v1.expansion_uri = ExpansionFactory(collection_version=v1).uri
+        v1.save()
+        own = [v1.get_version_export_path(suffix=None), v1.get_legacy_version_export_path(suffix=None),
+               v1.get_version_export_path(suffix=None, with_expansion=False)]
+        self.assertNotIn(shared, own)
+
+        v1.delete(force=True, sync=True)
+
+        called = [call_args.args[0] for call_args in delete_s3_objects_mock.call_args_list]
+        self.assertNotIn(shared, called)
+        self.assertLessEqual(set(own), set(called))
 
     def test_add_expressions(self):
         collection = OrganizationCollectionFactory()
@@ -2605,6 +2724,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(list(copy.concepts.all()), [latest])
         self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     @patch('core.common.tasks.export_collection')
@@ -2790,6 +2910,7 @@ class TasksTest(OCLTestCase):
                 self.assertEqual(list(manual.concepts.all()), expected)
                 self.assertIsNone(references[0]._valueset_locks)  # pylint: disable=protected-access
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -2828,6 +2949,7 @@ class TasksTest(OCLTestCase):
         reference.concepts.add(concept)
         return collection, expansion, reference
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -2849,6 +2971,7 @@ class TasksTest(OCLTestCase):
         self.assertFalse(
             Task.objects.filter(name__iendswith='readd_references_to_expansion_on_references_removal').exists())
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')

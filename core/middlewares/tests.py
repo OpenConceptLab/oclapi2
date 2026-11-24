@@ -1,15 +1,16 @@
 import json
+import re
 from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from rest_framework.exceptions import AuthenticationFailed
 
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, \
     SSOUsernameCaseMismatchRefused
-from core.middlewares.middlewares import RequireAuthenticationMiddleware
+from core.middlewares.middlewares import CustomLoggerMiddleware, RequireAuthenticationMiddleware
 
 
 @override_settings(
@@ -279,3 +280,74 @@ class RequireAuthenticationSettingsTest(SimpleTestCase):
         ):
             with self.subTest(header=header):
                 self.assertIn(header, settings.CORS_ALLOW_HEADERS)
+
+
+REQUEST_MARKER = 'request-body-marker'
+RESPONSE_MARKER = 'response-body-marker'
+
+
+@override_settings(LOG_REQUEST_BODIES=False)
+class CustomLoggerMiddlewareTest(SimpleTestCase):
+    """Request logging writes each request's lines but, unless LOG_REQUEST_BODIES, no request or response body."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def json_post(self):
+        return self.factory.post('/orgs/', data=json.dumps({'name': REQUEST_MARKER}), content_type='application/json')
+
+    def log_lines(self, request, status=400, response=None):
+        """Pass the request through the middleware to a view that answers with a marker; return what was logged."""
+        middleware = CustomLoggerMiddleware(
+            lambda req: response or JsonResponse({'name': RESPONSE_MARKER}, status=status))
+        with self.assertLogs('django.request', level='DEBUG') as logs:
+            middleware(request)
+        return [re.sub(r'\x1b\[[0-9;]*m', '', record.getMessage()) for record in logs.records]
+
+    def assert_no_marker(self, lines):
+        for marker in (REQUEST_MARKER, RESPONSE_MARKER):
+            self.assertEqual([line for line in lines if marker in line], [])
+
+    def test_logs_request_lines_but_no_body_at_any_status(self):
+        for status in (201, 400, 500):
+            with self.subTest(status=status):
+                lines = self.log_lines(self.json_post(), status)
+
+                self.assert_no_marker(lines)
+                self.assertIn('POST /orgs/', lines)
+                self.assertIn(f'POST /orgs/ - {status}', lines)
+
+    def test_logs_no_multipart_body(self):
+        lines = self.log_lines(self.factory.post('/orgs/', data={'name': REQUEST_MARKER}), 400)
+
+        self.assert_no_marker(lines)
+
+    @override_settings(REQUEST_LOGGING_SENSITIVE_HEADERS=['X-Deployment-Token'])
+    def test_masks_credential_headers_whether_or_not_bodies_are_logged(self):
+        for log_bodies in (False, True):
+            with self.subTest(log_bodies=log_bodies), override_settings(LOG_REQUEST_BODIES=log_bodies):
+                request = self.factory.get(
+                    '/orgs/', HTTP_AUTHORIZATION=f'Token {REQUEST_MARKER}', HTTP_X_API_KEY=REQUEST_MARKER,
+                    HTTP_COOKIE=f'sessionid={REQUEST_MARKER}', HTTP_X_CSRFTOKEN=REQUEST_MARKER,
+                    HTTP_X_AUTH_TOKEN=REQUEST_MARKER, HTTP_X_DEPLOYMENT_TOKEN=REQUEST_MARKER)
+                lines = self.log_lines(request, response=self.json_response_with_cookies())
+
+                self.assert_no_marker(lines)
+                self.assertTrue(any('X-Csrftoken' in line and 'Cookie' in line for line in lines))
+                self.assertTrue(any('Set-Cookie' in line for line in lines))
+
+    @staticmethod
+    def json_response_with_cookies():
+        response = JsonResponse({}, status=400)
+        response.set_cookie('sessionid', RESPONSE_MARKER)
+        response['Set-Cookie'] = f'token={RESPONSE_MARKER}'
+        response['X-Deployment-Token'] = RESPONSE_MARKER
+        return response
+
+    @override_settings(LOG_REQUEST_BODIES=True)
+    def test_logs_bodies_with_log_request_bodies(self):
+        """Shows the capture above would see a body: with LOG_REQUEST_BODIES both bodies are logged."""
+        lines = self.log_lines(self.json_post(), 400)
+
+        self.assertTrue(any(REQUEST_MARKER in line for line in lines))
+        self.assertTrue(any(RESPONSE_MARKER in line for line in lines))

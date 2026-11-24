@@ -822,7 +822,8 @@ class ImporterSubtask:
         self.indexer.finish()
         if self.isolated and not self.isolated_version:
             results.append({'seen': {
-                **{key: sorted(value) for key, value in self.seen.items()}, 'hierarchy': self.assigned_hierarchy}})
+                **{key: sorted(value) for key, value in self.seen.items()}, 'hierarchy': self.assigned_hierarchy,
+                'superseded': self.indexer.deferred_superseded_ids}})
         return results
 
     def collect_hierarchy_map(self, temp, is_zipped, is_tarred):
