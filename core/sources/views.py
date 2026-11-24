@@ -725,7 +725,10 @@ class AbstractSourceMappedSourcesListView(SourceListView):
         return self.request.query_params.get('excludeSelf', True) in get_truthy_values()
 
     def get_queryset(self):
-        return self.get_object().get_mapped_sources(exclude_self=self.is_exclude_self())
+        queryset = self.get_object().get_mapped_sources(exclude_self=self.is_exclude_self())
+        # viewing this source doesn't make the private sources its mappings point at visible
+        viewable = Source.get_viewable_versions_criteria(self.request.user)
+        return queryset if viewable is None else queryset.filter(viewable)
 
     @swagger_auto_schema(auto_schema=None)
     def post(self, request, **kwargs):
