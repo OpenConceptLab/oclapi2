@@ -91,6 +91,33 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
         response = self.client.get(f'/sources/?q={self.token}src')
         self.assertEqual((response['num_found'], response['num_returned']), ('1', '0'))  # num_found: the index's
 
+    def facet_names(self, url, user=None):
+        """Each facet's names, lowercased, as `url` answers them (facetsOnly)."""
+        kwargs = {'HTTP_AUTHORIZATION': 'Token ' + user.get_token()} if user else {}
+        response = self.client.get(f'{url}&facetsOnly=true', **kwargs)
+        self.assertEqual(response.status_code, 200, url)
+        return {facet: {str(bucket[0]).lower() for bucket in buckets}
+                for facet, buckets in response.data['facets']['fields'].items()}
+
+    def test_a_stale_document_s_source_and_owner_are_no_facet_name_for_the_public_or_an_outsider(self):
+        names = {'source': self.source.mnemonic.lower(), 'owner': self.org.mnemonic.lower()}
+        token = self.token
+        searches = [(f'/concepts/?q={token}concept', ('source', 'owner')),
+                    (f'/mappings/?q={token}map', ('source', 'owner')),
+                    (f'/sources/?q={token}src', ('owner',)), (f'/collections/?q={token}coll', ('owner',)),
+                    (f'/repos/?q={token}src', ('owner',))]
+        for url, facets in searches:
+            for facet in facets:
+                self.assertIn(names[facet], self.facet_names(url).get(facet, set()), (url, facet))  # the index's
+
+        self.make_private_without_reindex()
+
+        for url, facets in searches:
+            for user, named in ((None, False), (self.outsider, False), (self.member, True), (self.staff, True)):
+                for facet in facets:
+                    with self.subTest(url=url, user=user, facet=facet):
+                        self.assertEqual(names[facet] in self.facet_names(url, user).get(facet, set()), named)
+
     def test_a_concept_or_mapping_of_a_source_made_private_is_no_hit_before_its_own_row_follows(self):
         """A source made private commits before its save signal makes its concepts and mappings private."""
         Source.objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
