@@ -138,7 +138,13 @@ class Organization(BaseResourceModel, SourceContainerMixin, ChecksumModel):
 
     @classmethod
     def get_viewable(cls, queryset, user):
-        return cls.get_visible_to(user, queryset)
+        """The orgs of `queryset` `user` can view: public ones (public_can_view, the retired Edit too) and their own."""
+        if get(user, 'is_staff'):
+            return queryset
+        criteria = models.Q(public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        if get(user, 'is_authenticated'):
+            criteria |= models.Q(id__in=user.organizations.values('id'))
+        return queryset.filter(criteria)
 
     @classmethod
     def get_visible_to(cls, user, queryset):

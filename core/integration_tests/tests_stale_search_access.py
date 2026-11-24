@@ -6,7 +6,7 @@ from django.test import tag
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
-from core.common.constants import ACCESS_TYPE_NONE
+from core.common.constants import ACCESS_TYPE_NONE, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -89,7 +89,16 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
                 with self.subTest(url=url, user=user):
                     self.assertNotIn(_id, self.search_ids(url, user))
         response = self.client.get(f'/sources/?q={self.token}src')
-        self.assertEqual(response['num_returned'], '0')
+        self.assertEqual((response['num_found'], response['num_returned']), ('1', '0'))  # num_found: the index's
+
+    def test_a_concept_or_mapping_of_a_source_made_private_is_no_hit_before_its_own_row_follows(self):
+        """A source made private commits before its save signal makes its concepts and mappings private."""
+        Source.objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
+
+        for url, _id in self.searches()[4:]:
+            for user, found in ((None, False), (self.outsider, False), (self.member, True), (self.creator, True)):
+                with self.subTest(url=url, user=user):
+                    self.assertEqual(_id in self.search_ids(url, user), found)
 
     def test_members_staff_and_creators_still_find_them(self):
         self.make_private_without_reindex()
@@ -102,6 +111,13 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
         for url, _id in self.searches()[1:3] + self.searches()[4:]:
             with self.subTest(url=url, user=self.creator):
                 self.assertIn(_id, self.search_ids(url, self.creator))
+
+    def test_a_public_org_stored_with_the_retired_edit_access_is_still_a_hit(self):
+        Organization.objects.filter(id=self.org.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
+        OrganizationDocument().update(Organization.objects.filter(id=self.org.id), refresh=True)
+
+        for user in (None, self.outsider):
+            self.assertIn(self.org.mnemonic, self.search_ids(f'/orgs/?q={self.token}org', user))
 
     def test_another_user_s_org_list_drops_a_stale_document_of_an_org_not_shared(self):
         url = f'/users/{self.member.username}/orgs/sources/?q={self.token}src'

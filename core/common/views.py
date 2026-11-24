@@ -1332,10 +1332,11 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def get_viewable_hits(self, hits):
         """
         The hits the requester can view, as the database has them now: a hit whose index document is stale, such as a
-        repository made private before it was reindexed, is left out. One query for the page (one per model for the
-        repo search, whose hits are sources and collections). Like the search's access filter, it keeps the
-        repositories, concepts and mappings the requester created. The page can then hold fewer hits than its limit,
-        while num_found stays the index's count.
+        repository made private before it was reindexed, is left out, and so is a concept or mapping of a source the
+        requester can't view (a source made private commits before its save signal makes them private). One query for
+        the page (one per model for the repo search, whose hits are sources and collections). Like the search's access
+        filter, it keeps the repositories, concepts and mappings the requester created. The page can then hold fewer
+        hits than its limit, while num_found stays the index's count.
         """
         user = self.request.user
         if not isinstance(hits, models.QuerySet):  # the repo search's sources and collections
@@ -1346,6 +1347,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             }
             return [hit for hit in hits if (type(hit), hit.id) in viewable_ids]
         viewable = hits.model.get_viewable(hits, user)
+        if self.is_source_child_document_model():
+            from core.sources.models import Source
+            parents = Source.get_viewable(Source.objects.filter(id__in=hits.order_by().values('parent_id')), user)
+            viewable = viewable.filter(parent_id__in=parents.values('id'))
         if user.is_authenticated and not user.is_staff and (
                 self.is_concept_container_document_model() or self.is_source_child_document_model()):
             viewable = hits.filter(models.Q(id__in=viewable.values('id')) | models.Q(created_by_id=user.id))

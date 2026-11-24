@@ -18,6 +18,7 @@ from core.common.tests import OCLAPITestCase, OCLAPITransactionTestCase
 from core.concepts.tests.factories import ConceptFactory
 from core.importers.importer import ImportRequest, ResourceImporter
 from core.importers.models import BulkImportInline
+from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -369,7 +370,7 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
         being asked make_private.
         """
         repos = ((self.source, OrganizationSourceFactory), (self.collection, OrganizationCollectionFactory))
-        concept = ConceptFactory(parent=self.source)
+        children = (ConceptFactory(parent=self.source), MappingFactory(parent=self.source))
         changes = ((ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE), (ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW))  # (read, concurrent)
         for repo, factory in repos:
             model = type(repo)
@@ -387,9 +388,10 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                             row.refresh_from_db()
                             self.assertEqual((row.public_access, row.name), (concurrent, 'Renamed'))
                             self.assertEqual([call[2] for call in self.take_calls()], [WRITE_ACTION_EDIT])
-                            if row.id == self.source.id:
-                                concept.refresh_from_db()
-                                self.assertEqual(concept.public_access, concurrent)
+                            if row is self.source:
+                                for child in children:
+                                    child.refresh_from_db()
+                                    self.assertEqual(child.public_access, concurrent)
 
     def test_a_rest_edit_that_sends_no_access_reads_its_row_for_update_in_the_transaction_that_saves_it(self):
         """A concurrent write that changes the row's access waits for the edit's save, so it isn't overwritten."""
