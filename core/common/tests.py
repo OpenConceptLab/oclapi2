@@ -1605,6 +1605,16 @@ class HeadExportSnapshotTest(OCLTestCase):
         self.assertEqual([entry['version'] for entry in exported['concepts']], [newer_concept.version])
         self.assertEqual([entry['version'] for entry in exported['mappings']], [newer_mapping.version])
 
+    def test_source_head_lists_each_row_without_a_versioned_object(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, names=1).get_latest_version() for _ in range(2)]
+        Concept.objects.filter(id__in=[concept.id for concept in concepts]).update(versioned_object_id=None)
+
+        exported, _ = self.export(source)
+
+        self.assertEqual(
+            sorted(entry['version'] for entry in exported['concepts']), sorted(concept.version for concept in concepts))
+
     @patch('core.common.utils.EXPORT_BATCH_SIZE', 2)
     @patch('core.collections.models.batch_index_resources', Mock())
     def test_collection_head_references_changed_between_pages(self):
