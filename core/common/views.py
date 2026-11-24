@@ -803,7 +803,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         """
         from core.collections.models import Collection
         collections = [name for name, _, _ in facets.pop('_collection_names', [])]
-        present = [facet for facet in self.collection_url_facets if facets.get(facet)]
+        present = {facet: {name for name, _, _ in facets[facet]} for facet in self.collection_url_facets
+                   if facets.get(facet)}
         viewable = Collection.get_viewable_versions_criteria(self.request.user)
         if not present or viewable is None:
             return
@@ -827,20 +828,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     @staticmethod
     def get_viewable_collection_facet_urls(facets, collections, viewable):
         """
-        {(facet, name): urls} for these collection facets: each name they'd show for the expansions of these
-        collections' versions the requester can view (`viewable`), with its URLs (collection version URLs, or for
-        the expansion facet expansion URLs), read from each expansion as its members' documents read it.
+        {(facet, name): urls} for these collection facets ({facet: the names it lists}), from these collections'
+        versions the requester can view (`viewable`): their URLs by collection and version name, as the collection
+        filter matches them, and their expansions' URLs by expansion name. A version or expansion name counts only if
+        its facet lists it, so the request stays the facets' size. Names read as the documents read them from their
+        expansions' URIs (to_parent_kwargs_from_uri).
         """
         from core.collections.models import Collection, Expansion
+        versions = Collection.objects.filter(viewable, mnemonic__in=collections)
         urls = {}
-        for expansion in Expansion.objects.filter(collection_version__in=Collection.objects.filter(
-                viewable, mnemonic__in=collections)).only('uri', 'mnemonic'):
-            for facet, name, url in [
-                    ('collection', expansion.collection_version_mnemonic, expansion.collection_version_url),
-                    ('collection_version', expansion.collection_version_name, expansion.collection_version_url),
-                    ('expansion', expansion.mnemonic, expansion.uri)]:
-                if facet in facets:
-                    urls.setdefault((facet, name), set()).add(url)
+        for uri in versions.values_list('uri', flat=True):
+            parts = uri.strip('/').split('/')
+            for facet, name in [('collection', parts[3]), ('collection_version', parts[4] if len(parts) > 4 else HEAD)]:
+                if facet in facets and (facet == 'collection' or name in facets[facet]):
+                    urls.setdefault((facet, name), set()).add(uri)
+        if 'expansion' in facets:
+            for uri, name in Expansion.objects.filter(
+                    collection_version__in=versions, mnemonic__in=facets['expansion']).values_list('uri', 'mnemonic'):
+                urls.setdefault(('expansion', name), set()).add(uri)
         return urls
 
     def get_extras_searchable_fields_from_query_params(self):

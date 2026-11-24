@@ -11,7 +11,7 @@ from django.core.cache import cache
 from django.test import tag, override_settings
 from core.client_configs.models import ClientConfig
 from core.collections.documents import CollectionDocument
-from core.collections.models import Collection, CollectionReference
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, RETIRED_ACCESS_TYPE_EDIT, ROLE_ADMIN
 from core.common.permissions import HasOwnership
@@ -2344,6 +2344,11 @@ class QueryCollectionAccessTest(AccessTestMixin, OCLAPITestCase):
             self.assertEqual(self.collection_facet(url, self.member), {f'{self.tag}Q': 2, f'{self.tag}R': 1})
             self.assertEqual(self.collection_facet(url, self.staff),
                              {f'{self.tag}P': 1, f'{self.tag}Q': 2, f'{self.tag}R': 1})
+        # an expansion deleted alone leaves its version's indexed members counted, as the collection filter finds them
+        Expansion.objects.filter(collection_version=self.r_v1).delete()
+        url = f'/concepts/?source={self.source.mnemonic}'
+        self.assertEqual(self.collection_facet(url, None), {f'{self.tag}Q': 1, f'{self.tag}R': 1})
+        self.assertEqual(self.listed(f'{url}&collection={self.tag}R', None, 'concepts'), ['inRv1'])
 
     def test_collection_version_and_expansion_facets_name_only_versions_the_requester_can_view(self):
         hidden = OrganizationCollectionFactory(
