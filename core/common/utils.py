@@ -230,10 +230,16 @@ def take_head_export_snapshot(version, concept_ids, mapping_ids, filters):
     last_child_update = version.last_child_update
 
     def members(model, ids):
-        """(id, versioned_object_id) of each member, in export order"""
+        """
+        (id, versioned_object_id) of each member, in export order. A source lists one version of each: if earlier
+        concurrent edits left two flagged latest, the newest, as repair_duplicate_latest_versions keeps.
+        """
         rows = []
         for batch in chunks(list(ids), EXPORT_BATCH_SIZE):
             rows += model.objects.filter(id__in=batch, **filters).values_list('id', 'versioned_object_id')
+        if is_source:
+            rows = [(row_id, versioned_object_id) for versioned_object_id, row_id in dict(
+                (versioned_object_id, row_id) for row_id, versioned_object_id in sorted(rows)).items()]
         return sorted(rows, reverse=True)
 
     with one_snapshot():

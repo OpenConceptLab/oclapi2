@@ -1567,7 +1567,7 @@ class HeadExportSnapshotTest(OCLTestCase):
         mappings = [MappingFactory(parent=source) for _ in range(5)]
         Concept.objects.filter(parent=source).update(updated_at=self.past)
         Mapping.objects.filter(parent=source).update(updated_at=self.past)
-        before, before_key = self.export(source)
+        before, _ = self.export(source)
 
         exported, key = self.export(source, self.on_page({
             'Serializing concepts 1 - 2...': lambda: [
@@ -1581,10 +1581,29 @@ class HeadExportSnapshotTest(OCLTestCase):
         self.assertEqual(len(before['mappings']), 5)
         self.assertEqual(exported['concepts'], before['concepts'])
         self.assertEqual(exported['mappings'], before['mappings'])
-        self.assertEqual(key, before_key)
         self.assertEqual(key, source.get_version_export_path(suffix=f"{self.past.strftime('%Y-%m-%d_%H%M%S')}.zip"))
         self.assertGreater(source.last_child_update, self.past)
         self.assertEqual(source.get_active_concepts().count(), 6)
+
+    def test_source_head_lists_one_version_when_two_are_flagged_latest(self):
+        """Earlier concurrent edits can leave two latest versions; the export lists the newer, as repair keeps"""
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, names=1)
+        mapping = MappingFactory(parent=source)
+        older_concept, older_mapping = concept.get_latest_version(), mapping.get_latest_version()
+        self.edit_concept(concept)
+        self.edit_mapping(mapping)
+        newer_concept, newer_mapping = concept.get_latest_version(), mapping.get_latest_version()
+        for older in (older_concept, older_mapping):
+            older.is_latest_version = True
+            older.save()
+            older.sources.add(source)
+
+        exported, _ = self.export(source)
+
+        self.assertNotEqual(older_concept.id, newer_concept.id)
+        self.assertEqual([entry['version'] for entry in exported['concepts']], [newer_concept.version])
+        self.assertEqual([entry['version'] for entry in exported['mappings']], [newer_mapping.version])
 
     @patch('core.common.utils.EXPORT_BATCH_SIZE', 2)
     @patch('core.collections.models.batch_index_resources', Mock())
