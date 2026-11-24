@@ -119,14 +119,28 @@ class CollectionVersionListSerializer(ModelSerializer):
     expansion_url = CharField(source='expansion_uri', read_only=True)
     checksums = SerializerMethodField()
     external_exports = SerializerMethodField()
+    expansion_health = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = (
             'type', 'short_code', 'name', 'url', 'canonical_url', 'owner', 'owner_type', 'owner_url', 'version',
             'created_at', 'id', 'collection_type', 'updated_at', 'released', 'retired', 'version_url',
-            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports', 'verification'
+            'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports', 'verification',
+            'expansion_health'
         )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not hasattr(instance, 'expansion_health_state'):
+            # only the versions list annotates it, so version lists nested elsewhere add no query per row
+            data.pop('expansion_health', None)
+        return data
+
+    @staticmethod
+    def get_expansion_health(obj):
+        # only rows the versions list annotated: everywhere else the field is dropped, so no lookup per row
+        return Collection.get_expansion_health(obj) if hasattr(obj, 'expansion_health_state') else None
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -169,9 +183,15 @@ class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelS
 
     def prepare_object(self, validated_data, instance=None):
         collection = instance if instance else Collection()
+        was_head = instance is not None and instance.is_head
         collection.version = validated_data.get('version', collection.version) or HEAD
-        collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
-        collection.public_access = validated_data.get('public_access', collection.public_access or DEFAULT_ACCESS_TYPE)
+        # a stored row takes a new mnemonic only as a HEAD that stays one: a version, or a HEAD the body makes one,
+        # never moves to another repository
+        if instance is None or (was_head and collection.is_head):
+            collection.mnemonic = validated_data.get(self.Meta.lookup_field, collection.mnemonic)
+        # a stored row keeps its own access when the write sends none, a blank (private) one included
+        collection.public_access = validated_data.get(
+            'public_access', collection.public_access if instance else DEFAULT_ACCESS_TYPE)
         collection.default_locale = validated_data.get('default_locale', collection.default_locale or DEFAULT_LOCALE)
         supported_locales = validated_data.get('supported_locales')
         if not supported_locales:
@@ -221,7 +241,9 @@ class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelS
         if self._errors:
             return collection
         user = self.context['request'].user
-        errors = Collection.persist_changes(collection, user, original_schema)
+        # an edit that sends no access keeps the row's current access, not the one read before a concurrent change
+        errors = Collection.persist_changes(
+            collection, user, original_schema, keep_access='public_access' not in validated_data)
         self._errors.update(errors)
         return collection
 
@@ -504,6 +526,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
     states = SerializerMethodField()
     tasks = SerializerMethodField()
     external_exports = SerializerMethodField()
+    expansion_health = SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -516,9 +539,14 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
             'version', 'concepts_url', 'mappings_url', 'expansions_url', 'is_processing', 'released', 'retired',
             'canonical_url', 'identifier', 'publisher', 'contact', 'jurisdiction', 'purpose', 'copyright', 'meta',
             'immutable', 'revision_date', 'summary', 'text', 'experimental', 'locked_date',
-            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports', 'verification'
+            'autoexpand', 'expansion_url', 'checksums', 'states', 'tasks', 'external_exports', 'verification',
+            'expansion_health'
         ) + AbstractRepoResourcesSerializer.Meta.fields
         read_only_fields = ('verification',)
+
+    @staticmethod
+    def get_expansion_health(obj):
+        return Collection.get_expansion_health(obj)
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -659,8 +687,9 @@ class ExpansionSerializer(ModelSerializer):
         model = Expansion
         fields = (
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing',
-            'collection_version', 'extras'
+            'collection_version', 'extras', 'health', 'health_is_current'
         )
+        read_only_fields = ('health', 'health_is_current')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -704,8 +733,9 @@ class ExpansionDetailSerializer(ModelSerializer):
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
             'is_processing', 'unresolved_repo_versions', 'collection_version',
             'explicit_collection_versions', 'explicit_source_versions',
-            'evaluated_collection_versions', 'evaluated_source_versions', 'extras'
+            'evaluated_collection_versions', 'evaluated_source_versions', 'extras', 'health', 'health_is_current'
         )
+        read_only_fields = ('health', 'health_is_current')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

@@ -12,11 +12,13 @@ from mock import patch, Mock, ANY
 from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
+from core.collections.constants import REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
 from core.collections.models import CollectionReference, Collection
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.common.tasks import export_collection, delete_s3_objects
+from core.common.tasks import export_collection, delete_s3_objects, add_references, \
+    update_collection_active_concepts_count, update_collection_active_mappings_count
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, drop_version, get_export_key_pattern
@@ -29,7 +31,7 @@ from core.orgs.tests.factories import OrganizationFactory
 from core.services.storages.cloud.aws import S3
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
-from core.tasks.models import Task
+from core.tasks.models import Task, AsyncTask, QueueOnceCustomTask
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
 
@@ -893,6 +895,48 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             len(add_references_mock.apply_async.call_args[1]['task_id']), 36 + 1 + 7 + 1 + 6
         )
 
+    def test_put_async_counts_what_the_references_added_once_they_commit(self):
+        concept = ConceptFactory()
+        retired_concept = ConceptFactory(retired=True)
+        mapping = MappingFactory()
+        published = []
+
+        def record(task, *args, **kwargs):
+            published.append((task, args[0] if args else kwargs.get('args')))
+
+        def published_counts():
+            return sorted((task.name, args) for task, args in published if task.name.endswith('_count'))
+
+        # the tasks the request and then the worker queue are recorded, and run here as the worker would
+        with override_settings(TEST_MODE=False), \
+                patch.object(AsyncTask, 'apply_async', autospec=True, side_effect=record), \
+                patch.object(QueueOnceCustomTask, 'apply_async', autospec=True, side_effect=record):
+            response = self.client.put(
+                self.collection.uri + 'references/?async=true',
+                {'data': {'expressions': [
+                    obj.get_latest_version().url for obj in [concept, retired_concept, mapping]]}},
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+            self.assertEqual(response.status_code, 202)
+            [(job, job_args)] = [(task, args) for task, args in published if task.name == add_references.name]
+            with self.captureOnCommitCallbacks(execute=True):
+                job(*job_args)
+                counts_queued_before_commit = published_counts()
+
+        self.assertEqual(counts_queued_before_commit, [])
+        self.assertEqual(
+            published_counts(),
+            sorted([(update_collection_active_concepts_count.name, (self.collection.id,)),
+                    (update_collection_active_mappings_count.name, (self.collection.id,))])
+        )
+        for task, args in published:
+            if task.name.endswith('_count'):
+                task.run(*args)
+        self.collection.refresh_from_db()
+        self.assertEqual(self.collection.expansion.concepts.count(), 3)
+        self.assertEqual((self.collection.active_concepts, self.collection.active_mappings), (2, 1))
+
     def test_put_200_specific_expression(self):  # pylint: disable=too-many-statements
         response = self.client.put(
             self.collection.uri + 'references/',
@@ -1062,6 +1106,272 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         self.assertEqual(self.collection.expansion.mappings.count(), 2)
         self.assertEqual(self.collection.active_concepts, 3)
         self.assertEqual(self.collection.active_mappings, 2)
+
+    def test_put_200_reference_resolving_to_nothing_names_the_version_it_looked_in(self):
+        source = self.concept.parent
+        # unreleased, so the versionless concept2 reference still resolves to HEAD
+        empty_version = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=False)
+        concept2 = ConceptFactory(parent=source)
+        missing_expression = f'{empty_version.uri}concepts/{concept2.mnemonic}/'
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [missing_expression, concept2.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.collection.references.filter(expression=missing_expression).exists())
+        self.assertEqual(self.collection.expansion.concepts.count(), 2)
+        self.assertCountEqual(
+            response.data,
+            [
+                {
+                    'added': True,
+                    'resolved': False,
+                    'expression': missing_expression,
+                    'repo_versions': [empty_version.uri],
+                    'message': f'The reference is saved in collection {self.collection.name}, but it resolved to '
+                               f'no concepts or mappings in {empty_version.uri}'
+                },
+                {
+                    'added': True,
+                    'expression': concept2.uri,
+                    'message': f'The concept {concept2.mnemonic} is successfully added to '
+                               f'collection {self.collection.name}'
+                }
+            ]
+        )
+
+    @staticmethod
+    def _source_with_concept_version_no_release_holds():
+        """A concept version no released version holds; v2 holds its replacement"""
+        source = OrganizationSourceFactory(organization=OrganizationFactory())
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        old = concept.get_latest_version()
+        new = ConceptFactory(parent=source, mnemonic='c1', versioned_object=concept, version='new')
+        old.sources.remove(source)
+        v2 = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v2', released=True)
+        new.sources.add(v2)
+        return source, old, v2
+
+    def _put_with_resolution_on(self, expression):
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True):
+            return self.client.put(
+                self.collection.uri + 'references/',
+                {'data': {'expressions': [expression]}},
+                HTTP_AUTHORIZATION='Token ' + self.token,
+                format='json'
+            )
+
+    def test_put_200_pinned_reference_no_version_holds_says_so_end_to_end(self):
+        source, old, _ = self._source_with_concept_version_no_release_holds()
+
+        response = self._put_with_resolution_on(old.uri)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'added': True,
+                'resolved': False,
+                'expression': old.uri,
+                'repo_versions': [source.uri],
+                'message': f'The reference is saved in collection {self.collection.name}, but no version of '
+                           f'{source.uri} holds resource version {old.version}'
+            }]
+        )
+
+    def test_put_200_pinned_reference_naming_a_version_that_does_not_hold_it_names_that_version(self):
+        _, old, v2 = self._source_with_concept_version_no_release_holds()
+        expression = f'{v2.uri}concepts/c1/{old.version}/'
+
+        response = self._put_with_resolution_on(expression)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(response.data[0]['repo_versions'], [v2.uri])
+        self.assertEqual(
+            response.data[0]['message'],
+            f'The reference is saved in collection {self.collection.name}, but {v2.uri} does not hold '
+            f'resource version {old.version}'
+        )
+
+    @patch('core.collections.views.add_references')
+    def test_put_200_pinned_reference_no_version_holds_says_so(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        source = self.concept.parent
+        reference = CollectionReference(
+            expression=f'{self.concept.uri}v9/', collection=self.collection, system=source.uri,
+            code=self.concept.mnemonic, resource_version='v9')
+        reference.save()
+        add_references_mock.return_value = ([reference.id], {}, [[reference.id, REFERENCE_VERSION_NOT_HELD]])
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [reference.expression]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'added': True,
+                'resolved': False,
+                'expression': reference.expression,
+                'repo_versions': [source.uri],
+                'message': f'The reference is saved in collection {self.collection.name}, but no version of '
+                           f'{source.uri} holds resource version v9'
+            }]
+        )
+
+    @patch('core.collections.views.add_references')
+    def test_put_200_reference_the_expansion_parameters_exclude_says_so(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        source = self.concept.parent
+        reference = CollectionReference(
+            expression=self.concept.uri, collection=self.collection, system=source.uri, code=self.concept.mnemonic)
+        reference.save()
+        add_references_mock.return_value = (
+            [reference.id], {}, [[reference.id, REFERENCE_EXCLUDED_BY_PARAMETERS]])
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'concepts': [self.concept.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(response.data[0]['repo_versions'], [source.uri])
+        self.assertEqual(
+            response.data[0]['message'],
+            f"The reference is saved in collection {self.collection.name}, but the expansion's parameters "
+            f"exclude everything it resolved to in {source.uri}"
+        )
+
+    @patch('core.collections.views.add_references')
+    def test_put_200_with_a_result_from_an_older_worker(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        concept2 = ConceptFactory()
+        reference = CollectionReference(
+            expression=concept2.uri, collection=self.collection, system=concept2.parent.uri, code=concept2.mnemonic)
+        reference.save()
+        add_references_mock.return_value = ([reference.id], {})
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'concepts': [concept2.uri]}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            [{
+                'added': True,
+                'expression': concept2.uri,
+                'message': f'The concept {concept2.mnemonic} is successfully added to '
+                           f'collection {self.collection.name}'
+            }]
+        )
+
+    @staticmethod
+    def _private_source_with_empty_release():
+        """A source only its org can view, whose latest release holds none of its concepts"""
+        source = OrganizationSourceFactory(organization=OrganizationFactory(), public_access=ACCESS_TYPE_NONE)
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        return source, concept, release
+
+    def _put_expressions(self, expressions):
+        return self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': expressions}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+    def _resolved_to_nothing_item(self, expression, repo_version):
+        return {
+            'added': True,
+            'resolved': False,
+            'expression': expression,
+            'repo_versions': [repo_version],
+            'message': f'The reference is saved in collection {self.collection.name}, but it resolved to '
+                       f'no concepts or mappings in {repo_version}'
+        }
+
+    def test_put_200_reference_to_a_repository_the_requester_cannot_view_answers_like_a_missing_one(self):
+        source, concept, _ = self._private_source_with_empty_release()
+        missing_expression = '/orgs/nobody/sources/nothing/concepts/c1/'
+
+        response = self._put_expressions([concept.uri, missing_expression])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            list(response.data),
+            [
+                self._resolved_to_nothing_item(concept.uri, source.uri),
+                self._resolved_to_nothing_item(missing_expression, '/orgs/nobody/sources/nothing/')
+            ]
+        )
+
+    def test_put_200_reference_to_a_private_repository_names_the_version_to_its_members(self):
+        source, concept, release = self._private_source_with_empty_release()
+        source.organization.members.add(self.user)
+
+        response = self._put_expressions([concept.uri])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(concept.uri, release.uri)])
+
+    def test_put_200_reference_to_a_private_repository_names_the_version_to_staff(self):
+        _, concept, release = self._private_source_with_empty_release()
+        self.user.is_staff = True
+        self.user.save()
+
+        response = self._put_expressions([concept.uri])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(concept.uri, release.uri)])
+
+    def test_put_200_pinned_reference_naming_a_version_the_requester_cannot_view_answers_like_a_missing_one(self):
+        source, old, v2 = self._source_with_concept_version_no_release_holds()
+        Source.objects.filter(mnemonic=source.mnemonic, organization=source.organization).update(
+            public_access=ACCESS_TYPE_NONE)
+        expression = f'{v2.uri}concepts/c1/{old.version}/'
+        missing_source_uri = '/orgs/nobody/sources/nothing/'
+        missing_expression = f'{missing_source_uri}v2/concepts/c1/{old.version}/'
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True):
+            response = self._put_expressions([expression, missing_expression])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            list(response.data),
+            [
+                {
+                    'added': True,
+                    'resolved': False,
+                    'expression': _expression,
+                    'repo_versions': [source_uri],
+                    'message': f'The reference is saved in collection {self.collection.name}, but no version of '
+                               f'{source_uri} holds resource version {old.version}'
+                } for _expression, source_uri in ((expression, source.uri), (missing_expression, missing_source_uri))
+            ]
+        )
 
     def test_put_expression_with_cascade_to_concepts(self):
         source1 = OrganizationSourceFactory()
@@ -4757,6 +5067,25 @@ class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_delete_400_default_expansion(self):
+        response = self.client.delete(
+            self.expansion.url + 'resolved-repo-updates/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'errors': ['Cannot delete default expansion']})
+        self.expansion.refresh_from_db()
+        self.assertTrue(self.expansion.is_active)
+
+    def test_delete_204_other_expansion(self):
+        expansion = ExpansionFactory(collection_version=self.collection)
+
+        response = self.client.delete(
+            expansion.url + 'resolved-repo-updates/', HTTP_AUTHORIZATION='Token ' + self.token)
+
+        self.assertEqual(response.status_code, 204)
+        expansion.refresh_from_db()
+        self.assertFalse(expansion.is_active)
 
 
 class CollectionVersionsComparisonViewTest(OCLAPITestCase):

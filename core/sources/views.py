@@ -19,9 +19,9 @@ from core.client_configs.views import ResourceClientConfigsView
 from core.common.constants import HEAD, RELEASED_PARAM, PROCESSING_PARAM
 from core.common.exceptions import Http405, Http400
 from core.common.mixins import ListWithHeadersMixin, ConceptDictionaryCreateMixin, ConceptDictionaryUpdateMixin, \
-    ConceptContainerExportMixin, ConceptContainerProcessingMixin
-from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject, \
-    CanViewConceptDictionaryVersion
+    ConceptContainerExportMixin, ConceptContainerProcessingMixin, RepoVersionListMixin
+from core.common.permissions import CanViewConceptDictionary, CanEditConceptDictionary, \
+    CanEditConceptDictionaryVersion, CanViewConceptDictionaryVersion
 from core.common.swagger_parameters import q_param, limit_param, sort_desc_param, sort_asc_param, \
     page_param, verbose_param, include_retired_param, updated_since_param, include_facets_header, compress_header, \
     canonical_url_param, all_versions_param
@@ -30,7 +30,7 @@ from core.common.tasks import export_source, index_source_concepts, index_source
 from core.common.utils import parse_boolean_query_param, compact_dict_by_values, to_parent_uri, decode_string, \
     get_truthy_values
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
-from core.repos.mixins import RepoExternalExportMixin
+from core.repos.mixins import RepoExternalExportMixin, RepoListCSVMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.constants import DELETE_FAILURE, DELETE_SUCCESS, VERSION_ALREADY_EXISTS
 from core.sources.documents import SourceDocument
@@ -101,7 +101,9 @@ class SourceVersionBaseView(SourceBaseView):
         return super().get_filter_params(default_version_to_head)
 
 
-class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
+class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_label = 'Source'
+    csv_type_field = 'source_type'
     serializer_class = SourceListSerializer
     is_searchable = True
     es_fields = Source.es_fields
@@ -136,35 +138,6 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
-    def get_csv_rows(self, queryset=None):  # pragma: no cover
-        if not queryset:
-            queryset = self.get_queryset()
-
-        values = queryset.values('mnemonic', 'name', 'full_name', 'source_type', 'description', 'default_locale',
-                                 'supported_locales', 'website', 'external_id', 'updated_at', 'updated_by', 'uri')
-
-        for value in values:
-            value['Owner'] = Source.objects.get(uri=value['uri']).parent.mnemonic
-            value['Source ID'] = value.pop('mnemonic')
-            value['Source Name'] = value.pop('name')
-            value['Source Full Name'] = value.pop('full_name')
-            value['Source Type'] = value.pop('source_type')
-            value['Description'] = value.pop('description')
-            value['Default Locale'] = value.pop('default_locale')
-            value['Supported Locales'] = ",".join(value.pop('supported_locales'))
-            value['Website'] = value.pop('website')
-            value['External ID'] = value.pop('external_id')
-            value['Last Updated'] = value.pop('updated_at')
-            value['Updated By'] = value.pop('updated_by')
-            value['URI'] = value.pop('uri')
-
-        values.field_names.extend([
-            'Owner', 'Source ID', 'Source Name', 'Source Full Name', 'Source Type', 'Description', 'Default Locale',
-            'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
-        ])
-        del values.field_names[0:12]
-        return values
-
 
 class SourceLogoView(SourceBaseView, BaseLogoView):
     serializer_class = SourceDetailSerializer
@@ -180,6 +153,7 @@ class SourceRetrieveUpdateDestroyView(
     SourceBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = SourceDetailSerializer
+    writes_own_object = True  # its DELETE deletes the repository, and its PUT/PATCH can publish it
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
@@ -223,7 +197,9 @@ class SourceRetrieveUpdateDestroyView(
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin):
+class SourceVersionListView(
+        RepoVersionListMixin, SourceVersionBaseView, CreateAPIView, ListWithHeadersMixin
+):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -233,7 +209,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_head(self):
         head = get(self.get_queryset().first(), 'head')
@@ -252,7 +228,7 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
         return SourceVersionListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.get_head()
+        self.check_repos_permissions()  # before `released`, so it answers for every repository the URL names
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
@@ -263,9 +239,9 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
             raise Http404()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic,
-            "id": head_object.mnemonic,
             "name": head_object.name, **request.data,
+            "mnemonic": head_object.mnemonic,  # the version is the URL's repository's, whatever the body says
+            "id": head_object.mnemonic,
             "organization_id": head_object.organization_id,
             "user_id": head_object.user_id,
             'version': version,
@@ -302,12 +278,13 @@ class SourceVersionListView(SourceVersionBaseView, CreateAPIView, ListWithHeader
 
 class SourceLatestVersionRetrieveUpdateView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -475,11 +452,12 @@ class SourceConceptsCloneView(SourceBaseView):
 
 class SourceVersionRetrieveUpdateDestroyView(SourceVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = SourceVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -720,7 +698,10 @@ class AbstractSourceMappedSourcesListView(SourceListView):
         return self.request.query_params.get('excludeSelf', True) in get_truthy_values()
 
     def get_queryset(self):
-        return self.get_object().get_mapped_sources(exclude_self=self.is_exclude_self())
+        queryset = self.get_object().get_mapped_sources(exclude_self=self.is_exclude_self())
+        # viewing this source doesn't make the private sources its mappings point at visible
+        viewable = Source.get_viewable_versions_criteria(self.request.user)
+        return queryset if viewable is None else queryset.filter(viewable)
 
     @swagger_auto_schema(auto_schema=None)
     def post(self, request, **kwargs):

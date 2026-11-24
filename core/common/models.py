@@ -1,9 +1,11 @@
 import logging
 import re
 import time
+from contextlib import nullcontext
 from urllib.parse import quote
 
 from celery.result import AsyncResult
+from celery.states import FAILURE
 from celery_once import AlreadyQueued
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
@@ -13,7 +15,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models, IntegrityError, OperationalError, transaction
-from django.db.models import Value, Q, Count, Func
+from django.db.models import Value, Q, Count, Func, Exists, OuterRef
 from django.db.models.expressions import CombinedExpression, F
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -24,21 +26,22 @@ from elasticsearch import ApiError, TransportError
 from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
 from pydash import get
 
+from core.capabilities.writes import check_make_private
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
-    delete_s3_objects
+    delete_s3_objects, batch_index_resources
 from core.common.utils import reverse_resource, reverse_resource_version, parse_updated_since_param, drop_version, \
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
-from core.common.utils import to_owner_uri
-from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS
+from core.common.utils import to_owner_uri, chunks
+from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS, REINDEX_CHUNK_SIZE
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
 from .checksums import ChecksumModel
 from .constants import (
     ACCESS_TYPE_CHOICES, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX,
-    ACCESS_TYPE_VIEW, SUPER_ADMIN_USER_ID,
+    ACCESS_TYPE_VIEW, ACCESS_TYPE_NONE, SUPER_ADMIN_USER_ID,
     HEAD, PERSIST_NEW_ERROR_MESSAGE, SOURCE_PARENT_CANNOT_BE_NONE, PARENT_RESOURCE_CANNOT_BE_NONE,
     CREATOR_CANNOT_BE_NONE, CANNOT_DELETE_ONLY_VERSION, OPENMRS_VALIDATION_SCHEMA, VALIDATION_SCHEMAS,
     DEFAULT_VALIDATION_SCHEMA, ES_REQUEST_TIMEOUT, UPDATED_BY_USERNAME_PARAM, ES_RETRYABLE_ERROR_TYPES,
@@ -863,46 +866,43 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.update_mappings_count(sync)
 
     def update_mappings_count(self, sync=False):
-        task = None
-        job = None
-        try:
-            if sync or get(settings, 'TEST_MODE'):
-                self.set_active_mappings()
-                self.save(update_fields=['active_mappings'])
-            elif self.__class__.__name__ == 'Source':
-                job = update_source_active_mappings_count
-            elif self.__class__.__name__ == 'Collection':
-                job = update_collection_active_mappings_count
-            if job:
-                from core.tasks.models import Task
-                task = Task.new(
-                    name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
-                )
-                job.apply_async((self.id,), task_id=task.id, queue='concurrent')
-        except AlreadyQueued:
-            if task:
-                task.delete()
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_mappings()
+            self.save(update_fields=['active_mappings'])
+        elif self.__class__.__name__ == 'Source':
+            self.queue_count_task(update_source_active_mappings_count)
+        elif self.__class__.__name__ == 'Collection':
+            self.queue_count_task(update_collection_active_mappings_count)
 
     def update_concepts_count(self, sync=False):
-        task = None
-        job = None
-        try:
-            if sync or get(settings, 'TEST_MODE'):
-                self.set_active_concepts()
-                self.save(update_fields=['active_concepts'])
-            elif self.__class__.__name__ == 'Source':
-                job = update_source_active_concepts_count
-            elif self.__class__.__name__ == 'Collection':
-                job = update_collection_active_concepts_count
-            if job:
-                from core.tasks.models import Task
-                task = Task.new(
-                    name=job.__name__, queue='concurrent', user=(get_current_authorized_user() or self.updated_by)
-                )
+        if sync or get(settings, 'TEST_MODE'):
+            self.set_active_concepts()
+            self.save(update_fields=['active_concepts'])
+        elif self.__class__.__name__ == 'Source':
+            self.queue_count_task(update_source_active_concepts_count)
+        elif self.__class__.__name__ == 'Collection':
+            self.queue_count_task(update_collection_active_concepts_count)
+
+    def queue_count_task(self, job):
+        # Queued once the caller's transaction commits: a worker counting before then reads the members
+        # as they were, e.g. none after a collection's first references are added. A failure to queue is
+        # logged: it fails neither the committed write nor the other count.
+        user = get_current_authorized_user() or self.updated_by
+
+        def queue():
+            from core.tasks.models import Task
+            task = Task.new(name=job.__name__, queue='concurrent', user=user)
+            queued = False
+            try:
                 job.apply_async((self.id,), task_id=task.id, queue='concurrent')
-        except AlreadyQueued:
-            if task:
-                task.delete()
+                queued = True
+            except AlreadyQueued:
+                pass
+            finally:
+                if not queued:  # no task to show
+                    task.delete()
+
+        transaction.on_commit(queue, robust=True)
 
     @property
     def last_child_update(self):
@@ -982,17 +982,17 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
-        export_paths = self.get_export_paths_to_delete()
+        from core.collections.models import Expansion
+        other_versions = list(self.versions.exclude(id=self.id)) if self.is_head else []
+        deleting = {self.id, *(version.id for version in other_versions)}
+        export_paths = self.get_export_paths_to_delete(deleting)
         deleted_urls = [self.url]
-        deleted_ids = [self.id]
         canonical_urls = {self.canonical_url}
         if self.is_head:
-            other_versions = list(self.versions.exclude(id=self.id))
             for other_version in other_versions:
                 other_version.clear_cache()
-                export_paths += other_version.get_export_paths_to_delete()
+                export_paths += other_version.get_export_paths_to_delete(deleting)
                 deleted_urls.append(other_version.url)
-                deleted_ids.append(other_version.id)
                 canonical_urls.add(other_version.canonical_url)
         elif self.is_latest_version:
             prev_version = self.prev_version
@@ -1002,7 +1002,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.is_latest_version = True
                 prev_version.save()
 
-        registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
+        # before the rows go, while expansions still record these versions and their locks
+        after_delete = Expansion.before_repository_delete(self, [self, *other_versions])
+        registry_entry_ids = self.unlink_url_registry_entries(deleting)
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
 
@@ -1012,9 +1014,33 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
+        after_delete()
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
         self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
+
+    def queue_children_reindex(self, concept_ids, mapping_ids, user=None):
+        """
+        Indexes again these concepts and mappings, whose documents name what they belonged to: a deleted version's
+        former members, whose links are gone, or the rows a seed superseded. REINDEX_CHUNK_SIZE a Task on the
+        indexing queue, with its arguments saved so it can be rerun; a chunk that can't be queued is left as a failed
+        Task. user: who the Tasks belong to (and can cancel them), by default this repository's last editor.
+        """
+        from core.tasks.models import Task
+        user = user or self.updated_by
+        for resource, ids in (('concept', concept_ids), ('mapping', mapping_ids)):
+            for chunk in chunks(sorted(ids), REINDEX_CHUNK_SIZE):
+                args = [resource, {'id__in': chunk}]
+                if get(settings, 'TEST_MODE', False):
+                    batch_index_resources(*args)
+                    continue
+                task = Task.new(queue='indexing', user=user, name=batch_index_resources.name, args=args)
+                try:
+                    batch_index_resources.apply_async(args, task_id=task.id, queue='indexing', persist_args=True)
+                except Exception as ex:  # pylint: disable=broad-except
+                    task.state = FAILURE
+                    task.finished_at = timezone.now()
+                    task.record_exception(ex)
 
     def unlink_url_registry_entries(self, repo_ids):
         """
@@ -1043,11 +1069,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 Q(id__in=entry_ids) | Q(url__in=canonical_urls, namespace=self.parent_url), is_active=True):
             entry.lookup_entry()
 
-    def get_export_key_prefixes(self):
-        prefix = self.get_version_export_path(suffix=None)
+    def get_export_key_prefixes(self, with_expansion=True, deleting=()):
+        prefix = self.get_version_export_path(suffix=None, with_expansion=with_expansion)
         prefixes = [(prefix, get_export_key_pattern(prefix))]
-        if self.owns_legacy_export_path():
-            legacy_prefix = self.get_legacy_version_export_path(suffix=None)
+        if self.owns_legacy_export_path(with_expansion, deleting):
+            legacy_prefix = self.get_legacy_version_export_path(suffix=None, with_expansion=with_expansion)
             prefixes.append((legacy_prefix, get_export_key_pattern(legacy_prefix)))
         return prefixes
 
@@ -1056,9 +1082,15 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         for prefix, key_pattern in self.get_export_key_prefixes():
             service.delete_objects(prefix, key_pattern=key_pattern)
 
-    def get_export_paths_to_delete(self):
-        return self.get_export_key_prefixes() + [
-            (path, None) for path in self.external_exports.values_list('file_path', flat=True)]
+    def get_export_paths_to_delete(self, deleting=()):
+        """
+        Also the prefixes without the default expansion: a version exported before it had one keeps that export.
+        deleting: ids of the versions deleted with this one, as in owns_legacy_export_path.
+        """
+        prefixes = self.get_export_key_prefixes(deleting=deleting)
+        if self.get_version_export_path(suffix=None, with_expansion=False) != prefixes[0][0]:
+            prefixes += self.get_export_key_prefixes(with_expansion=False, deleting=deleting)
+        return prefixes + [(path, None) for path in self.external_exports.values_list('file_path', flat=True)]
 
     @staticmethod
     def delete_export_paths(export_paths, sync=False):
@@ -1174,6 +1206,36 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             return criteria | Q(**{f'{user_field}__organizations__id': self.organization_id})
         return criteria | Q(**{f'{user_field}_id': self.user_id})
 
+    @classmethod
+    def get_viewable_versions_criteria(cls, user):
+        """
+        has_view_access as a query on the active repository versions `user` can view: public ones whose HEAD is
+        public too, and their own or their orgs' otherwise. None for staff, who can view every version. An inactive
+        version (deleted, or its owner's deactivated) is left out, as its own lists answer 404.
+        """
+        if get(user, 'is_staff'):
+            return None
+        # A version shares its mnemonic and owner with its HEAD (its active one, as `head` reads it). One of
+        # organization_id and user_id is NULL, and NULL never equals, so the OR matches on the owner that is set.
+        private_head = cls.objects.filter(
+            Q(organization_id=OuterRef('organization_id')) | Q(user_id=OuterRef('user_id')),
+            mnemonic=OuterRef('mnemonic'), version=HEAD, is_active=True).exclude(
+            public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        criteria = Q(public_access__in=cls.PUBLIC_ACCESS_VALUES)
+        if get(user, 'is_authenticated'):
+            own = Q(user_id=user.id) | Q(organization_id__in=user.organizations.values('id'))
+            criteria |= own
+            # Their own and their orgs' versions have their own or their orgs' HEADs, which the check leaves out.
+            # That keeps the check outside the OR, where the database can run it once for all versions.
+            private_head = private_head.exclude(own)
+        return Q(is_active=True) & criteria & ~Exists(private_head)
+
+    @classmethod
+    def get_viewable(cls, queryset, user):
+        """The repositories of `queryset` `user` can view (get_viewable_versions_criteria)."""
+        criteria = cls.get_viewable_versions_criteria(user)
+        return queryset if criteria is None else queryset.filter(criteria)
+
     @staticmethod
     def get_version_url_kwarg():
         return 'version'
@@ -1225,6 +1287,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         persisted = False
         obj.version = HEAD
+        obj.store_blank_access_as_none()
+        check_make_private(user, obj, None)  # a new private repository: the capability policy may refuse it
         try:
             obj.save(**kwargs)
             if obj.id:
@@ -1285,6 +1349,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             head = cls.objects.select_for_update().get(id=head.id)
             obj.apply_version_metadata_to_head(head)
             obj.update_version_data(head)
+            obj.store_blank_access_as_none()  # a HEAD stored blank before blanks were stored as None
             obj.save(**kwargs)
             # the default is settled while HEAD is locked, so a queued task can't see another HEAD
             expansion = obj.get_expansion_choice(expansion) or expansion
@@ -1330,44 +1395,75 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     def get_expansion_choice(self, expansion=None):  # pylint: disable=unused-argument
         return None
 
+    def store_blank_access_as_none(self):
+        """A blank access is private (public_can_view): it's stored as None, the value the lists read as private"""
+        if self.public_access == '':
+            self.public_access = ACCESS_TYPE_NONE
+
     def apply_version_metadata_to_head(self, head):
         pass
 
     @classmethod
-    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches
+    def persist_changes(cls, obj, updated_by, original_schema, **kwargs):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        """
+        Saves `obj` over its stored row. With keep_private=True the save never makes a private row viewable: it reads
+        the stored row under a row lock held through the save, and keeps that row's access when it's private, so a
+        concurrent write that makes it private isn't overwritten (a FHIR update, whose resource carries no access).
+        The tasks the save queues go once its transaction ends. keep_access=True keeps the stored row's access whatever
+        it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
+        with no lock, and the save runs under autocommit, as other REST writes do. A blank access is stored as None
+        instead, so that save writes it, under the lock.
+        """
+        keep_private = kwargs.pop('keep_private', False)
+        keep_access = kwargs.pop('keep_access', False)
+        lock = keep_private or (keep_access and cls.objects.filter(id=obj.id, public_access='').exists())
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
             errors['parent'] = SOURCE_PARENT_CANNOT_BE_NONE
 
         queue_schema_update_task = obj.is_validation_necessary()
-        original_repo = cls.objects.filter(id=obj.id).first()
-
-        is_source = cls.__name__ == 'Source'
-        should_reindex_resources = is_source and obj.released != original_repo.released
-        concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
-        should_sync_vectors = is_source and (
-            bool(obj.has_semantic_match_algorithm) != bool(original_repo.has_semantic_match_algorithm))
-
-        obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
-        obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
-
         try:
-            obj.full_clean()
-        except ValidationError as ex:
-            errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+            with transaction.atomic() if lock else nullcontext():
+                stored_rows = cls.objects.filter(id=obj.id)
+                # no key update, so a concurrent child write's foreign-key check on the row isn't blocked
+                original_repo = (stored_rows.select_for_update(no_key=True) if lock else stored_rows).first()
+                if keep_access or (keep_private and not original_repo.public_can_view):
+                    obj.public_access = original_repo.public_access
+                obj.store_blank_access_as_none()
 
-        if errors:
-            return errors
+                is_source = cls.__name__ == 'Source'
+                should_reindex_resources = is_source and obj.released != original_repo.released
+                concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
+                should_sync_vectors = is_source and (
+                    bool(obj.has_semantic_match_algorithm) != bool(original_repo.has_semantic_match_algorithm))
 
-        if updated_by:
-            obj.updated_by = updated_by
-        try:
-            if queue_schema_update_task:
-                target_schema = obj.custom_validation_schema
-                obj.custom_validation_schema = original_schema
+                obj._should_update_public_access = is_source and obj.public_access != original_repo.public_access  # pylint: disable=protected-access
+                obj._should_update_is_active = is_source and obj.is_active != original_repo.is_active  # pylint: disable=protected-access
 
-            obj.save(**kwargs)
+                try:
+                    obj.full_clean()
+                except ValidationError as ex:
+                    errors.update(get(ex, 'message_dict', {}) or get(ex, 'error_dict', {}))
+
+                if errors:
+                    return errors
+
+                if updated_by:
+                    obj.updated_by = updated_by
+                # a row made private, or moved while private: the capability policy may refuse it
+                check_make_private(obj.updated_by, obj, original_repo)
+                if queue_schema_update_task:
+                    target_schema = obj.custom_validation_schema
+                    obj.custom_validation_schema = original_schema
+
+                if keep_access and not lock:
+                    kwargs['update_fields'] = [
+                        field.name for field in cls._meta.concrete_fields
+                        if not field.primary_key and field.name != 'public_access']
+                obj.save(**kwargs)
+                if keep_access and not lock:  # the access the row has now, which a concurrent write may have changed
+                    obj.refresh_from_db(fields=['public_access'])
 
             if queue_schema_update_task:
                 from core.tasks.models import Task
@@ -1575,15 +1671,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @cached_property
     def version_export_path(self):
-        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
-        return self.get_version_export_path(suffix=f"{last_update}.zip")
+        return self.get_version_export_path_at(self.last_child_update)
 
-    def get_version_export_path(self, suffix='*'):
+    def get_version_export_path_at(self, last_child_update):
+        """The key of this version's export of its content as of last_child_update"""
+        return self.get_version_export_path(suffix=f"{last_child_update.strftime('%Y-%m-%d_%H%M%S')}.zip")
+
+    def get_version_export_path(self, suffix='*', with_expansion=True):
         owner = self.parent
         owner_type = f'{owner.get_url_kwarg()}s'
         # each dynamic part is one segment, so a version like 'a/b' can't pass for version 'a' with expansion 'b'
         parts = [owner.mnemonic, f'{self.resource_type.lower()}s', self.mnemonic, self.version]
-        expansion = get(self, 'expansion.mnemonic')
+        expansion = get(self, 'expansion.mnemonic') if with_expansion else None
         if expansion:
             parts.append(expansion)
         path = f"{owner_type}/" + '/'.join(quote(part, safe='') for part in parts) + '.'
@@ -1616,17 +1715,19 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         return path
 
-    def owns_legacy_export_path(self):
+    def owns_legacy_export_path(self, with_expansion=True, deleting=()):
         """
         True when no other source or collection version builds this version's legacy export prefix, so the keys
         under it can only be its own. Underscores in the old format also let a version stand in for an expansion
         (version 'a_b' and version 'a' with expansion 'b'), so every version of the owner whose mnemonic could
-        be part of the prefix is compared, not only this one's name variants.
+        be part of the prefix is compared, not only this one's name variants: with its default expansion and
+        without (an export made before it had one). deleting: ids of this model's versions deleted with this one (a
+        HEAD's), which can't keep a prefix from it.
         """
         from core.sources.models import Source
         from core.collections.models import Collection
 
-        legacy_path = self.get_legacy_version_export_path(suffix=None)
+        legacy_path = self.get_legacy_version_export_path(suffix=None, with_expansion=with_expansion)
         mnemonic = str(self.mnemonic)
         mnemonics = [mnemonic[:i] for i in range(1, len(mnemonic) + 1)]
         mnemonic_criteria = Q(mnemonic__in=mnemonics) | Q(mnemonic__startswith=mnemonic)
@@ -1634,11 +1735,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             candidates = model.objects.filter(
                 mnemonic_criteria, organization_id=self.organization_id, user_id=self.user_id)
             for candidate in candidates:
-                if isinstance(self, model) and candidate.id == self.id:
+                if isinstance(self, model) and (candidate.id == self.id or candidate.id in deleting):
                     continue
-                base = candidate.get_legacy_version_export_path(suffix=None, with_expansion=False).rstrip('.')
-                same_path = candidate.get_legacy_version_export_path(suffix=None) == legacy_path
-                if legacy_path.startswith(base) and same_path:
+                if legacy_path in (candidate.get_legacy_version_export_path(suffix=None, with_expansion=False),
+                                   candidate.get_legacy_version_export_path(suffix=None)):
                     return False
         return True
 
@@ -1996,8 +2096,15 @@ class CelerySignalProcessor(RealTimeSignalProcessor):
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                handle_save.apply_async(
-                    (instance.app_name, instance.model_name, instance.id), queue='indexing', permanent=False)
+                # once committed, so the task reads the row as saved. Deferred in a transaction, it's robust, so a
+                # failed enqueue doesn't stop the transaction's other callbacks (a version's seed task); at once under
+                # autocommit, its error reaches the write, as before
+                args = (instance.app_name, instance.model_name, instance.id)
+                connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
+                connection.on_commit(
+                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False),
+                    robust=connection.in_atomic_block,
+                )
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:

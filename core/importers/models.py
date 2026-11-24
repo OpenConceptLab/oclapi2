@@ -1,26 +1,38 @@
 import json
 import time
+import uuid
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery import group
 from celery.utils.log import get_task_logger
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
+from django.core.cache import cache as django_cache
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import F, Q
+from django.utils import timezone
 from ocldev.oclfleximporter import OclFlexImporter
 from pydash import compact, get
 
+from core.capabilities.constants import WRITE_ACTION_EDIT
+from core.capabilities.exceptions import WriteRefused
+from core.capabilities.writes import BatchWriteRefusals, get_own_write_action, get_write_target
 from core.celery import app
 from core.collections.models import Collection
 from core.common import ERRBIT_LOGGER
-from core.common.constants import HEAD, ALL
+from core.common.constants import HEAD, ALL, INDEX_BATCH_SIZE
+from core.common.models import BatchIndexRun
 from core.common.tasks import bulk_import_parts_inline, delete_organization, batch_index_resources, \
-    post_import_update_resource_counts, index_concepts_mapped_codes
+    post_import_update_resource_counts, index_concepts_mapped_codes, get_batch_index_relations, \
+    run_deferred_import_indexing
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
 from core.concepts.models import Concept
+from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, \
+    DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_FLAGS_SECONDS, \
+    DEFERRED_INDEX_REJECTED_RETRY_SECONDS, DEFERRED_INDEX_RUN_SECONDS, DEFERRED_INDEX_BEAT_SECONDS
 from core.mappings.models import Mapping
 from core.orgs.models import Organization
 from core.sources.constants import ISOLATED_METADATA_FIELDS, ISOLATED_VERSION_CONTENT_FAILED, \
@@ -115,7 +127,9 @@ class BaseResourceImporter:
     mandatory_fields = set()
     allowed_fields = []
 
-    def __init__(self, data, user, update_if_exists=False, cache=None, isolated=False):  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments
+            self, data, user, update_if_exists=False, cache=None, isolated=False, write_refusals=None
+    ):
         self.user = user
         self.data = data
         self.update_if_exists = update_if_exists
@@ -123,6 +137,17 @@ class BaseResourceImporter:
         self.index_resources = False
         self.cache = cache if cache is not None else {}
         self.isolated = isolated
+        self.write_refusals = write_refusals  # the write checks a batch shares; made on first use otherwise
+
+    def get_write_refusal(self, repository, action=WRITE_ACTION_EDIT):
+        """
+        For a write to an existing `repository` the user has edit access to: the WriteRefused the line fails with when
+        the capability policy refuses it, carrying the policy's body, or None to go ahead.
+        """
+        if self.write_refusals is None:
+            self.write_refusals = BatchWriteRefusals()
+        refusal = self.write_refusals.get(self.user, get_write_target(repository), action)
+        return None if refusal is None else WriteRefused(refusal)
 
     @classmethod
     def can_handle(cls, obj):
@@ -308,7 +333,10 @@ class SourceImporter(BaseResourceImporter):
     def process(self):
         source = Source(**self.data)
         if source.has_parent_edit_access(self.user):
-            errors = Source.persist_new(source, self.user)
+            try:
+                errors = Source.persist_new(source, self.user)
+            except WriteRefused as ex:  # a new private repository the capability policy refused: the line's result
+                return ex
             return errors or CREATED
         return PERMISSION_DENIED
 
@@ -317,6 +345,10 @@ class SourceImporter(BaseResourceImporter):
             source = self.get_queryset().first()
             try:
                 if source.has_parent_edit_access(self.user):
+                    # deleting the HEAD deletes the repository; deleting another version is an edit
+                    refusal = self.get_write_refusal(source, get_own_write_action(source, 'DELETE', None))
+                    if refusal is not None:
+                        return refusal
                     source.delete()
                     return DELETED
                 return PERMISSION_DENIED
@@ -358,8 +390,9 @@ class SourceVersionImporter(BaseResourceImporter):
             self.data['supported_locales'] = supported_locales.split(',')
 
     def __init__(  # pylint: disable=too-many-arguments
-            self, data, user, update_if_exists=False, cache=None, isolated_version=False, import_task_id=None):
-        super().__init__(data, user, update_if_exists, cache=cache)
+            self, data, user, update_if_exists=False, cache=None, isolated_version=False, import_task_id=None,
+            write_refusals=None):
+        super().__init__(data, user, update_if_exists, cache=cache, write_refusals=write_refusals)
         self.isolated_version = isolated_version
         self.import_task_id = import_task_id
 
@@ -374,6 +407,9 @@ class SourceVersionImporter(BaseResourceImporter):
             source.seeded_from = {'type': SEEDED_FROM_IMPORT, 'task': self.import_task_id}
         source._metadata_fields = list(self.data.keys())  # pylint: disable=protected-access
         if source.has_parent_edit_access(self.user):
+            refusal = self.get_write_refusal(source)
+            if refusal is not None:
+                return refusal
             errors = Source.persist_new_version(source, self.user)
             return errors or CREATED
         return PERMISSION_DENIED
@@ -556,12 +592,15 @@ class IsolatedVersionCommit:
         self.hierarchy_map = hierarchy_map or {}
         self.seen_concept_ids = set(seen_concept_ids or [])
         self.seen_mapping_ids = set(seen_mapping_ids or [])
+        self.superseded_ids = {'concept': set(), 'mapping': set()}  # ImportIndexer.deferred_superseded_ids
         self.content_failures = content_failures
 
     def add_seen(self, seen):
         self.seen_concept_ids.update(get(seen, 'concepts') or [])
         self.seen_mapping_ids.update(get(seen, 'mappings') or [])
         self.hierarchy_map.update(get(seen, 'hierarchy') or {})
+        for resource, ids in (get(seen, 'superseded') or {}).items():
+            self.superseded_ids[resource].update(ids)
 
     def add_runner_result(self, result):
         """Folds in one BulkImportInline part's result, so the parts are read once and not kept."""
@@ -585,13 +624,19 @@ class IsolatedVersionCommit:
         return Source.objects.filter(**{owner_filter: owner}, mnemonic=source, version=HEAD).first()
 
     def get_rejection(self, importer, needs_head=True):
-        """(True, result) when this version would be rejected. A HEAD the import itself creates isn't there yet."""
+        """
+        (True, result) when this version would be rejected: a WriteRefused when the capability policy refuses an edit
+        of HEAD, before anything changes it. A HEAD the import itself creates isn't there yet.
+        """
         is_clean = importer.clean()
         if not is_clean:
             return True, is_clean
         head = self.get_head()
         if (needs_head and not head) or (head and not head.has_edit_access(self.user)):
             return True, PERMISSION_DENIED
+        refusal = importer.get_write_refusal(head) if head else None
+        if refusal is not None:
+            return True, refusal
         return False, None
 
     def preflight(self, content_lines=()):
@@ -603,6 +648,8 @@ class IsolatedVersionCommit:
             raise ValidationError({'__all__': [SEED_FROM_IMPORT_NEEDS_UPDATE]})
         importer = SourceVersionImporter({**self.version_line}, self.user, self.update_if_exists, isolated_version=True)
         rejected, result = self.get_rejection(importer, needs_head=False)
+        if isinstance(result, WriteRefused):
+            raise result
         if rejected:
             raise ValidationError(result if isinstance(result, dict) else {'__all__': [{
                 False: ISOLATED_VERSION_LINE_INVALID, None: ISOLATED_VERSION_EXISTS,
@@ -661,9 +708,14 @@ class IsolatedVersionCommit:
                 if result != CREATED:
                     raise IsolatedVersionRollback(result)
         except IsolatedVersionRollback as ex:
+            self.dropped = None  # rolled back: HEAD kept everything
             return ex.result
         except ValidationError as ex:
+            self.dropped = None
             return get(ex, 'message_dict') or {'__all__': ex.messages}
+        # once the version is created: a rejected seed leaves them to the import's deferral, as their replacements
+        transaction.on_commit(lambda: head.queue_reindex(
+            self.superseded_ids['concept'], self.superseded_ids['mapping'], user=self.user))
         return CREATED
 
 
@@ -707,7 +759,10 @@ class CollectionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         if coll.has_parent_edit_access(self.user):
-            errors = Collection.persist_new(coll, self.user)
+            try:
+                errors = Collection.persist_new(coll, self.user)
+            except WriteRefused as ex:  # a new private repository the capability policy refused: the line's result
+                return ex
             return errors or CREATED
         return PERMISSION_DENIED
 
@@ -716,6 +771,10 @@ class CollectionImporter(BaseResourceImporter):
             collection = self.get_queryset().first()
             try:
                 if collection.has_parent_edit_access(self.user):
+                    # deleting the HEAD deletes the repository; deleting another version is an edit
+                    refusal = self.get_write_refusal(collection, get_own_write_action(collection, 'DELETE', None))
+                    if refusal is not None:
+                        return refusal
                     collection.delete()
                     return DELETED
                 return PERMISSION_DENIED
@@ -753,6 +812,9 @@ class CollectionVersionImporter(BaseResourceImporter):
     def process(self):
         coll = Collection(**self.data)
         if coll.has_parent_edit_access(self.user):
+            refusal = self.get_write_refusal(coll)
+            if refusal is not None:
+                return refusal
             errors = Collection.persist_new_version(obj=coll, user=self.user, sync=True)
             return errors or CREATED
         return PERMISSION_DENIED
@@ -770,8 +832,11 @@ class ConceptImporter(BaseResourceImporter):
         return 'Concept'
 
     def __init__(  # pylint: disable=too-many-arguments
-            self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None, isolated=False):
-        super().__init__(data, user, update_if_exists, cache=cache, isolated=isolated)
+            self, data, user, update_if_exists, skip_hierarchy_tasks=False, cache=None, isolated=False,
+            write_refusals=None
+    ):
+        super().__init__(
+            data, user, update_if_exists, cache=cache, isolated=isolated, write_refusals=write_refusals)
         self.skip_hierarchy_tasks = skip_hierarchy_tasks
         self.version = False
         self.instance = None
@@ -820,13 +885,16 @@ class ConceptImporter(BaseResourceImporter):
         self.parse()
         return True
 
-    def process(self):
+    def process(self):  # pylint: disable=too-many-return-statements
         parent = self.data.get('parent')
         errors = {}
         if not parent:
             errors['source'] = 'Not Found'
             return errors
         if parent.has_edit_access(self.user):
+            refusal = self.get_write_refusal(parent)
+            if refusal is not None:
+                return refusal
             if self.version:
                 self.instance = self.get_queryset().first().clone()
                 self.instance._counted = None  # pylint: disable=protected-access
@@ -862,6 +930,9 @@ class ConceptImporter(BaseResourceImporter):
             parent = self.data.get('parent')
             try:
                 if parent.has_edit_access(self.user):
+                    refusal = self.get_write_refusal(parent)
+                    if refusal is not None:
+                        return refusal
                     self.retire_resource(self.get_queryset().first())
                     return self.track_result(DELETED)
                 return PERMISSION_DENIED
@@ -883,8 +954,11 @@ class MappingImporter(BaseResourceImporter):
     def get_resource_type():
         return 'Mapping'
 
-    def __init__(self, data, user, update_if_exists, cache=None, isolated=False):  # pylint: disable=too-many-arguments
-        super().__init__(data, user, update_if_exists, cache=cache, isolated=isolated)
+    def __init__(  # pylint: disable=too-many-arguments
+            self, data, user, update_if_exists, cache=None, isolated=False, write_refusals=None
+    ):
+        super().__init__(
+            data, user, update_if_exists, cache=cache, isolated=isolated, write_refusals=write_refusals)
         self.version = False
         self.instance = None
 
@@ -1010,13 +1084,16 @@ class MappingImporter(BaseResourceImporter):
         self.parse()
         return True
 
-    def process(self):
+    def process(self):  # pylint: disable=too-many-return-statements
         parent = self.data.get('parent')
         errors = {}
         if not parent:
             errors['source'] = 'Not Found'
             return errors
         if parent.has_edit_access(self.user):
+            refusal = self.get_write_refusal(parent)
+            if refusal is not None:
+                return refusal
             if self.version:
                 queryset = self.get_queryset()
                 if queryset.count() > 1:
@@ -1056,6 +1133,9 @@ class MappingImporter(BaseResourceImporter):
             parent = self.data.get('parent')
             try:
                 if parent.has_edit_access(self.user):
+                    refusal = self.get_write_refusal(parent)
+                    if refusal is not None:
+                        return refusal
                     self.retire_resource(self.get_queryset().first())
                     return self.track_result(DELETED)
                 return PERMISSION_DENIED
@@ -1095,6 +1175,9 @@ class ReferenceImporter(BaseResourceImporter):
 
         if collection:
             if collection.has_edit_access(self.user):
+                refusal = self.get_write_refusal(collection)
+                if refusal is not None:
+                    return refusal
                 added_references, errors = collection.add_expressions(
                     self.get('data'), self.user, self.get('__cascade', False),
                     self.get('__transform', False)
@@ -1123,10 +1206,13 @@ class ReferenceImporter(BaseResourceImporter):
             return PERMISSION_DENIED
         return NOT_FOUND
 
-    def delete(self):  # pylint: disable=too-many-locals,too-many-branches
+    def delete(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-return-statements
         collection = self.get_queryset().first()
         if collection:  # pylint: disable=too-many-nested-blocks
             if collection.has_edit_access(self.user):
+                refusal = self.get_write_refusal(collection)
+                if refusal is not None:
+                    return refusal
                 expressions = self.get('references', None) or self.get(
                     'data', {}).get('expressions', [])
                 if expressions == [ALL]:
@@ -1159,7 +1245,10 @@ class ReferenceImporter(BaseResourceImporter):
 
 
 def should_index_import(index, lines):
-    """`index` as the request gave it; otherwise whether an import of this many lines is small enough to index."""
+    """
+    `index` as the request gave it; otherwise whether an import of this many lines is small enough to index as each
+    part finishes. An import that doesn't index then leaves it to the off-peak job (DeferredImportIndex).
+    """
     return lines <= settings.IMPORT_INDEX_MAX_LINES if index is None else index
 
 
@@ -1167,28 +1256,38 @@ class ImportIndexer:
     """
     Ends the indexing deferral for the concepts and mappings an import saved with _index=False: the versions it
     created or retired, their versioned objects and the versions they superseded. finish() resets their _index,
-    whether or not they get indexed, so later saves index them again. Unless the import doesn't index, it then queues
-    their batch indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of
-    the concepts the imported mappings come from.
+    whether or not they get indexed, so later saves index them again. If the import indexes, it then queues their batch
+    indexing, without forcing a refresh per batch, and an update of the mapped codes in the documents of the concepts
+    the imported mappings come from. If it doesn't, it records the same work for the off-peak job (DeferredImportIndex).
+
+    deferred_superseded_ids: the versions an import that doesn't index superseded. When it seeds a version, the seed's
+    commit indexes them once the version is created (IsolatedVersionCommit, Source.queue_reindex): their documents
+    would still say they're HEAD's latest versions, and keep the names of versions that held them, so searches of HEAD,
+    and of a later version of the same name, would find them next to the versions that replaced them
+    (OpenConceptLab/ocl_online#744). The new version indexes those.
     """
     CHUNK_SIZE = 5000
 
-    def __init__(self, index=True):
+    def __init__(self, index=True, task_id=None):
         self.index = index
+        self.task_id = task_id  # the import task (or part) that saved the rows, for the deferred record
         self.ids = {'concept': set(), 'mapping': set()}
+        self.superseded_ids = {'concept': set(), 'mapping': set()}  # the versions the import demoted, of self.ids
         self.mapped_concept_ids = set()
 
     def add(self, instance):
         resource = {Concept: 'concept', Mapping: 'mapping'}.get(type(instance))
         if not resource or not instance.id or instance.should_index:
             return  # nothing saved, or saved with _index=True, which indexes it
+        superseded = compact([
+            get(instance, 'prev_latest_version_id'), *(get(instance, 'stale_latest_version_ids') or [])])
         self.ids[resource].update(compact([
             instance.versioned_object_id,
-            get(instance, 'prev_latest_version_id'),
-            *(get(instance, 'stale_latest_version_ids') or []),
+            *superseded,
             get(instance, 'latest_version_id'),
             instance.id,
         ]))
+        self.superseded_ids[resource].update(superseded)
         if resource == 'mapping' and instance.from_concept_id and instance.from_source_id == instance.parent_id:
             self.mapped_concept_ids.add(instance.from_concept_id)
         if resource == 'mapping' and get(instance, 'replaced_from_concept_id'):
@@ -1199,18 +1298,25 @@ class ImportIndexer:
         for resource, model in (('concept', Concept), ('mapping', Mapping)):
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
                 model.objects.filter(id__in=chunk, _index=False).update(_index=True)
-        if self.index:
-            for resource in ('concept', 'mapping'):
-                for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
-                    batch_index_resources.apply_async(
-                        (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
-            for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
-                index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+        if not self.index:
+            DeferredImportIndex.record(self)
+            return
+        for resource in ('concept', 'mapping'):
+            for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
+                batch_index_resources.apply_async(
+                    (resource, {'id__in': chunk}, True, False), queue='indexing', permanent=False)
+        for chunk in chunks(sorted(self.get_mapped_concept_ids() - self.ids['concept']), self.CHUNK_SIZE):
+            index_concepts_mapped_codes.apply_async((chunk,), queue='indexing', permanent=False)
+
+    @property
+    def deferred_superseded_ids(self):
+        return {} if self.index else {resource: sorted(ids) for resource, ids in self.superseded_ids.items() if ids}
 
     def get_mapped_concept_ids(self):
         """
-        The concepts the imported mappings come from, with their versioned objects and latest versions. Older versions
-        are left as they were indexed, as their releases were.
+        The concepts the imported mappings come from, with their versioned objects and latest versions, and the older
+        versions no release holds, which read HEAD's codes too. Older versions a release holds are left as they were
+        indexed, as their releases were.
         """
         ids = set()
         for chunk in chunks(sorted(self.mapped_concept_ids), self.CHUNK_SIZE):
@@ -1221,7 +1327,262 @@ class ImportIndexer:
             ids.update(versioned_ids)
             ids.update(Concept.objects.filter(
                 versioned_object_id__in=versioned_ids, is_latest_version=True).values_list('id', flat=True))
+            ids.update(Concept.get_unreleased_older_ids(versioned_ids))
         return ids
+
+
+class DeferredImportIndex(models.Model):
+    """
+    Search indexing that an import left for later (OpenConceptLab/ocl_online#268): what one import part would have
+    indexed as it finished, had it been within IMPORT_INDEX_MAX_LINES or sent with index=true. Each row is one stage of
+    up to ImportIndexer.CHUNK_SIZE ids, deleted once done, so this table is exactly what's still waiting. run() works
+    through it every few minutes:
+    - INDEX: a full index of the versions the part created or retired, their versioned objects and latest versions;
+    - MAPPED_CODES: the mapped codes in the documents of the concepts the part's mappings come from.
+      These two run only while IMPORT_INDEX_WINDOW is open, oldest part first, INDEX_BATCH_SIZE ids at a time.
+    - LATEST_FLAGS: the documents of the versions the part superseded, which still say they're the latest. A partial
+      update that re-embeds nothing, so it runs whenever the job does, but only once a version's replacement has a
+      document flagged latest: until then, the old document is the only one search finds. The others wait. A version
+      with no document goes to an INDEX row instead, to be fully indexed in the window. An INDEX row hands over to
+      this stage the versions that were superseded since, while their replacements aren't searchable.
+    """
+    class Meta:
+        db_table = 'deferred_import_indexes'
+
+    class Stage(models.IntegerChoices):
+        INDEX = 1, 'index'
+        MAPPED_CODES = 2, 'mapped codes'
+        LATEST_FLAGS = 3, 'latest flags'
+
+    DONE, WAITING, FAILED = 'done', 'waiting', 'failed'  # what process() did with a row
+
+    group = models.UUIDField()  # one import part's rows
+    created_at = models.DateTimeField()  # when the part finished; shared by its rows, so parts run in turn
+    stage = models.PositiveSmallIntegerField(choices=Stage.choices)
+    resource = models.CharField(max_length=16)  # 'concept' or 'mapping'
+    ids = ArrayField(models.BigIntegerField())  # what's left to do
+    task_id = models.CharField(max_length=255, null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)  # failures, not counting Elasticsearch refusing writes
+    last_error = models.TextField(null=True, blank=True)
+    retry_at = models.DateTimeField(null=True, blank=True)  # after a failure, not tried again until then
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def record(cls, indexer):
+        """Records what an ImportIndexer that doesn't index would have queued."""
+        concept_ids = indexer.ids['concept'] - indexer.superseded_ids['concept']
+        stages = [
+            (cls.Stage.INDEX, 'concept', concept_ids),
+            (cls.Stage.INDEX, 'mapping', indexer.ids['mapping'] - indexer.superseded_ids['mapping']),
+            (cls.Stage.MAPPED_CODES, 'concept', indexer.get_mapped_concept_ids() - concept_ids),
+            (cls.Stage.LATEST_FLAGS, 'concept', indexer.superseded_ids['concept']),
+            (cls.Stage.LATEST_FLAGS, 'mapping', indexer.superseded_ids['mapping']),
+        ]
+        part = {'group': uuid.uuid4(), 'created_at': timezone.now(), 'task_id': indexer.task_id}
+        rows = [
+            cls(stage=stage, resource=resource, ids=chunk, **part)
+            for stage, resource, ids in stages for chunk in chunks(sorted(ids), ImportIndexer.CHUNK_SIZE)
+        ]
+        cls.objects.bulk_create(rows)
+        if rows:
+            logger.info(
+                'Import %s deferred the indexing of %s concepts and %s mappings to IMPORT_INDEX_WINDOW',
+                indexer.task_id, len(indexer.ids['concept']), len(indexer.ids['mapping']))
+        return rows
+
+    @staticmethod
+    def get_window():
+        """
+        IMPORT_INDEX_WINDOW's (start, end) times in UTC, or None when it's empty, not 'HH:MM-HH:MM', or shorter than the
+        time between beat's runs, which might then never fall in it.
+        """
+        value = (settings.IMPORT_INDEX_WINDOW or '').strip()
+        if not value:
+            return None
+        try:
+            start, end = (datetime.strptime(part.strip(), '%H:%M').time() for part in value.split('-'))
+        except ValueError:
+            logger.error('IMPORT_INDEX_WINDOW %r is not HH:MM-HH:MM, so deferred import indexing is paused', value)
+            return None
+        minutes = (end.hour * 60 + end.minute - start.hour * 60 - start.minute) % (24 * 60)
+        if minutes * 60 < DEFERRED_INDEX_BEAT_SECONDS:
+            logger.error(
+                'IMPORT_INDEX_WINDOW %r is shorter than the %s minutes between runs, so deferred import indexing is '
+                'paused', value, DEFERRED_INDEX_BEAT_SECONDS // 60)
+            return None
+        return start, end
+
+    @classmethod
+    def is_window_open(cls, now=None):
+        """Whether `now` (default: the current time) is in IMPORT_INDEX_WINDOW, which can span midnight."""
+        window = cls.get_window()
+        if not window:
+            return False
+        start, end = window
+        current = (now or timezone.now()).astimezone(dt_timezone.utc).time()
+        return start <= current < end if start <= end else (current >= start or current < end)
+
+    @classmethod
+    def get_pending(cls):
+        """
+        The rows to do now, oldest part first: not those waiting to be retried after a failure, nor those that failed
+        DEFERRED_INDEX_MAX_ATTEMPTS times, which stay in the table with their errors until someone resets attempts.
+        """
+        return cls.objects.filter(attempts__lt=DEFERRED_INDEX_MAX_ATTEMPTS).filter(
+            Q(retry_at__isnull=True) | Q(retry_at__lte=timezone.now())).order_by('created_at', 'group', 'stage', 'id')
+
+    @classmethod
+    def run(cls):
+        """
+        Updates the superseded versions whose replacements are searchable now. While the window is open, it also
+        indexes the INDEX and MAPPED_CODES rows in order, updating the superseded versions again every
+        DEFERRED_INDEX_FLAGS_SECONDS and at the end, all within about DEFERRED_INDEX_RUN_SECONDS: a third for the
+        opening pass over the latest flags, a third for the indexing (or more, up to two thirds, when that pass was
+        quick), and the rest for the closing pass. If indexing is left, it queues the next run behind the indexing
+        tasks queued meanwhile, so they share the worker. Outside the window there's only the latest flags to do, and
+        the pass goes through all of them. Returns how many rows it finished.
+
+        One runner at a time: a run holds a lock it renews before each batch, and stops if the lock is no longer its
+        own. The lock expires if its runner dies, so a later run picks up where it stopped.
+        """
+        if not cls.objects.exists():
+            return 0
+        token = uuid.uuid4().hex
+        if not django_cache.add(DEFERRED_INDEX_LOCK_KEY, token, timeout=DEFERRED_INDEX_LOCK_SECONDS):
+            return 0
+        started_at = time.monotonic()
+        third = DEFERRED_INDEX_RUN_SECONDS / 3
+        deadline = None  # the indexing's
+
+        def keep_going(indexing=True):
+            """Whether to start another batch: the lock is still this run's, and for indexing, time is left."""
+            if django_cache.get(DEFERRED_INDEX_LOCK_KEY) != token:
+                return False
+            django_cache.touch(DEFERRED_INDEX_LOCK_KEY, timeout=DEFERRED_INDEX_LOCK_SECONDS)
+            return not indexing or (time.monotonic() < deadline and cls.is_window_open())
+
+        resume = False
+        try:
+            done = cls.update_latest_flags(keep_going, started_at + third if cls.is_window_open() else None)
+            if cls.is_window_open():  # again: the pass may have taken it into the window
+                flagged_at = time.monotonic()
+                deadline = max(started_at + 2 * third, flagged_at + third)
+                for row in iter(lambda: cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).first(), None):
+                    if row.process(keep_going) != cls.DONE:
+                        break  # out of time, the window closed, the lock was lost, or the row failed
+                    done += 1
+                    if time.monotonic() - flagged_at >= DEFERRED_INDEX_FLAGS_SECONDS:
+                        done += cls.update_latest_flags(keep_going, deadline)
+                        flagged_at = time.monotonic()
+                done += cls.update_latest_flags(keep_going, deadline + third)
+                resume = time.monotonic() >= deadline and keep_going(indexing=False) and cls.is_window_open() and \
+                    cls.get_pending().exclude(stage=cls.Stage.LATEST_FLAGS).exists()
+        finally:
+            if django_cache.get(DEFERRED_INDEX_LOCK_KEY) == token:
+                django_cache.delete(DEFERRED_INDEX_LOCK_KEY)
+        if resume:
+            run_deferred_import_indexing.apply_async(queue='indexing', expires=DEFERRED_INDEX_BEAT_SECONDS - 60)
+        logger.info('Deferred import indexing: %s row(s) done, %s waiting', done, cls.objects.count())
+        return done
+
+    @classmethod
+    def update_latest_flags(cls, keep_going, until=None):
+        """
+        Processes the LATEST_FLAGS rows, the ones checked longest ago first, until `until` (a time.monotonic() value;
+        None: no limit). Stops at a failure, or once keep_going says to. Returns how many rows it finished.
+        """
+        done = 0
+        for row in cls.get_pending().filter(stage=cls.Stage.LATEST_FLAGS).order_by('updated_at', 'id'):
+            if (until is not None and time.monotonic() >= until) or not keep_going(indexing=False):
+                break
+            result = row.process(keep_going)
+            if result == cls.FAILED:
+                break
+            done += result == cls.DONE
+        return done
+
+    def get_model(self):
+        return {'concept': Concept, 'mapping': Mapping}[self.resource]
+
+    def process(self, keep_going):
+        """
+        Works on this row, starting each batch only if keep_going() says so: DONE (and deleted), WAITING (kept, with
+        what's left) or FAILED. A failed row is held back, so the rows after it go on: for
+        DEFERRED_INDEX_REJECTED_RETRY_SECONDS if Elasticsearch was only refusing writes for now, which doesn't count as
+        an attempt; otherwise for DEFERRED_INDEX_RETRY_SECONDS, so an outage costs each row one attempt a night.
+        """
+        try:
+            finished = self.update_flags() if self.stage == self.Stage.LATEST_FLAGS else self.index(keep_going)
+        except Exception as ex:  # pylint: disable=broad-except
+            delay = DEFERRED_INDEX_REJECTED_RETRY_SECONDS
+            if not BatchIndexRun.is_rejected(ex):
+                self.attempts += 1
+                delay = DEFERRED_INDEX_RETRY_SECONDS
+            self.retry_at = timezone.now() + timedelta(seconds=delay)
+            self.last_error = BatchIndexRun.describe(ex)
+            self.save(update_fields=['attempts', 'last_error', 'retry_at', 'updated_at'])
+            logger.error('Deferred import indexing of row %s failed (attempt %s): %s', self.id, self.attempts,
+                         self.last_error)
+            return self.FAILED
+        if finished:
+            self.delete()
+            return self.DONE
+        return self.WAITING
+
+    def index(self, keep_going):
+        """
+        Indexes the row's ids INDEX_BATCH_SIZE at a time while keep_going() says to, without forcing a refresh, as the
+        import's own indexing does. Saves what's left after each batch. Whether it got through them all.
+        """
+        model = self.get_model()
+        while self.ids:
+            if not keep_going():
+                return False
+            batch = self.ids[:INDEX_BATCH_SIZE]
+            if self.stage == self.Stage.INDEX:
+                # superseded since, and rewriting them now would hide their concepts until their replacements are
+                # searchable: they wait in a LATEST_FLAGS row, usually the superseding import's own
+                waiting = model.get_ids_with_unsearchable_replacements(batch)
+                self.hand_over(self.Stage.LATEST_FLAGS, waiting)
+                if len(waiting) < len(batch):
+                    model.batch_index(
+                        model.objects.filter(id__in=[_id for _id in batch if _id not in waiting]),
+                        model.get_search_document(), refresh=False, **get_batch_index_relations(model))
+            else:
+                model.index_mapped_codes(model.objects.filter(id__in=batch))
+            self.ids = self.ids[INDEX_BATCH_SIZE:]
+            self.save(update_fields=['ids', 'updated_at'])
+        return True
+
+    def update_flags(self):
+        """
+        Updates the documents of the row's superseded versions whose replacements are searchable, hands those with no
+        document to an INDEX row, and keeps the others. Whether none are left.
+        """
+        model = self.get_model()
+        waiting = model.get_ids_with_unsearchable_replacements(self.ids)
+        ready = [_id for _id in self.ids if _id not in waiting]
+        if ready:
+            self.hand_over(self.Stage.INDEX, model.index_latest_flags(model.objects.filter(id__in=ready)))
+        if waiting:  # saved even when nothing changed, as updated_at puts it behind the others in the next pass
+            self.ids = sorted(waiting)
+            self.save(update_fields=['ids', 'updated_at'])
+        return not waiting
+
+    def hand_over(self, stage, ids):
+        """
+        Leaves these ids to a row of this part at `stage`, unless a row of that stage that isn't parked already has
+        them: an INDEX row indexes them a batch at a time in the window, a LATEST_FLAGS row once they can be updated.
+        """
+        if not ids:
+            return
+        others = self.__class__.objects.filter(
+            stage=stage, resource=self.resource, ids__overlap=list(ids), attempts__lt=DEFERRED_INDEX_MAX_ATTEMPTS)
+        ids = set(ids).difference(*others.values_list('ids', flat=True))
+        if ids:
+            self.__class__.objects.create(
+                group=self.group, created_at=self.created_at, stage=stage, resource=self.resource, ids=sorted(ids),
+                task_id=self.task_id)
 
 
 class BulkImportInline(BaseImporter):
@@ -1239,6 +1600,7 @@ class BulkImportInline(BaseImporter):
         self.seen_concept_ids = set()
         self.seen_mapping_ids = set()
         self.assigned_hierarchy = {}
+        self.indexer = None  # the run's ImportIndexer
         # Lookup cache shared across this run's items (see ConceptImporter/MappingImporter).
         # It caches misses too (None/False), so it's only safe because a chunk is single-resource-type
         # in the production parallel path (BulkImportParallelRunner.make_parts splits concepts and
@@ -1248,6 +1610,7 @@ class BulkImportInline(BaseImporter):
         # cache a "not found" for a concept created earlier in the same run. Don't share this cache
         # across resource types unless that invariant is re-verified.
         self.cache = {}
+        self.write_refusals = BatchWriteRefusals()  # every line's write check: one question per repository
         self.set_task()
         if input_list:
             self.input_list = input_list
@@ -1274,8 +1637,13 @@ class BulkImportInline(BaseImporter):
 
     def preflight_isolated_version(self, version_line):
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
-                Source.get_import_content_lines(self.input_list))
+            try:
+                IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                    Source.get_import_content_lines(self.input_list))
+            except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
+                self.permission_denied.append({**version_line, 'errors': ex.detail})
+                self.processed = 1  # of self.total, the lines submitted
+                self.input_list = []
 
     def set_task(self):
         self.task = Task.objects.filter(id=self.self_task_id).first()
@@ -1288,7 +1656,8 @@ class BulkImportInline(BaseImporter):
 
     def import_source_version(self, item):
         if not self.isolated_version:
-            return SourceVersionImporter(item, self.user, self.update_if_exists).run()
+            return SourceVersionImporter(
+                item, self.user, self.update_if_exists, write_refusals=self.write_refusals).run()
         commit = IsolatedVersionCommit(
             item, self.user, self.update_if_exists,
             hierarchy_map={**Concept.get_import_hierarchy_map(self.input_list, include_parentless=True),
@@ -1296,6 +1665,7 @@ class BulkImportInline(BaseImporter):
             seen_concept_ids=self.seen_concept_ids, seen_mapping_ids=self.seen_mapping_ids,
             content_failures=self.content_failures_count, import_task_id=self.self_task_id
         )
+        commit.add_seen({'superseded': self.indexer.deferred_superseded_ids})
         result = commit.run()
         self.dropped = commit.dropped
         return result
@@ -1309,6 +1679,10 @@ class BulkImportInline(BaseImporter):
             return
         if result == FAILED:
             self.failed.append(item)
+            return
+        if isinstance(result, WriteRefused):  # reported as a permission failure, with the capability policy's body
+            item['errors'] = result.detail
+            self.permission_denied.append(item)
             return
         if result == DELETED:
             self.deleted.append(item)
@@ -1362,7 +1736,7 @@ class BulkImportInline(BaseImporter):
             print("****STARTED SUBPROCESS****")
             print(f"TASK ID: {self.self_task_id}")
             print("***************")
-        indexer = ImportIndexer(self.index)
+        indexer = self.indexer = ImportIndexer(self.index, self.self_task_id)
         try:
             for original_item in self.input_list:
                 self.processed += 1
@@ -1380,7 +1754,8 @@ class BulkImportInline(BaseImporter):
                     )
                     continue
                 if item_type == 'source':
-                    source_importer = SourceImporter(item, self.user, self.update_if_exists)
+                    source_importer = SourceImporter(
+                        item, self.user, self.update_if_exists, write_refusals=self.write_refusals)
                     self.handle_item_import_result(
                         source_importer.delete() if action == 'delete' else source_importer.run(), original_item
                     )
@@ -1389,14 +1764,17 @@ class BulkImportInline(BaseImporter):
                     self.handle_item_import_result(self.import_source_version(item), original_item)
                     continue
                 if item_type == 'collection':
-                    collection_importer = CollectionImporter(item, self.user, self.update_if_exists)
+                    collection_importer = CollectionImporter(
+                        item, self.user, self.update_if_exists, write_refusals=self.write_refusals)
                     self.handle_item_import_result(
                         collection_importer.delete() if action == 'delete' else collection_importer.run(), original_item
                     )
                     continue
                 if item_type == 'collection version':
                     self.handle_item_import_result(
-                        CollectionVersionImporter(item, self.user, self.update_if_exists).run(), original_item
+                        CollectionVersionImporter(
+                            item, self.user, self.update_if_exists, write_refusals=self.write_refusals).run(),
+                        original_item
                     )
                     continue
                 if item_type == 'concept':
@@ -1404,7 +1782,7 @@ class BulkImportInline(BaseImporter):
                         concept_importer = ConceptImporter(
                             item, self.user, self.update_if_exists,
                             skip_hierarchy_tasks=self.skip_hierarchy_tasks and bool(item.get('id')),
-                            cache=self.cache, isolated=self.isolated
+                            cache=self.cache, isolated=self.isolated, write_refusals=self.write_refusals
                         )
                         _result = concept_importer.delete() if action == 'delete' else concept_importer.run()
                         indexer.add(concept_importer.instance)
@@ -1418,7 +1796,9 @@ class BulkImportInline(BaseImporter):
                 if item_type == 'mapping':
                     try:
                         mapping_importer = MappingImporter(
-                            item, self.user, self.update_if_exists, cache=self.cache, isolated=self.isolated)
+                            item, self.user, self.update_if_exists, cache=self.cache, isolated=self.isolated,
+                            write_refusals=self.write_refusals
+                        )
                         _result = mapping_importer.delete() if action == 'delete' else mapping_importer.run()
                         indexer.add(mapping_importer.instance)
                         self.seen_mapping_ids.update(compact([mapping_importer.get_seen_versioned_object_id(_result)]))
@@ -1428,7 +1808,8 @@ class BulkImportInline(BaseImporter):
                     self.handle_item_import_result(_result, original_item)
                     continue
                 if item_type == 'reference':
-                    reference_importer = ReferenceImporter(item, self.user, self.update_if_exists)
+                    reference_importer = ReferenceImporter(
+                        item, self.user, self.update_if_exists, write_refusals=self.write_refusals)
                     self.handle_item_import_result(
                         reference_importer.delete() if action == 'delete' else reference_importer.run(), original_item
                     )
@@ -1487,7 +1868,7 @@ class BulkImportInline(BaseImporter):
         if self.isolated and not self.isolated_version:
             self.result['seen'] = {
                 'concepts': sorted(self.seen_concept_ids), 'mappings': sorted(self.seen_mapping_ids),
-                'hierarchy': self.assigned_hierarchy}
+                'hierarchy': self.assigned_hierarchy, 'superseded': self.indexer.deferred_superseded_ids}
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
@@ -1522,8 +1903,12 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.index = should_index_import(index, self.total)
         version_line = Source.get_import_version_line(self.input_list, self.isolated_version)
         if version_line:
-            IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
-                Source.get_import_content_lines(self.input_list))
+            try:
+                IsolatedVersionCommit(version_line, self.user, self.update_if_exists).preflight(
+                    Source.get_import_content_lines(self.input_list))
+            except WriteRefused as ex:  # nothing imports: the version line is denied with the capability policy's body
+                self.isolated_version_results['permission_denied'] = [{**version_line, 'errors': ex.detail}]
+                self.input_list = []
         self.make_resource_distribution()
         self.make_parts()
         self.collect_concept_hierarchy_map()
@@ -1693,12 +2078,15 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         self.dropped = commit.dropped
         # the commit owns the hierarchy, so a rejected version leaves it untouched
         self.hierarchy_reconciliation_done = True
+        errors = result.detail if isinstance(result, WriteRefused) else result if isinstance(result, dict) else None
         self.isolated_version_results.setdefault(self.get_result_key(result), []).append(
-            {**version_line, 'errors': result} if isinstance(result, dict) else version_line)
+            version_line if errors is None else {**version_line, 'errors': errors})
         self.notify_progress()
 
     @staticmethod
     def get_result_key(result):
+        if isinstance(result, WriteRefused):  # as BulkImportInline reports it, with the capability policy's body
+            return 'permission_denied'
         if isinstance(result, dict):
             return 'failed'
         return {None: 'exists', False: 'invalid', CREATED: 'created', PERMISSION_DENIED: 'permission_denied'}.get(
@@ -1708,7 +2096,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         return self.total + int(self.has_hierarchy_reconciliation_step())
 
     def get_completed_progress(self):
-        return self.get_overall_tasks_progress() + int(
+        # the seeding version line is processed here, never in a part
+        return self.get_overall_tasks_progress() + sum(map(len, self.isolated_version_results.values())) + int(
             self.has_hierarchy_reconciliation_step() and self.hierarchy_reconciliation_done
         )
 
@@ -1828,6 +2217,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         for key, items in self.isolated_version_results.items():
             total_result[key] += items
             total_result['processed'] += len(items)
+        if self.isolated_version_results:  # the lines submitted: the parts hold all but the version line, or none
+            total_result['total'] = max(total_result['total'], self.total)
         total_result['start_time'] = self.start_time_formatted
         total_result['elapsed_seconds'] = self.elapsed_seconds
         total_result['child_resource_time_distribution'] = self.resource_wise_time

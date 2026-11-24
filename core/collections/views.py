@@ -17,13 +17,16 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.capabilities.exceptions import WriteRefused
 from core.client_configs.views import ResourceClientConfigsView
 from core.collections.constants import (
     INCLUDE_REFERENCES_PARAM, CONCEPT_VERSION_ADDED_TO_COLLECTION,
     MAPPING_VERSION_ADDED_TO_COLLECTION, CONCEPT_ADDED_TO_COLLECTION_FMT, MAPPING_ADDED_TO_COLLECTION_FMT,
     DELETE_FAILURE, DELETE_SUCCESS, NO_MATCH, VERSION_ALREADY_EXISTS,
     SOURCE_MAPPINGS,
-    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL)
+    UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
+    REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
+    REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
@@ -39,24 +42,25 @@ from core.collections.serializers import (
 from core.collections.utils import is_version_specified
 from core.common.constants import (
     HEAD, RELEASED_PARAM, PROCESSING_PARAM, OK_MESSAGE,
-    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER)
+    ACCESS_TYPE_NONE, INCLUDE_RETIRED_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, ALL, LATEST, DEPRECATED_API_HEADER,
+    INCLUDE_HEALTH)
 from core.common.exceptions import Http409, Http405, Http400
 from core.common.mixins import (
     ConceptDictionaryCreateMixin, ListWithHeadersMixin, ConceptDictionaryUpdateMixin,
     ConceptContainerExportMixin,
-    ConceptContainerProcessingMixin)
+    ConceptContainerProcessingMixin, RepoVersionListMixin)
 from core.common.permissions import (
     CanViewConceptDictionary, CanEditConceptDictionary, HasAccessToVersionedObject,
-    CanViewConceptDictionaryVersion
+    CanViewConceptDictionaryVersion, CanEditConceptDictionaryVersion
 )
 from core.common.serializers import TaskSerializer
 from core.common.swagger_parameters import q_param, compress_header, page_param, verbose_param, \
     include_facets_header, sort_asc_param, sort_desc_param, updated_since_param, include_retired_param, limit_param, \
-    canonical_url_param, all_versions_param, include_summary_param
+    canonical_url_param, all_versions_param, include_summary_param, include_health_param
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values, to_int
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -65,10 +69,12 @@ from core.concepts.views import ConceptCascadeView
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
 from core.mappings.search import MappingFacetedSearch
-from core.repos.mixins import RepoExternalExportMixin
+from core.repos.mixins import RepoExternalExportMixin, RepoListCSVMixin
 from core.repos.serializers import RepoExternalExportSerializer
 from core.sources.mixins import SummaryMixin
 from core.tasks.mixins import TaskMixin, IndexingTaskMixin
+from core.collections.reference_conversions import ReferenceConversions, CONVERSIONS, MAX_REFERENCES
+from core.common.tasks import convert_references
 from core.tasks.models import Task
 from core.tasks.serializers import TaskBriefSerializer
 from core.toggles.models import Toggle
@@ -113,7 +119,12 @@ class CollectionBaseView(BaseAPIView):
     def get_filter_params(self, default_version_to_head=True):
         query_params = self.request.query_params.dict()
 
-        version = query_params.get('version', None) or self.kwargs.get('version', None)
+        # a route that names a version reads it (as its search does, and as its writes act on it), so a different
+        # version in the query string is refused rather than read; routes that name none read the query string's
+        url_version, query_version = self.kwargs.get('version', None), query_params.get('version', None)
+        if url_version and query_version and query_version != url_version:
+            raise Http400(detail=f'The URL names version {url_version}; the query string names {query_version}.')
+        version = url_version or query_version
         if not version and default_version_to_head:
             version = HEAD
         if version == LATEST:
@@ -157,7 +168,9 @@ class CollectionVersionBaseView(CollectionBaseView):
         return super().get_filter_params(default_version_to_head)
 
 
-class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin):
+class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListWithHeadersMixin, RepoListCSVMixin):
+    csv_label = 'Collection'
+    csv_type_field = 'collection_type'
     serializer_class = CollectionListSerializer
     is_searchable = True
     es_fields = Collection.es_fields
@@ -202,35 +215,6 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
 
-    def get_csv_rows(self, queryset=None):  # pragma: no cover
-        if not queryset:
-            queryset = self.get_queryset()
-
-        values = queryset.values('mnemonic', 'name', 'full_name', 'collection_type', 'description', 'default_locale',
-                                 'supported_locales', 'website', 'external_id', 'updated_at', 'updated_by', 'uri')
-
-        for value in values:
-            value['Owner'] = Collection.objects.get(uri=value['uri']).parent.mnemonic
-            value['Collection ID'] = value.pop('mnemonic')
-            value['Collection Name'] = value.pop('name')
-            value['Collection Full Name'] = value.pop('full_name')
-            value['Collection Type'] = value.pop('collection_type')
-            value['Description'] = value.pop('description')
-            value['Default Locale'] = value.pop('default_locale')
-            value['Supported Locales'] = ",".join(value.pop('supported_locales'))
-            value['Website'] = value.pop('website')
-            value['External ID'] = value.pop('external_id')
-            value['Last Updated'] = value.pop('updated_at')
-            value['Updated By'] = value.pop('updated_by')
-            value['URI'] = value.pop('uri')
-
-        values.field_names.extend([
-            'Owner', 'Collection ID', 'Collection Name', 'Collection Full Name', 'Collection Type', 'Description',
-            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
-        ])
-        del values.field_names[0:12]
-        return values
-
 
 class CollectionLogoView(CollectionBaseView, BaseLogoView):
     serializer_class = CollectionDetailSerializer
@@ -246,6 +230,7 @@ class CollectionRetrieveUpdateDestroyView(
     CollectionBaseView, ConceptDictionaryUpdateMixin, RetrieveAPIView, UpdateAPIView, TaskMixin
 ):
     serializer_class = CollectionDetailSerializer
+    writes_own_object = True  # its DELETE deletes the repository, and its PUT/PATCH can publish it
 
     def get_object(self, queryset=None):
         instance = self.get_queryset().filter(is_active=True).order_by('-created_at').first()
@@ -289,6 +274,20 @@ class CollectionRetrieveUpdateDestroyView(
         return Response({'detail': get(result, 'messages', [DELETE_FAILURE])}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def get_reference_or_404(collection, reference_id):
+    """
+    The collection version's reference with this ID. A reference the version doesn't hold, or an ID no reference can
+    have, answers 404: versioned routes take any string, and IDs are ASCII digits only.
+    """
+    reference_id = str(reference_id)
+    reference = collection.references.filter(id=to_int(reference_id, None)).first() if (
+        reference_id.isascii() and reference_id.isdigit()) else None
+    if not reference:
+        raise Http404()
+
+    return reference
+
+
 class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = CollectionReferenceDetailSerializer
 
@@ -309,11 +308,7 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
         self.check_object_permissions(self.request, collection)
 
-        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
-        if not reference:
-            raise Http404()
-
-        return reference
+        return get_reference_or_404(collection, self.kwargs.get('reference'))
 
     def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         reference = self.get_object()
@@ -324,7 +319,11 @@ class CollectionReferenceView(CollectionBaseView, RetrieveAPIView, DestroyAPIVie
 
 
 class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeadersMixin):
-    def get_queryset(self):
+    def get_reference(self):
+        """
+        The reference in the URL. Its collection version answers 404 when it doesn't exist and 401 or 403 to those who
+        can't view it, and a reference that version doesn't hold, or an ID no reference can have, answers 404.
+        """
         collection = super().get_queryset().filter(is_active=True).order_by('-created_at').first()
 
         if not collection:
@@ -332,14 +331,18 @@ class CollectionReferenceAbstractResourcesView(CollectionBaseView, ListWithHeade
 
         self.check_object_permissions(self.request, collection)
 
-        reference = collection.references.filter(id=self.kwargs.get('reference')).first()
-        if not reference:
-            raise Http404()
+        return get_reference_or_404(collection, self.kwargs.get('reference'))
 
-        return reference
+    def get_queryset(self):
+        return self.get_reference()
 
     def get(self, request, *args, **kwargs):
+        self.get_reference()  # checks the version and reference before a search, its facets or a sort lists from them
         return self.list(request, *args, **kwargs)
+
+    def head(self, request, **kwargs):
+        self.get_reference()  # checks the version and reference before a search counts
+        return super().head(request, **kwargs)
 
 
 # Right now only for testing/debugging
@@ -525,9 +528,13 @@ class CollectionReferencesView(
         result = self.perform_task(add_references, task_args, queue='default')
         if isinstance(result, Response):
             return result
-        added_references_ids, errors = result
+        added_references_ids, errors = result[:2]
+        # an older worker's result has no third item
+        unresolved_reasons = dict(result[2]) if len(result) > 2 else {}
         if get(errors, 'error') == 'Collection not found':  # async task, collection may be deleted
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        if len(result) > 3 and result[3] is not None:  # the capability policy's refusal, kept apart from the errors
+            raise WriteRefused(result[3])
 
         added_references = CollectionReference.objects.filter(
             id__in=added_references_ids) if added_references_ids else []
@@ -549,9 +556,11 @@ class CollectionReferencesView(
                 added_original_expressions.add(expression)
 
         results = []
+        unresolved_items = self.get_unresolved_items(
+            collection, added_references, unresolved_reasons, self.request.user)
 
         for expression in added_original_expressions:
-            response_item = self.create_response_item(added_expressions, errors, expression)
+            response_item = self.create_response_item(added_expressions, errors, expression, unresolved_items)
             if response_item:
                 results.append(response_item)
 
@@ -563,23 +572,55 @@ class CollectionReferencesView(
     def should_cascade_mappings(self):
         return self.request.query_params.get('cascade', '').lower() == SOURCE_MAPPINGS
 
-    def create_response_item(self, added_expressions, errors, expression):
+    @staticmethod
+    def get_unresolved_items(collection, references, unresolved_reasons, user):
+        """{expression: response item} of the added include references its expansion found nothing for.
+        A repository version `user` can't view is left out, so it answers as one that doesn't exist."""
+        unresolved_refs = [reference for reference in references if reference.id in unresolved_reasons]
+        expansion = collection.expansion if unresolved_refs else None
+        if not expansion:
+            return {}
+        system_version_cache = {}
+        items = {}
+        for reference in unresolved_refs:
+            reason = unresolved_reasons[reference.id]
+            item = {'added': True, 'resolved': False, 'expression': reference.expression}
+            if reason == REFERENCE_VERSION_NOT_HELD:
+                named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
+                named_version = named_version if named_version and named_version.has_view_access(user) else None
+                item['repo_versions'] = [named_version.uri if named_version else reference.system]
+                message_format = REFERENCE_NAMED_VERSION_NOT_HELD_FMT if named_version else \
+                    REFERENCE_VERSION_NOT_HELD_FMT
+                item['message'] = message_format.format(
+                    collection.name, item['repo_versions'][0], reference.resource_version)
+            else:
+                item['repo_versions'] = reference.get_evaluated_repo_version_urls(
+                    expansion, user, system_version_cache)
+                message_format = REFERENCE_EXCLUDED_BY_PARAMETERS_FMT if reason == REFERENCE_EXCLUDED_BY_PARAMETERS \
+                    else REFERENCE_RESOLVED_TO_NOTHING_FMT
+                item['message'] = message_format.format(
+                    collection.name, ', '.join(item['repo_versions']) or 'any repository version')
+            items[reference.expression] = item
+        return items
+
+    def create_response_item(self, added_expressions, errors, expression, unresolved_items):
         adding_expression_failed = len(errors) > 0 and expression in errors
         if adding_expression_failed:
             return self.create_error_message(errors, expression)
-        return self.create_success_message(added_expressions, expression)
+        return self.create_success_message(added_expressions, expression, unresolved_items)
 
-    def create_success_message(self, added_expressions, expression):
-        message = self.select_update_message(expression)
-
+    def create_success_message(self, added_expressions, expression, unresolved_items):
         references = list(filter(lambda expr: expr.startswith(expression), added_expressions))
         if len(references) < 1:
             return None
 
+        if references[0] in unresolved_items:
+            return unresolved_items[references[0]]
+
         return {
             'added': True,
             'expression': references[0],
-            'message': message
+            'message': self.select_update_message(expression)
         }
 
     @staticmethod
@@ -619,6 +660,8 @@ class CollectionReferencesView(
 
 
 class CollectionReferencesPreview(CollectionBaseView):
+    writes_content = False  # evaluates references without adding them
+
     def get_permissions(self):
         # evaluating arbitrary expressions (with cascade) is expensive: collection editors only (ocl_online#230)
         return [CanEditConceptDictionary()]
@@ -671,6 +714,109 @@ class CollectionReferencesPreview(CollectionBaseView):
         return self.get_preview()
 
 
+class CollectionReferenceConversionsBaseView(CollectionBaseView):
+    """HEAD only: a released collection version's references are never converted"""
+    def get_permissions(self):
+        # evaluates many references, and only the collection's editors can convert them
+        return [CanEditConceptDictionary()]
+
+    def get_object(self, queryset=None):
+        instance = self.get_queryset().filter(version=HEAD, is_active=True).first()
+        if not instance:
+            raise Http404(NO_MATCH)
+        self.check_object_permissions(self.request, instance)
+        return instance
+
+
+class CollectionReferenceConversionsPreviewView(CollectionReferenceConversionsBaseView):
+    writes_content = False  # reports what converting would bring in, changes nothing
+
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'ids': openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Items(type=openapi.TYPE_INTEGER),
+                description=f'Reference ids, at most {MAX_REFERENCES}, or "*" for every resource-versioned reference'),
+            'offset': openapi.Schema(
+                type=openapi.TYPE_INTEGER, description=f'With "*": where to start; {MAX_REFERENCES} per page'),
+        }
+    ))
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        collection = self.get_object()
+        ids = request.data.get('ids')
+        try:
+            offset = max(int(request.data.get('offset') or 0), 0)
+        except (TypeError, ValueError):
+            return Response({'offset': ['must be a number']}, status=status.HTTP_400_BAD_REQUEST)
+        if ids == ALL:
+            candidates = ReferenceConversions.get_candidates(collection)
+            total = candidates.count()
+            references = list(candidates[offset:offset + MAX_REFERENCES])
+        elif isinstance(ids, list) and ids and len(ids) <= MAX_REFERENCES:
+            references = list(collection.references.filter(id__in=ids).order_by('id'))
+            total, offset = len(references), 0
+        else:
+            return Response(
+                {'ids': [f'a list of at most {MAX_REFERENCES} reference ids, or "*"']},
+                status=status.HTTP_400_BAD_REQUEST)
+        data = ReferenceConversions(collection, request.user).preview(references)
+        following = offset + len(references)
+        data['summary'].update(total=total, offset=offset, next_offset=following if following < total else None)
+        return Response(data)
+
+
+class CollectionReferenceConversionsView(CollectionReferenceConversionsBaseView, TaskMixin):
+    @swagger_auto_schema(request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'conversions': openapi.Schema(
+                type=openapi.TYPE_ARRAY, items=openapi.Items(type=openapi.TYPE_OBJECT),
+                description=f'[{{"id": reference id, "to": one of {", ".join(CONVERSIONS)}, "repo_version": optional, '
+                            'the version the preview showed; a conversion that now resolves elsewhere isn\'t made}]'),
+            'all': openapi.Schema(
+                type=openapi.TYPE_STRING, description='Instead of conversions: convert every resource-versioned '
+                                                      f'reference to this, one of {", ".join(CONVERSIONS)}'),
+        }
+    ))
+    def post(self, request, **kwargs):  # pylint: disable=unused-argument
+        collection = self.get_object()
+        conversions = self.get_conversions(collection)
+        if conversions is None:
+            return Response(
+                {'conversions': [f'a list of {{"id", "to"}} with "to" one of {", ".join(CONVERSIONS)}, or "all"']},
+                status=status.HTTP_400_BAD_REQUEST)
+        result = self.perform_task(convert_references, (request.user.id, collection.id, conversions), queue='default')
+        if isinstance(result, Response):
+            return result
+        if result.get('error'):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+        if result.get('refusal') is not None:
+            raise WriteRefused(result['refusal'])
+        return Response(result['results'])
+
+    def get_conversions(self, collection):
+        to_all = self.request.data.get('all')
+        if to_all:
+            if to_all not in CONVERSIONS:
+                return None
+            return [
+                {'id': reference_id, 'to': to_all}
+                for reference_id in ReferenceConversions.get_candidates(collection).values_list('id', flat=True)]
+        conversions = self.request.data.get('conversions')
+        if not isinstance(conversions, list) or not conversions:
+            return None
+        if not all(
+                isinstance(item, dict) and isinstance(item.get('id'), int) and item.get('to') in CONVERSIONS and
+                isinstance(item.get('repo_version') or '', str)
+                for item in conversions):
+            return None
+        # repo_version, optional: the version the preview showed, so a change since then is refused
+        return [
+            {'id': item['id'], 'to': item['to'], **({'repo_version': item['repo_version']} if item.get(
+                'repo_version') else {})}
+            for item in conversions]
+
+
 class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeadersMixin, CollectionReferencesMixin):
     is_page_size_capped = True
 
@@ -679,21 +825,33 @@ class CollectionVersionReferencesView(CollectionVersionBaseView, ListWithHeaders
             return CollectionReferenceDetailSerializer
         return CollectionReferenceSerializer
 
-    def get(self, request, *args, **kwargs):
-        query_params = self.request.query_params
-        search_query = query_params.get('q', '')
-        sort = query_params.get('search_sort', 'ASC')
+    def get_references(self):
+        """
+        The references GET lists: the collection version's, matching `q` and the filters. The version answers 404 when
+        it doesn't exist and 401 or 403 to those who can't view it.
+        """
         object_version = self.get_queryset().first()
         if not object_version:
             raise Http404()
-        self.check_object_permissions(request, object_version)
-        references = object_version.references.filter(expression__icontains=search_query)
-        references = self.apply_filters(references)
+        self.check_object_permissions(self.request, object_version)
+        references = object_version.references.filter(expression__icontains=self.request.query_params.get('q', ''))
+        return self.apply_filters(references)
+
+    def get(self, request, *args, **kwargs):
+        references = self.get_references()
+        sort = self.request.query_params.get('search_sort', 'ASC')
         self.object_list = references if sort == 'ASC' else list(reversed(references))
         return self.list(request, *args, **kwargs)
 
+    def head(self, request, **kwargs):  # pylint: disable=unused-argument
+        response = Response()
+        response['num_found'] = self.get_references().count()
+        return response
 
-class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin):
+
+class CollectionVersionListView(
+        RepoVersionListMixin, CollectionVersionBaseView, CreateAPIView, ListWithHeadersMixin
+):
     released_filter = None
     processing_filter = None
     default_qs_sort_attr = '-created_at'
@@ -703,7 +861,7 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionary(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_head(self):
         head = get(self.get_queryset().first(), 'head')
@@ -722,7 +880,7 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
         return CollectionVersionListSerializer
 
     def get(self, request, *args, **kwargs):
-        self.get_head()
+        self.check_repos_permissions()  # before `released`, so it answers for every repository the URL names
         self.released_filter = parse_boolean_query_param(request, RELEASED_PARAM, self.released_filter)
         self.processing_filter = parse_boolean_query_param(request, PROCESSING_PARAM, self.processing_filter)
         return self.list(request, *args, **kwargs)
@@ -733,7 +891,9 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
             raise Http404()
         version = request.data.pop('id', None)
         payload = {
-            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic, "name": head_object.name, **request.data,
+            "name": head_object.name, **request.data,
+            # the version is the URL's repository's, whatever the body says
+            "mnemonic": head_object.mnemonic, "id": head_object.mnemonic,
             "organization_id": head_object.organization_id, "user_id": head_object.user_id,
             'version': version
         }
@@ -759,17 +919,20 @@ class CollectionVersionListView(CollectionVersionBaseView, CreateAPIView, ListWi
         queryset = super().get_queryset()
         if self.released_filter is not None:
             queryset = queryset.filter(released=self.released_filter)
+        if not self.request.query_params.get('csv'):  # djqscsv can't write values() that carry annotations
+            queryset = Collection.annotate_expansion_health(queryset)
         return queryset.order_by('-created_at')
 
 
 class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, RetrieveAPIView, UpdateAPIView):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version it resolves to
 
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion(), ]
 
-        return [IsAuthenticated(), HasAccessToVersionedObject()]
+        return [IsAuthenticated(), CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         obj = self.get_queryset().first()
@@ -801,11 +964,12 @@ class CollectionLatestVersionRetrieveUpdateView(CollectionVersionBaseView, Retri
 
 class CollectionVersionRetrieveUpdateDestroyView(CollectionBaseView, RetrieveAPIView, UpdateAPIView, TaskMixin):
     serializer_class = CollectionVersionDetailSerializer
+    writes_own_object = True  # its PUT/PATCH can publish the version, and on HEAD/ its DELETE deletes the repository
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         instance = get_object_or_404(self.get_queryset())
@@ -860,9 +1024,10 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
         return ExpansionSerializer
 
     def get_permissions(self):
-        if self.request.method == 'GET':
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        # a new expansion changes what the version resolves to: an edit of it
+        return [CanEditConceptDictionaryVersion()]
 
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset())
@@ -916,7 +1081,7 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
 
 
 class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
-    """List all expansions across all versions of a collection."""
+    """List the expansions across the versions of a collection the requester can view."""
 
     def get_serializer_class(self):
         if self.is_verbose():
@@ -926,7 +1091,12 @@ class CollectionExpansionsView(CollectionBaseView, ListWithHeadersMixin):
     def get_queryset(self):
         instance = get_object_or_404(super().get_queryset())
         self.check_object_permissions(self.request, instance)
-        return Expansion.objects.filter(collection_version_id__in=instance.versions.values_list('id', flat=True))
+        # viewing HEAD doesn't make a private release's expansions visible: only versions the requester can view
+        versions = instance.versions
+        viewable = Collection.get_viewable_versions_criteria(self.request.user)
+        if viewable is not None:
+            versions = versions.filter(viewable)
+        return Expansion.objects.filter(collection_version_id__in=versions.values('id'))
 
     @swagger_auto_schema(
         manual_parameters=[verbose_param, include_summary_param, page_param, limit_param]
@@ -941,7 +1111,8 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
     def get_permissions(self):
         if self.request.method in ['GET', 'HEAD']:
             return [CanViewConceptDictionaryVersion()]
-        return [HasAccessToVersionedObject()]
+        # deleting or re-evaluating an expansion changes what the version resolves to: an edit of it
+        return [CanEditConceptDictionaryVersion()]
 
     def get_object(self, queryset=None):
         expansion = self.get_queryset().first()
@@ -956,23 +1127,27 @@ class CollectionVersionExpansionBaseView(CollectionBaseView):
         self.request.instance = version
         return version.expansions.filter(mnemonic=self.kwargs.get('expansion'))
 
+    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
+        """Every DELETE of an expansion leaves its version's default expansion in place."""
+        expansion = self.get_object()
+        if expansion.is_default:
+            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
+        self.perform_destroy(expansion)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class CollectionVersionExpansionView(CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (CanViewConceptDictionary, )
-
-    def destroy(self, request, *args, **kwargs):  # pylint: disable=unused-argument
-        obj = self.get_object()
-        if obj.is_default:
-            return Response({'errors': ['Cannot delete default expansion']}, status=status.HTTP_400_BAD_REQUEST)
-        obj.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CollectionVersionExpansionResolvedRepoUpdatesView(
     CollectionVersionExpansionBaseView, RetrieveAPIView, DestroyAPIView):
     serializer_class = ExpansionDetailSerializer
     permission_classes = (HasAccessToVersionedObject, )
+
+    def perform_destroy(self, instance):
+        instance.soft_delete()
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
@@ -1000,14 +1175,39 @@ class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseVie
 
 
 class CollectionVersionExpansionChildrenView(CollectionVersionExpansionBaseView, ListWithHeadersMixin):
+    health_resource_type = None
+
     def get_queryset(self):
         expansion = super().get_queryset().first()
 
         if not expansion:
             raise Http404()
 
+        self.expansion = expansion  # pylint: disable=attribute-defined-outside-init
         return expansion
 
+    def serialize_list(self, results, paginator=None):
+        data = super().serialize_list(results, paginator)
+        if self.request.query_params.get(INCLUDE_HEALTH) in get_truthy_values() and Expansion.is_health_on():
+            self.add_member_health(results, data['results'] if isinstance(data, dict) else data)
+        return data
+
+    def add_member_health(self, members, items):
+        """Each member of this page gets its class and the references that judged it, computed for this page"""
+        from core.collections.health import ExpansionHealth
+        members = list(members)
+        classes = ExpansionHealth(self.expansion).classify(self.health_resource_type, [member.id for member in members])
+        references_uri = f'{self.expansion.collection_version.uri}references/'
+        for member, item in zip(members, items):
+            # by the row's own id where it has one; the serializer keeps the page's order, so position matches too
+            member_id = int(item['uuid']) if item.get('uuid') else member.id
+            member_class, reference_ids, _ = classes.get(member_id, (None, [], False))
+            item['health'] = {
+                'class': member_class,
+                'references': [f'{references_uri}{reference_id}/' for reference_id in reference_ids]
+            }
+
+    @swagger_auto_schema(manual_parameters=[include_health_param])
     def get(self, request, *args, **kwargs):
         self.get_queryset()
         return self.list(request, *args, **kwargs)
@@ -1025,6 +1225,8 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
     facet_class = ConceptFacetedSearch
     default_qs_sort_attr = '-id'
 
+    health_resource_type = 'concepts'
+
     def get_serializer_class(self):
         from core.concepts.serializers import ConceptDetailSerializer, ConceptListSerializer
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
@@ -1040,6 +1242,8 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
     es_fields = Mapping.es_fields
     facet_class = MappingFacetedSearch
     default_qs_sort_attr = '-id'
+
+    health_resource_type = 'mappings'
 
     def get_serializer_class(self):
         from core.mappings.serializers import MappingDetailSerializer, MappingListSerializer
@@ -1414,6 +1618,8 @@ class ReferenceExpressionResolveView(APIView):
 
 
 class CollectionVersionExpansionProcessingView(CollectionVersionExpansionBaseView):
+    writes_content = False  # its POST only clears a processing flag
+
     def get_permissions(self):
         """Checked against the collection version. Clearing the flag needs staff or edit access to it."""
         if self.request.method == 'POST':

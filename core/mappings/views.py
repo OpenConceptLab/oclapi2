@@ -16,7 +16,7 @@ from core.common.swagger_parameters import (
     include_facets_header, updated_since_param, include_retired_param,
     compress_header, include_source_versions_param, include_collection_versions_param, search_from_latest_repo_header)
 from core.common.utils import to_int
-from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, SourceVersionListHeadMixin, \
+from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView
 from core.concepts.permissions import CanEditParentDictionary, CanViewParentDictionary
 from core.mappings.constants import PARENT_VERSION_NOT_LATEST_CANNOT_UPDATE_MAPPING
@@ -40,10 +40,11 @@ class MappingBaseView(SourceChildCommonBaseView):
         return MappingDetailSerializer(obj, data, files, partial)
 
     def get_queryset(self):
-        return Mapping.get_base_queryset(self.params)
+        return self.keep_to_viewable_query_versions(Mapping.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
 
 
-class MappingListView(SourceVersionListHeadMixin, MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
+class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
     is_page_size_capped = True
     serializer_class = MappingListSerializer
 
@@ -136,18 +137,16 @@ class MappingListView(SourceVersionListHeadMixin, MappingBaseView, ListWithHeade
     )
     def get(self, request, *args, **kwargs):
         self.set_parent_resource(False)
-        self.check_parent_permissions(request)
         return self.list(request, *args, **kwargs)
 
     def set_parent_resource(self, __pop=True):
-        from core.sources.models import Source
         source = self.kwargs.pop('source', None) if __pop else self.kwargs.get('source', None)
         collection = self.kwargs.pop('collection', None) if __pop else self.kwargs.get('collection', None)
         container_version = self.kwargs.pop('version', HEAD) if __pop else self.kwargs.get('version', HEAD)
         parent_resource = None
         filters = self.get_parent_owner_filters()
         if source:
-            parent_resource = Source.get_version(source, container_version or HEAD, filters)
+            parent_resource = self.get_url_source_version(source, container_version or HEAD, filters)
         if collection:
             from core.collections.models import Collection
             parent_resource = Collection.get_version(source, container_version or HEAD, filters)
@@ -195,7 +194,7 @@ class MappingRetrieveUpdateDestroyView(MappingBaseView, RetrieveAPIView, UpdateA
         return instance
 
     def get_permissions(self):
-        if self.request.method in ['GET']:
+        if self.request.method in ['GET', 'HEAD']:
             return [CanViewParentDictionary(), ]
 
         if self.request.method == 'DELETE' and self.is_hard_delete_requested():
@@ -258,7 +257,8 @@ class MappingCollectionMembershipView(MappingBaseView, ListWithHeadersMixin):
         return CollectionVersionListSerializer
 
     def get_object(self, queryset=None):
-        queryset = Mapping.get_base_queryset(self.params)
+        queryset = self.keep_to_viewable_query_versions(Mapping.get_base_queryset(
+            self.params, self.get_viewable_query_collection_versions()))
         if 'mapping_version' not in self.kwargs:
             queryset = queryset.filter(id=F('versioned_object_id'))
         instance = queryset.first()

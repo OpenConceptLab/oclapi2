@@ -6,7 +6,7 @@ import factory
 from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import transaction, connection
 from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock, call
 from rest_framework import status
@@ -25,7 +25,7 @@ from core.common.tasks import update_source_active_concepts_count
 from core.common.tasks import update_source_active_mappings_count
 from core.common.tasks import update_validation_schema
 from core.common.tasks import index_source_public_access
-from core.common.tests import OCLTestCase, OCLAPITestCase
+from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
@@ -107,7 +107,7 @@ class SourceViewsAPITest(OCLAPITestCase):
     def test_get_object_updates_active_counts_when_not_test_mode(
             self, update_concepts_apply_async_mock, update_mappings_apply_async_mock):
         source = OrganizationSourceFactory(created_by=self.admin, updated_by=self.admin)
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(source.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
         self.assertEqual(response.status_code, 200)
         update_concepts_apply_async_mock.assert_called()
@@ -150,7 +150,7 @@ class SourceViewsAPITest(OCLAPITestCase):
             mnemonic=source.mnemonic, organization=source.organization, version='v1',
             created_by=self.admin, updated_by=self.admin
         )
-        with override_settings(TEST_MODE=False):
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
             response = self.client.get(version.uri, HTTP_AUTHORIZATION=f"Token {self.admin_token}")
         self.assertEqual(response.status_code, 200)
         update_concepts_apply_async_mock.assert_called()
@@ -584,6 +584,73 @@ class SourceTest(OCLTestCase):
         v1.delete(force=True)
 
         clear_cache_mock.assert_called_once()
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch.object(Source, 'index_children_async', autospec=True)
+    @patch('core.common.models.batch_index_resources')
+    def test_deleting_a_version_indexes_its_former_members_again(
+            self, batch_index_resources_mock, index_children_async_mock):
+        """OpenConceptLab/ocl_online#744: their documents would keep the deleted version's name."""
+        head = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=head)
+        mapping = MappingFactory(parent=head)
+        v1 = OrganizationSourceFactory(
+            mnemonic=head.mnemonic, organization=head.organization, version='v1', released=True)
+        v2 = OrganizationSourceFactory(
+            mnemonic=head.mnemonic, organization=head.organization, version='v2', released=True)
+        v2.concepts.add(concept.get_latest_version())
+        v2.mappings.add(mapping.get_latest_version())
+        self.assertTrue(v2.is_latest_released)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            v2.delete(force=True)
+            batch_index_resources_mock.assert_not_called()  # the rows still belong to v2 until the delete commits
+
+        self.assertEqual(batch_index_resources_mock.call_args_list, [
+            call('concept', {'id__in': [concept.get_latest_version().id]}),
+            call('mapping', {'id__in': [mapping.get_latest_version().id]}),
+        ])
+        index_children_async_mock.assert_called_once_with(ANY, head.updated_by, {'is_in_latest_source_version': True})
+        self.assertEqual(index_children_async_mock.call_args[0][0].id, v1.id)  # the new latest release's members
+
+        batch_index_resources_mock.reset_mock()
+        index_children_async_mock.reset_mock()
+        v0 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v0')
+        v0.concepts.add(concept.get_latest_version())
+        with self.captureOnCommitCallbacks(execute=True):
+            v0.delete(force=True)
+
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
+        index_children_async_mock.assert_not_called()  # v0 wasn't the latest release, so no flag changes
+
+        # a failure after the rows are deleted (here, queueing the export cleanup) still reindexes the members
+        batch_index_resources_mock.reset_mock()
+        v3 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v3')
+        v3.concepts.add(concept.get_latest_version())
+        with patch('core.common.models.delete_s3_objects', Mock(apply_async=Mock(side_effect=ConnectionError))), \
+                self.assertRaises(ConnectionError), self.captureOnCommitCallbacks(execute=True):
+            v3.delete(force=True)
+        batch_index_resources_mock.assert_called_once_with('concept', {'id__in': [concept.get_latest_version().id]})
+
+    @patch('core.common.models.delete_s3_objects', Mock())
+    @patch('core.common.models.batch_index_resources')
+    def test_deleted_version_reindex_tasks_keep_their_arguments(self, batch_index_resources_mock):
+        """The version and its links are gone, so a failed chunk can only be rerun from its saved arguments."""
+        batch_index_resources_mock.name = 'core.common.tasks.batch_index_resources'
+        head = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=head)
+        v1 = OrganizationSourceFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        v1.concepts.add(concept.get_latest_version())
+
+        with override_settings(TEST_MODE=False), self.captureOnCommitCallbacks(execute=True):
+            v1.delete(force=True)
+
+        args = ['concept', {'id__in': [concept.get_latest_version().id]}]
+        batch_index_resources_mock.apply_async.assert_called_once_with(
+            args, task_id=ANY, queue='indexing', persist_args=True)
+        task = Task.objects.get(id=batch_index_resources_mock.apply_async.call_args[1]['task_id'])
+        self.assertEqual(
+            (task.name, task.queue, task.args), ('core.common.tasks.batch_index_resources', 'indexing', args))
 
     @patch('core.common.models.delete_s3_objects')
     def test_delete_clears_export_and_external_export_s3_objects(self, delete_s3_objects_mock):
@@ -2938,7 +3005,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source.active_mappings, None)
 
-        update_source_active_mappings_count(source.id)
+        update_source_active_mappings_count.run(source.id)
 
         source.refresh_from_db()
         self.assertEqual(source.active_mappings, 1)
@@ -2950,7 +3017,7 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(source.active_concepts, None)
 
-        update_source_active_concepts_count(source.id)
+        update_source_active_concepts_count.run(source.id)
 
         source.refresh_from_db()
         self.assertEqual(source.active_concepts, 1)
@@ -3400,3 +3467,28 @@ class SourceSupplementsTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data['supplements'], self.ICD10)
+
+
+class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
+    def test_get_mapped_sources_reads_the_target_sources_from_an_index(self):
+        source = OrganizationSourceFactory()
+        version = OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        concept = ConceptFactory(parent=source)
+        mapping = MappingFactory(
+            parent=source, from_concept=concept, to_concept=concept, from_source=source, to_source=source)
+        version.mappings.add(mapping)
+        with connection.cursor() as cursor:  # an all-visible table, as in production, lets an index answer alone
+            cursor.execute('vacuum (analyze) mappings')
+            cursor.execute('vacuum (analyze) mappings_sources')
+
+        for repo, index in ((source, 'mappings_head_parent_to_source'), (version, 'mappings_id_incl_to_source')):
+            # tiny tables let the planner read mappings by the plain to_source_id index; hide it, then roll back
+            sql, params = repo.get_mapped_source_ids().query.sql_with_params()
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute('drop index mappings_to_source_id_ee5ed6f2')
+                cursor.execute('set local enable_seqscan = off; set local enable_bitmapscan = off')
+                cursor.execute(f'explain {sql}', params)
+                plan = '\n'.join(row[0] for row in cursor.fetchall())
+                transaction.set_rollback(True)
+
+            self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)

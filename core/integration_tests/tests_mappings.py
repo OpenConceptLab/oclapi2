@@ -4,6 +4,7 @@ from django.test import override_settings, tag
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.common.mixins import FACETS_CACHE_SUFFIX
 from core.common.tests import OCLAPITestCase
 from core.concepts.tests.factories import ConceptFactory, ConceptNameFactory
 from core.integration_tests.test_utils import SourceChildListQueryCountMixin
@@ -1181,13 +1182,15 @@ class MappingListCacheTest(OCLAPITestCase):
 
     def test_repo_version_mappings_facets_are_cached(self):
         body_key, _ = self.source_v1.get_mappings_cache_keys()
-        facets_key = body_key + '?facetsOnly=true'
+        facets_key = body_key + '?facetsOnly=true' + FACETS_CACHE_SUFFIX
 
         response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/?facetsOnly=true')
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('facets', response.data)
-        self.assertEqual(cache.get(facets_key), response.data)
+        # cached as anyone sees them; answered as this requester (signed out: no updatedBy) sees them
+        cached = cache.get(facets_key)['facets']['fields']
+        self.assertLessEqual(response.data['facets']['fields'].items(), cached.items())
         self.assertIsNone(cache.get(body_key))  # facets do not collide with the plain listing
 
     def test_repo_version_mappings_facets_are_served_from_cache(self):
@@ -1196,7 +1199,7 @@ class MappingListCacheTest(OCLAPITestCase):
 
         self.assertEqual(self.client.get(url).status_code, 200)
 
-        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+        cache.set(body_key + '?facetsOnly=true' + FACETS_CACHE_SUFFIX, {'facets': {'fields': {'fromCache': []}}})
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
@@ -1209,7 +1212,7 @@ class MappingListCacheTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('facets', response.data)
-        self.assertIsNone(cache.get(body_key + '?facetsOnly=true'))
+        self.assertIsNone(cache.get(body_key + '?facetsOnly=true' + FACETS_CACHE_SUFFIX))
 
     def test_repo_version_mappings_with_search_are_not_cached(self):
         body_key, headers_key = self.source_v1.get_mappings_cache_keys()

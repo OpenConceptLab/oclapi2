@@ -7,7 +7,7 @@ from core.common.constants import RELEASED_PARAM, VERBOSE_PARAM, INCLUDE_RETIRED
     LAST_LOGIN_BEFORE_PARAM, LAST_LOGIN_SINCE_PARAM, DATE_JOINED_SINCE_PARAM, DATE_JOINED_BEFORE_PARAM, \
     CASCADE_HIERARCHY_PARAM, CASCADE_METHOD_PARAM, MAP_TYPES_PARAM, EXCLUDE_MAP_TYPES_PARAM, CASCADE_MAPPINGS_PARAM, \
     INCLUDE_MAPPINGS_PARAM, CASCADE_LEVELS_PARAM, CASCADE_DIRECTION_PARAM, ALL, RETURN_MAP_TYPES, OMIT_IF_EXISTS_IN, \
-    EQUIVALENCY_MAP_TYPES, CANONICAL_URL_REQUEST_PARAM, INCLUDE_SUMMARY
+    EQUIVALENCY_MAP_TYPES, CANONICAL_URL_REQUEST_PARAM, INCLUDE_SUMMARY, INCLUDE_HEALTH
 # HEADERS
 from core.orgs.constants import NO_MEMBERS
 
@@ -107,9 +107,12 @@ update_if_exists_param = openapi.Parameter(
 )
 index_param = openapi.Parameter(
     'index', openapi.IN_QUERY, type=openapi.TYPE_STRING,
-    description="Index the imported concepts and mappings for search as the import finishes: true | false. "
-                f"When omitted, imports of up to {settings.IMPORT_INDEX_MAX_LINES:,} lines are indexed and larger "
-                "ones aren't"
+    description="true | false. true indexes the imported concepts and mappings for search as the import finishes. "
+                "false leaves that to an off-peak job, which indexes them in its next window "
+                f"({settings.IMPORT_INDEX_WINDOW} UTC); until then they may be missing from search or show their "
+                "previous versions. When omitted, imports of up to "
+                f"{settings.IMPORT_INDEX_MAX_LINES:,} lines are indexed as they finish and larger ones are left to "
+                "that job"
 )
 seed_from_import_param = openapi.Parameter(
     'seed_from_import', openapi.IN_QUERY, type=openapi.TYPE_STRING, default='false',
@@ -214,6 +217,10 @@ cascade_view_hierarchy = openapi.Parameter(
 include_summary_param = openapi.Parameter(
     INCLUDE_SUMMARY, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
     description='Include summary counts of active concepts and mappings'
+)
+include_health_param = openapi.Parameter(
+    INCLUDE_HEALTH, openapi.IN_QUERY, type=openapi.TYPE_BOOLEAN, default=False,
+    description="Include each member's health class and the references that judged it, for this page"
 )
 
 task_state_param = openapi.Parameter(
