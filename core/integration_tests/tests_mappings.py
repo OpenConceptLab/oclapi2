@@ -1114,6 +1114,16 @@ class MappingListCacheTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, {'facets': {'fields': {'fromCache': []}}})
 
+    def test_repo_version_mappings_facets_ignore_answers_cached_before(self):
+        """An answer cached for one requester before facets were cached for anyone isn't read for another."""
+        body_key, _ = self.source_v1.get_mappings_cache_keys()
+        cache.set(body_key + '?facetsOnly=true', {'facets': {'fields': {'fromCache': []}}})
+
+        response = self.client.get(f'/orgs/{self.org}/sources/MapCacheSource/v1/mappings/?facetsOnly=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('fromCache', response.data['facets']['fields'])
+
     def test_head_version_mappings_facets_are_not_cached(self):
         body_key, _ = self.source.get_mappings_cache_keys()
 
