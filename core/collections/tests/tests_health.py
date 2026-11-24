@@ -903,6 +903,13 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertGreater(checked_at[self.expansion.id], tried_at)
         self.assertEqual(checked_at[other.id], tried_at)
 
+    @patch('core.collections.constants.EXPANSION_HEALTH_RECHECK_LIMIT', 1)
+    def test_a_nightly_recheck_takes_no_more_than_the_cap_whatever_limit_it_is_given(self):
+        other = self.another_default_expansion()
+        Expansion.objects.filter(id__in=[self.expansion.id, other.id]).update(health_is_current=None)
+
+        self.assertEqual(recheck_expansion_health(limit=5), 1)
+
     def test_a_nightly_recheck_with_a_limit_of_zero_queues_nothing(self):
         Expansion.objects.filter(id=self.expansion.id).update(health_is_current=None)
 

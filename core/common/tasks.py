@@ -532,8 +532,8 @@ def recheck_expansion_health(limit=None):
     expansion_ids = list(Expansion.objects.exclude(health_is_current=True).filter(
         is_processing=False, is_active=True, collection_version__is_active=True,
         collection_version__expansion_uri=F('uri')
-    ).order_by(F('health_checked_at').asc(nulls_first=True), 'id').values_list(
-        'id', flat=True)[:EXPANSION_HEALTH_RECHECK_LIMIT if limit is None else limit])
+    ).order_by(F('health_checked_at').asc(nulls_first=True), 'id').values_list('id', flat=True)[
+        :EXPANSION_HEALTH_RECHECK_LIMIT if limit is None else min(limit, EXPANSION_HEALTH_RECHECK_LIMIT)])
     if not expansion_ids:
         return 0
     spacing = EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS / len(expansion_ids)
