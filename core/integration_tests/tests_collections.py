@@ -4430,6 +4430,19 @@ class CollectionVersionConceptMappingsViewTest(OCLAPITestCase):
             sorted([self.mapping.url, self.mapping2.url])
         )
 
+    def test_retired_mappings_only_with_include_retired(self):
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        retired = MappingFactory(from_concept=self.concept, parent=self.source, retired=True)
+        self.expansion.mappings.add(self.mapping, retired)
+        url = self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true'
+
+        for query, expected in (('', [self.mapping]), ('&includeRetired=false', [self.mapping]),
+                                ('&includeRetired=true', [self.mapping, retired])):
+            response = self.client.get(url + query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(data['url'] for data in response.data), sorted(m.url for m in expected), query)
+
     def test_get_404(self):
         self.collection.expansion_uri = self.expansion.uri
         self.collection.save()

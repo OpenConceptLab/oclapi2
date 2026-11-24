@@ -2349,6 +2349,18 @@ class ConceptMappingsViewTest(OCLAPITestCase):
             sorted([str(direct_mapping.id), str(indirect_mapping.id)])
         )
 
+    def test_retired_mappings_only_with_include_retired(self):
+        active = MappingFactory(parent=self.concept.parent, from_concept=self.concept)
+        retired = MappingFactory(parent=self.concept.parent, from_concept=self.concept, retired=True)
+        mappings_url = self.concept.uri + 'mappings/'
+
+        for query, expected in (('', [active]), ('?includeRetired=false', [active]),
+                                ('?includeRetired=true', [active, retired])):
+            response = self.client.get(mappings_url + query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(mapping['uuid'] for mapping in response.data), sorted(str(m.id) for m in expected), query)
+
 
 class ConceptCascadeViewTest(OCLAPITestCase):
     def test_get_200_for_source_version(self):  # pylint: disable=too-many-statements
@@ -3917,6 +3929,19 @@ class ConceptRetiredFacetCountsTest(OCLAPITestCase):
         self.assertEqual(self.get_ids(url + '?conceptClass=classA&includeRetired=false'), ['ActiveA'])
         self.assertEqual(
             self.get_facet_counts(url + '?facetsOnly=true'), ({'classA': 2, 'classB': 1}, {'false': 2, 'true': 1}))
+
+    def test_collection_facet_viewable_recount_follows_the_retired_rule(self):
+        url = self.source.concepts_url + '?facetsOnly=true'
+        name = self.collection.mnemonic
+
+        def collection_count(query):
+            response = self.client.get(url + query)  # not staff: the collection facet is recounted
+            self.assertEqual(response.status_code, 200)
+            return {value: count for value, count, _ in response.data['facets']['fields']['collection']}.get(name)
+
+        self.assertEqual(collection_count(''), 2)
+        self.assertEqual(collection_count('&includeRetired=false'), 2)
+        self.assertEqual(collection_count('&includeRetired=true'), 3)
 
     def test_retired_filter_key_in_any_case(self):
         url = self.source.concepts_url
