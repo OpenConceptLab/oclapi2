@@ -207,6 +207,32 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
     return [reference.id for reference in added_references], errors, unresolved
 
 
+# QueueOnce, as export_source: its after_return replaces AsyncTask's, which stores a result as str(), so the
+# task's record keeps this one as JSON for a queued conversion's caller. The same request twice at once gets 409
+@app.task(base=QueueOnceCustomTask, bind=True)
+def convert_references(self, user_id, collection_id, conversions):
+    """Swaps a HEAD collection's resource-versioned references for repo-versioned or unversioned ones"""
+    from core.users.models import UserProfile
+    from core.collections.models import Collection
+    from core.collections.reference_conversions import ReferenceConversions
+    from core.capabilities.constants import WRITE_ACTION_EDIT
+    from core.capabilities.writes import get_write_refusal, get_write_target
+    user = UserProfile.objects.get(id=user_id)
+    collection = Collection.objects.filter(id=collection_id).first()
+    if not collection:
+        return {'error': 'Collection not found'}
+    refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
+    if refusal is not None:  # writable when queued, the collection may be read-only by now
+        return {'refusal': refusal}
+    if not collection.has_edit_access(user):  # an editor when queued may not be one by now
+        return {'error': 'You no longer have edit access to this collection'}
+    collection.add_processing(self.request.id)
+    try:
+        return {'results': ReferenceConversions(collection, user).convert(conversions, user)}
+    finally:
+        collection.remove_processing(self.request.id)
+
+
 def __handle_save(instance):
     if instance:
         registry.update(instance)

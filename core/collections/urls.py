@@ -106,6 +106,16 @@ urlpatterns = [
         name='collection-references'
     ),
     path(
+        '<str:collection>/references/conversions/',
+        views.CollectionReferenceConversionsView.as_view(),
+        name='collection-reference-conversions'
+    ),
+    path(
+        '<str:collection>/references/conversions/preview/',
+        views.CollectionReferenceConversionsPreviewView.as_view(),
+        name='collection-reference-conversions-preview'
+    ),
+    path(
         '<str:collection>/references/preview/',
         views.CollectionReferencesPreview.as_view(),
         name='collection-references-preview'
