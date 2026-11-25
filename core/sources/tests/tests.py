@@ -5,6 +5,7 @@ import time
 from types import SimpleNamespace
 
 import factory
+from celery.states import FAILURE
 import psycopg2
 from celery_once import AlreadyQueued
 from django.apps import apps
@@ -1000,6 +1001,39 @@ class SourceTest(OCLTestCase):
         task = Task.objects.get(name='seed_children_to_new_version')
         source_version.refresh_from_db()
         self.assertEqual(source_version._background_process_ids, [task.id])  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False, ES_SYNC=False)
+    @patch('core.common.models.seed_children_to_new_version.apply_async', Mock(side_effect=ConnectionError('down')))
+    def test_a_version_whose_seed_task_cant_be_queued_isnt_left_processing(self):
+        source = OrganizationSourceFactory(version=HEAD)
+        source_version = OrganizationSourceFactory.build(
+            version='v1', mnemonic=source.mnemonic, organization=source.organization)
+
+        with self.assertRaises(ConnectionError), self.captureOnCommitCallbacks(execute=True):
+            Source.persist_new_version(source_version, source.created_by)
+
+        task = Task.objects.get(name='seed_children_to_new_version')
+        self.assertEqual(task.state, FAILURE)
+        source_version.refresh_from_db()
+        self.assertFalse(source_version._background_process_ids)  # pylint: disable=protected-access
+
+    @override_settings(TEST_MODE=False, ES_SYNC=False)
+    @patch('core.sources.models.index_source_public_access')
+    def test_a_re_index_that_cant_be_queued_in_another_s_transaction_is_logged_and_not_left_processing(
+            self, index_task):
+        """Such as a FHIR update's: the error is only logged, as the source's own index enqueue's is."""
+        index_task.__name__ = 'index_source_public_access'
+        index_task.apply_async.side_effect = ConnectionError('down')
+        source = OrganizationSourceFactory(version=HEAD)
+
+        with self.assertLogs('django.test', 'ERROR'), self.captureOnCommitCallbacks(execute=True):
+            task = source.index_public_access_async()
+
+        index_task.apply_async.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.state, FAILURE)
+        source.refresh_from_db()
+        self.assertFalse(source._background_process_ids)  # pylint: disable=protected-access
 
     @override_settings(TEST_MODE=False)
     @patch('core.common.models.seed_children_to_new_version.apply_async')
@@ -3697,6 +3731,40 @@ class SourceAccessCascadeIndexEnqueueTest(SourceAccessCascadeMixin, OCLAPITransa
         self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
         # the transaction's later callbacks still ran: the children's re-index went
         self.index_public_access.apply_async.assert_called_once()
+
+
+class SourcePublicAccessEnqueueFailureTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    @override_settings(TEST_MODE=False, ES_SYNC=False)
+    def test_a_source_whose_re_index_cant_be_queued_isnt_left_processing(self):
+        self.index_public_access.apply_async.side_effect = ConnectionError('broker down')
+
+        with self.assertRaises(ConnectionError):
+            self.edit_access(ACCESS_TYPE_NONE)
+
+        task = Task.objects.get(name='index_source_public_access')
+        self.assertEqual(task.state, FAILURE)
+        self.source.refresh_from_db()
+        self.assertFalse(self.source._background_process_ids)  # pylint: disable=protected-access
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
+
+
+class ReleasePublicAccessEnqueueFailureTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    @override_settings(TEST_MODE=False, ES_SYNC=False)
+    def test_the_release_s_later_callbacks_run_when_its_re_index_cant_be_queued(self):
+        self.index_public_access.apply_async.side_effect = ConnectionError('broker down')
+        release = UserSourceFactory(user=self.user, mnemonic=self.source.mnemonic, version='v1')
+        ConceptFactory(parent=release)
+        rebuilt = Mock()
+
+        with patch.object(Source, 'index_release_rows_mapped_codes_async', lambda _: transaction.on_commit(rebuilt)):
+            with self.assertRaises(ConnectionError):
+                self.client.patch(
+                    release.uri, {'public_access': ACCESS_TYPE_NONE},
+                    HTTP_AUTHORIZATION='Token ' + self.user.get_token(), format='json')
+
+        rebuilt.assert_called_once_with()
+        release.refresh_from_db()
+        self.assertFalse(release._background_process_ids)  # pylint: disable=protected-access
 
 
 class SourceAccessCascadeChildCreatedMeanwhileTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
