@@ -4099,7 +4099,8 @@ class ExpansionTest(OCLTestCase):
         _, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
         CollectionReference(
             expression=f'{source_v1.uri}concepts/c1/', collection=collection, system=source_v1.uri, code='c1').save()
-        expansion.evaluated_source_versions.add(source_v1)
+        # a rebuild evaluates it in that version and records it as explicit
+        expansion.explicit_source_versions.add(source_v1)
 
         self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
 

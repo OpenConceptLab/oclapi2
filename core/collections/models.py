@@ -2567,7 +2567,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             version for _, version in self.resolve_system_version_entries(
                 get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM), default_namespace) if version.id
         ]
-        overridden_repos = {drop_version(version.uri) for version in system_versions}
         kept = {
             'explicit_source_versions': set(),
             'explicit_collection_versions': set(),
@@ -2617,9 +2616,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 kept['explicit_source_versions'].add(version.id)
                 continue
             evaluated_versions.append(version)
-            # a version its system names, unless system-version decides that repository; a bare one moves
-            if reference.names_repo_version and drop_version(version.uri) not in overridden_repos:
-                kept['evaluated_source_versions'].add(version.id)
         if CollectionReference.is_resource_version_repo_resolution_on():
             for latest, references in resource_versioned.values():
                 holders = CollectionReference.get_repo_versions_holding_resource_versions(references, latest)
