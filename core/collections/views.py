@@ -582,13 +582,13 @@ class CollectionReferencesView(
         expansion = collection.expansion if unresolved_refs else None
         if not expansion:
             return {}
-        system_version_cache = {}
+        system_version_cache, release_head_cache = {}, {}
         items = {}
         for reference in unresolved_refs:
             reason = unresolved_reasons[reference.id]
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
             release = None if reason == REFERENCE_EXCLUDED_BY_PARAMETERS else reference.get_release_added_after(
-                expansion, user, system_version_cache)
+                expansion, user, system_version_cache, release_head_cache)
             if release:
                 item['repo_versions'] = [release.uri]
                 item['message'] = REFERENCE_ADDED_AFTER_RELEASE_FMT.format(

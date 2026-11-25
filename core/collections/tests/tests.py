@@ -4464,6 +4464,26 @@ class ExpansionTest(OCLTestCase):
         release.save()
         self.assertIsNone(reference(code='c1').get_release_added_after(expansion, user))
 
+    def test_release_added_after_checks_a_release_s_access_and_head_once(self):
+        source = OrganizationSourceFactory()
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        ConceptFactory(parent=source, mnemonic='c1')
+        ConceptFactory(parent=source, mnemonic='c2')
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        system_version_cache, release_head_cache = {}, {}
+
+        with patch.object(Source, 'has_view_access', autospec=True, return_value=True) as has_view_access:
+            for code in ('c1', 'c2', 'c3'):
+                reference = CollectionReference(collection=collection, system=source.uri, code=code)
+                found = reference.get_release_added_after(
+                    expansion, collection.created_by, system_version_cache, release_head_cache)
+                self.assertEqual(found, None if code == 'c3' else release)
+
+        has_view_access.assert_called_once()
+        self.assertEqual(release_head_cache[release.id].id, source.id)
+
     def test_add_references_marks_include_references_that_add_nothing(self):
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source)
