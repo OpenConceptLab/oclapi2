@@ -1432,10 +1432,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         try:
             with transaction.atomic() if lock or cascade_atomically else nullcontext():
                 stored_rows = cls.objects.filter(id=obj.id)
-                # locked before the access is compared, so an overlapping access edit waits and then sees this one's;
-                # no key update, so a concurrent child write's foreign-key check on the row isn't blocked
-                original_repo = (
-                    stored_rows.select_for_update(no_key=True) if lock or cascade_atomically else stored_rows).first()
+                # an access edit locks before comparing, so an overlapping one waits and sees its access; one sending
+                # no access doesn't. No key update, so a child write's foreign-key check isn't blocked
+                locks_row = lock or (cascade_atomically and not keep_access)
+                original_repo = (stored_rows.select_for_update(no_key=True) if locks_row else stored_rows).first()
                 if keep_access or (keep_private and not original_repo.public_can_view):
                     obj.public_access = original_repo.public_access
                 obj.store_blank_access_as_none()

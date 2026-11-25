@@ -395,8 +395,8 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
 
     def test_a_rest_edit_that_sends_no_access_doesn_t_write_the_access_column(self):
         """
-        So a concurrent write's access stays whenever it commits, with no row lock: the edit runs under autocommit, as
-        other REST writes do. An edit that sends access writes it.
+        So a concurrent write's access stays whenever it commits, with no row lock. An edit that sends access writes
+        it, and a source's locks its row first, so an overlapping access edit waits for it.
         """
         for repo in (self.source, self.collection):
             table = type(repo)._meta.db_table  # pylint: disable=protected-access
@@ -412,7 +412,8 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                              '"name" = ' in sql and sql.endswith(row)]
                     self.assertEqual(len(saves), 1, saves)
                     self.assertEqual('"public_access" = ' in saves[0], writes)
-                    self.assertEqual([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')], [])
+                    locks = [sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')]
+                    self.assertEqual(len(locks), int(writes and repo is self.source), locks)
 
     def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
         """Its save leaves the column out, and it answers with the access the row has after it."""
