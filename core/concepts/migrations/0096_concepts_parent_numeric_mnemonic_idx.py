@@ -9,17 +9,20 @@ CREATE_NEW_INDEX = (
     "where id = versioned_object_id and mnemonic::text ~ '^\\d{1,18}$';"
 )
 MAX_ROWS_TO_BUILD_HERE = 3_000_000
+MAX_BYTES_TO_BUILD_HERE = 1024 ** 3  # for a table never analyzed, whose reltuples is -1
 
 
 def add_index(apps, schema_editor):  # pylint: disable=unused-argument
     with schema_editor.connection.cursor() as cursor:
         cursor.execute('select to_regclass(%s) is not null', [NEW_INDEX])
         if not cursor.fetchone()[0]:
-            cursor.execute('select reltuples from pg_class where oid = %s::regclass', [TABLE])
-            rows = cursor.fetchone()[0]
-            if rows > MAX_ROWS_TO_BUILD_HERE:
+            cursor.execute(
+                'select reltuples, pg_relation_size(oid) from pg_class where oid = %s::regclass', [TABLE])
+            rows, size = cursor.fetchone()
+            if rows > MAX_ROWS_TO_BUILD_HERE or (rows < 0 and size > MAX_BYTES_TO_BUILD_HERE):
+                found = f'about {rows:,.0f} rows' if rows >= 0 else f'{size / 1024 ** 3:,.1f} GB and was never analyzed'
                 raise RuntimeError(
-                    f'{TABLE} has about {rows:,.0f} rows: build {NEW_INDEX} by hand before deploying, '
+                    f'{TABLE} has {found}: build {NEW_INDEX} by hand before deploying, '
                     f'then migrate again. {CREATE_NEW_INDEX}')
             cursor.execute(CREATE_NEW_INDEX)
 
