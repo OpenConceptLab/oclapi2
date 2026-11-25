@@ -739,17 +739,24 @@ class SourceChildMixin(ChecksumModel):
         from core.collections.models import Expansion
         # the cascade takes the membership rows (a versioned object's, its versions' too), so expansions go first
         rows = self.__class__.objects.filter(versioned_object_id=self.id) if self.is_versioned_object else [self]
-        resources = f'{self.__class__.__name__.lower()}s'
         row_ids = [self.id, *[row.id for row in rows]]
-        after_delete = Expansion.mark_health_not_current_for_members(resources, row_ids)
-        # the source versions that lose these rows, HEAD aside: its caller recounts it
-        versions = list(self.sources.model.objects.filter(**{f'{resources}__id__in': row_ids}).exclude(
-            version=HEAD).distinct())
+        after_delete = Expansion.mark_health_not_current_for_members(f'{self.__class__.__name__.lower()}s', row_ids)
+        recount = self.recount_source_versions_after_delete(row_ids)
         result = super().delete(*args, **kwargs)
         after_delete()
-        for version in versions:
-            getattr(version, f'update_{resources}_count')()
+        recount()
         return result
+
+    @classmethod
+    def recount_source_versions_after_delete(cls, ids):
+        """
+        Read before rows are deleted: the source versions holding them, HEAD aside (its caller recounts it). Returns
+        what recounts those versions once the rows are gone, since the cascade takes their membership rows.
+        """
+        resources = f'{cls.__name__.lower()}s'
+        versions = list(cls._meta.get_field('sources').related_model.objects.filter(
+            **{f'{resources}__id__in': ids}).exclude(version=HEAD).distinct())
+        return lambda: [getattr(version, f'update_{resources}_count')() for version in versions]
 
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()

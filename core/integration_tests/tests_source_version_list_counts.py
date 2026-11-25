@@ -10,6 +10,7 @@ from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
+from core.users.models import UserProfile
 
 
 @override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
@@ -166,6 +167,20 @@ class SourceVersionListCountTest(OCLAPITestCase):
 
         for repo_version in (self.v1, self.v2):
             repo_version.refresh_from_db()
+            self.assertEqual(repo_version.active_concepts, 0)
+        response, _ = self.get('v1', 'concepts')
+        self.assertEqual(response['num_found'], '0')
+
+    def test_a_staff_db_hard_delete_of_a_concept_recounts_the_versions_holding_it(self):
+        token = UserProfile.objects.get(username='ocladmin').get_token()
+
+        response = self.client.delete(
+            self.concept.uri + '?db=true&hardDelete=true', HTTP_AUTHORIZATION='Token ' + token)
+
+        self.assertEqual(response.status_code, 204)
+        for repo_version in (self.v1, self.v2):
+            repo_version.refresh_from_db()
+            self.assertEqual(repo_version.concepts.count(), 1)  # the retired one
             self.assertEqual(repo_version.active_concepts, 0)
         response, _ = self.get('v1', 'concepts')
         self.assertEqual(response['num_found'], '0')
