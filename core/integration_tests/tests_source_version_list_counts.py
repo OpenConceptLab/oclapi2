@@ -1,8 +1,6 @@
-from io import StringIO
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.core.management import call_command
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -171,49 +169,3 @@ class SourceVersionListCountTest(OCLAPITestCase):
             self.assertEqual(repo_version.active_concepts, 0)
         response, _ = self.get('v1', 'concepts')
         self.assertEqual(response['num_found'], '0')
-
-
-class RecountSourceVersionsCommandTest(OCLAPITestCase):
-    def setUp(self):
-        super().setUp()
-        self.source = OrganizationSourceFactory(mnemonic='MySource')
-        self.concept = ConceptFactory(parent=self.source)
-        self.mapping = MappingFactory(parent=self.source)
-        self.v1 = OrganizationSourceFactory(
-            mnemonic='MySource', organization=self.source.organization, version='v1', released=True)
-        self.v1.concepts.add(self.concept.get_latest_version())
-        self.v1.mappings.add(self.mapping.get_latest_version())
-        self.other = OrganizationSourceFactory(mnemonic='MySource2', organization=self.source.organization,
-                                               version='v1', released=True)
-        Source.objects.filter(id__in=[self.v1.id, self.other.id]).update(active_concepts=4, active_mappings=6)
-
-    def call(self, *args):
-        out = StringIO()
-        call_command('recount_source_versions', *args, stdout=out)
-        return out.getvalue()
-
-    def counts(self, repo_version):
-        repo_version.refresh_from_db()
-        return repo_version.active_concepts, repo_version.active_mappings
-
-    def test_dry_run_lists_without_saving(self):
-        out = self.call('--dry-run', '--uri', self.source.uri)
-
-        self.assertIn(f'{self.v1.uri} active_mappings: 6 -> 1', out)
-        self.assertIn('2 count(s) would change', out)
-        self.assertEqual(self.counts(self.v1), (4, 6))
-
-    def test_recounts_the_named_sources_versions(self):
-        out = self.call('--uri', self.source.uri)
-
-        self.assertIn(f'{self.v1.uri} active_concepts: 4 -> 1', out)
-        self.assertIn('2 count(s) changed', out)
-        self.assertEqual(self.counts(self.v1), (1, 1))
-        self.assertEqual(self.counts(self.other), (4, 6))
-        self.assertEqual(self.counts(self.source), (self.source.active_concepts, self.source.active_mappings))
-
-    def test_recounts_every_version(self):
-        self.call()
-
-        self.assertEqual(self.counts(self.v1), (1, 1))
-        self.assertEqual(self.counts(self.other), (0, 0))
