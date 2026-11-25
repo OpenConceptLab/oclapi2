@@ -1179,7 +1179,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return self.get_mappings_queryset().values_list('to_source_id', flat=True).distinct()
 
     def get_mapped_sources(self, exclude_self=True):
-        queryset = Source.objects.filter(id__in=self.get_mapped_source_ids(), is_active=True)
+        # The ids take a pass over all the repository's mappings: read them once, not for a list's count and its page
+        queryset = Source.objects.filter(id__in=list(self.get_mapped_source_ids()), is_active=True)
         if exclude_self:
             # mappings point at HEAD, so on a version leave out every version of this source
             queryset = queryset.exclude(

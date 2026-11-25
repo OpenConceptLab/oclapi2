@@ -328,10 +328,9 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
         return collection
 
 
-class ExpansionSummarySerializer(ModelSerializer):
-    class Meta:
-        model = Expansion
-        fields = ('active_concepts', 'active_mappings')
+class ExpansionSummarySerializer(Serializer):  # pylint: disable=abstract-method
+    def to_representation(self, instance):
+        return instance.get_member_counts()
 
 
 class CollectionSummarySerializer(ModelSerializer):
@@ -687,9 +686,9 @@ class ExpansionSerializer(ModelSerializer):
         model = Expansion
         fields = (
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing',
-            'collection_version', 'extras', 'health', 'health_is_current'
+            'collection_version', 'extras', 'health', 'health_is_current', 'built_with'
         )
-        read_only_fields = ('health', 'health_is_current')
+        read_only_fields = ('health', 'health_is_current', 'built_with')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -733,9 +732,10 @@ class ExpansionDetailSerializer(ModelSerializer):
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'created_on', 'created_by',
             'is_processing', 'unresolved_repo_versions', 'collection_version',
             'explicit_collection_versions', 'explicit_source_versions',
-            'evaluated_collection_versions', 'evaluated_source_versions', 'extras', 'health', 'health_is_current'
+            'evaluated_collection_versions', 'evaluated_source_versions', 'extras', 'health', 'health_is_current',
+            'built_with'
         )
-        read_only_fields = ('health', 'health_is_current')
+        read_only_fields = ('health', 'health_is_current', 'built_with')
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')

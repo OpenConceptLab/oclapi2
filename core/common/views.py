@@ -45,6 +45,7 @@ from core.orgs.constants import ORG_OBJECT_TYPE
 from core.users.constants import USER_OBJECT_TYPE, LIST_UNPAGINATED_PERMISSION
 
 TRUTHY = get_truthy_values()
+FALSY = get_falsy_values()
 
 
 class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
@@ -68,6 +69,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     facet_class = None
     total_count = 0
     _latest_release_scopes = None  # exclude_hidden_latest_releases's, read once per request
+    _member_owners = None  # get_member_owners's, read once per request
     # a fuzzy search's targets, which only the concept list sets: without them it keeps to the URL's scope
     _source_versions = None
     _extra_filters = None
@@ -97,13 +99,36 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
     def has_parent_scope(self):
         return self.has_owner_scope() and self.has_concept_container_scope()
 
+    def is_collection_members_list(self):
+        """A collection's (or expansion's) concepts or mappings, which include retired ones by default."""
+        return 'expansion' in self.kwargs or ('collection' in self.kwargs and self.is_source_child_document_model())
+
     def _should_exclude_retired_from_search_results(self):
-        if self.is_owner_document_model() or 'expansion' in self.kwargs or self.is_url_registry_document():
+        if self.is_owner_document_model() or self.is_url_registry_document():
             return False
 
         params = get(self, 'params') or self.request.query_params.dict()
-        include_retired = params.get('retired', None) in TRUTHY or params.get(INCLUDE_RETIRED_PARAM, None) in TRUTHY
-        return not include_retired
+        include_retired = params.get(INCLUDE_RETIRED_PARAM, None)
+        retired = {to_snake_case(key): value for key, value in params.items()}.get('retired')  # as get_faceted_filters
+        # a retired=true filter lets them in whatever includeRetired says: the OCL Mapper sends both
+        if retired in TRUTHY or include_retired in TRUTHY:
+            return False
+        if self.is_collection_members_list():  # in unless includeRetired=false
+            return include_retired in FALSY
+        return True
+
+    def get_retired_criterion(self):
+        """
+        What the results ask of `retired`: the retired rule above and any `retired` filter. The facets count within
+        it, all but the `retired` facet, which counts both values so a client can show how many are retired.
+        """
+        criterion = Q('term', retired=False) if self._should_exclude_retired_from_search_results() else None
+        faceted_filters = self.get_faceted_filters()
+        retired_filter = self.get_faceted_criterion(
+            params={'retired': faceted_filters['retired']}) if 'retired' in faceted_filters else None
+        if retired_filter is not None:
+            criterion = retired_filter if criterion is None else criterion & retired_filter
+        return criterion
 
     def should_include_inactive(self):
         return self.request.query_params.get(INCLUDE_INACTIVE) in TRUTHY
@@ -425,7 +450,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
                 return Q('term', **{f"properties.{property_code}.keyword": clean_val})
 
-            return Q('term', **{attr: val.strip('\"').strip('\'')})
+            clean_val = val.strip('\"').strip('\'')
+            if attr == 'retired':  # indexed as 'true'/'false'; other spellings read as the retired rule reads them
+                clean_val = 'true' if clean_val in TRUTHY else 'false' if clean_val in FALSY else clean_val
+            return Q('term', **{attr: clean_val})
 
         def get_query(attr, val):
             """
@@ -626,26 +654,24 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
         if is_source_child_document_model:
             version = None
-            if is_version_specified:
-                container_version = self.kwargs['version']
-                is_latest_released = container_version == LATEST
-                params = {'user__username': self.url_username, 'organization__mnemonic': self.kwargs.get('org')}
-                if is_latest_released:
-                    if is_source_specified:
-                        from core.sources.models import Source
-                        version = Source.find_latest_released_version_by(
-                            {**params, 'mnemonic': self.kwargs['source']})
-                        filters['source_version'] = get(version, 'version')
-                    elif is_collection_specified:
-                        from core.collections.models import Collection
-                        version = Collection.find_latest_released_version_by(
-                            {**params, 'mnemonic': self.kwargs['collection']})
-                        filters['collection_version'] = get(version, 'version')
-                elif is_collection_specified and 'expansion' not in self.kwargs:
+            params = {'user__username': self.url_username, 'organization__mnemonic': self.kwargs.get('org')}
+            if self.kwargs.get('version') == LATEST:
+                if is_source_specified:
+                    from core.sources.models import Source
+                    version = Source.find_latest_released_version_by(
+                        {**params, 'mnemonic': self.kwargs['source']})
+                    filters['source_version'] = get(version, 'version')
+                elif is_collection_specified:
                     from core.collections.models import Collection
-                    version = Collection.objects.filter(
-                        **params, mnemonic=self.kwargs['collection'], version=self.kwargs['version']
-                    ).first()
+                    version = Collection.find_latest_released_version_by(
+                        {**params, 'mnemonic': self.kwargs['collection']})
+                    filters['collection_version'] = get(version, 'version')
+            elif is_collection_specified and 'expansion' not in self.kwargs and (
+                    is_version_specified or 'reference' not in self.kwargs):
+                from core.collections.models import Collection
+                version = Collection.objects.filter(  # without a version in the URL: HEAD, as its list
+                    **params, mnemonic=self.kwargs['collection'], version=self.kwargs.get('version', HEAD)
+                ).first()
 
             if is_collection_specified:
                 owner_type = filters.pop('ownerType', None)
@@ -740,7 +766,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
 
             params = {
                 'query': self.get_search_string(lower=False),
-                '_search': self.get_facets_search()
+                '_search': self.get_facets_search(),
+                'filters': {'retired': self.get_retired_criterion()}
             }
             if 'source' in self.kwargs and self.is_concept_document():
                 parent_repo = params['parent'] = get(self, 'parent_resource')
@@ -820,6 +847,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         counts = {}
         if urls:
             search = (search or self.get_facets_search()).extra(size=0).params(request_timeout=ES_REQUEST_TIMEOUT)
+            retired_criterion = self.get_retired_criterion()  # the facets count within it (get_facets)
+            if retired_criterion is not None:
+                search = search.filter(retired_criterion)
             search.aggs.bucket('viewable', 'filters', filters={
                 str(i): Q('terms', **{self.collection_url_facets[facet]: sorted(values)})
                 for i, ((facet, _), values) in enumerate(urls.items())})
@@ -844,9 +874,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         it was reindexed too, whose hits get_viewable_hits leaves out. Where the search filters by access, a source or
         owner name stays only if it names a repository the requester can view; a name of a mapping's or concept's
         target is left out only if the repositories it names exist and the requester can view none of them, so a
-        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. A hit kept as its
-        creator's can have its names missing, never wrong. `search`: get_facets_search's, which tells whether the
-        search filters by access.
+        target outside OCL keeps its name (get_repo_names_by_access). Counts stay the index's. `search`:
+        get_facets_search's, which tells whether the search filters by access.
         """
         user = self.request.user
         named = [facet for facet in self.repo_name_facets if facets.get(facet)]
@@ -901,7 +930,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         expansions' URIs (to_parent_kwargs_from_uri).
         """
         from core.collections.models import Collection, Expansion
-        versions = Collection.objects.filter(viewable, mnemonic__in=collections)
+        # a version with no owner has a URL no document names
+        versions = Collection.objects.filter(viewable, mnemonic__in=collections).exclude(
+            organization__isnull=True, user__isnull=True)
         urls = {}
         for uri in versions.values_list('uri', flat=True):
             parts = uri.strip('/').split('/')
@@ -998,18 +1029,61 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         return False
 
     def get_public_criteria(self):
+        """
+        Public documents and, for a signed-in requester, the private ones they can view: of repositories, concepts and
+        mappings, those of their own and their orgs' repositories, by current membership as lists and reads have it
+        (get_member_owner_criteria); of orgs, those the index lists them as a member of.
+        """
         criteria = Q('term', public_can_view=True)
         user = self.request.user
 
         if user.is_authenticated:
-            username = user.username
-            from core.orgs.documents import OrganizationDocument
-            if self.document_model in [OrganizationDocument]:
-                criteria |= (Q('term', public_can_view=False) & Q('term', user=username))
+            if self.is_org_document():
+                criteria |= (Q('term', public_can_view=False) & Q('term', user=user.username))
             if self.is_concept_container_document_model() or self.is_source_child_document_model():
-                criteria |= (Q('term', public_can_view=False) & Q('term', created_by=username))
+                member_criteria = self.get_member_owner_criteria()
+                if member_criteria is not None:
+                    criteria |= member_criteria
 
         return criteria
+
+    def get_member_owner_criteria(self):
+        """
+        The documents of the requester's own and their orgs' repositories, by owner type and name; None if there are
+        none. The index's `owner` holds names lowercased, and a URL's owner filters by it too, so a name another owner
+        of the same type has in another case is left out: it would match that owner's documents as well.
+        """
+        names = {}
+        for owner_type, name, has_twin in self.get_member_owners():
+            if not has_twin:
+                names.setdefault(owner_type, []).append(name.lower())
+        criteria = None
+        for owner_type, owner_names in names.items():
+            owner_criteria = Q('term', owner_type=owner_type) & Q('terms', owner=owner_names)
+            criteria = owner_criteria if criteria is None else criteria | owner_criteria
+        return criteria
+
+    def get_member_owners(self):
+        """
+        The requester and their orgs, as (owner type, name, whether another owner of that type has the name in another
+        case): one query, read once per request, as hits and facets each build a search.
+        """
+        if self._member_owners is None:
+            from core.orgs.models import Organization
+            from core.users.models import UserProfile
+            user = self.request.user
+            orgs = user.organizations.annotate(
+                _type=models.Value(ORG_OBJECT_TYPE), _name=F('mnemonic'), _twin=models.Exists(
+                    Organization.objects.filter(mnemonic__iexact=models.OuterRef('mnemonic')).exclude(
+                        id=models.OuterRef('id')))
+            ).order_by().values_list('_type', '_name', '_twin')
+            requester = UserProfile.objects.filter(id=user.id).annotate(
+                _type=models.Value(USER_OBJECT_TYPE), _name=F('username'), _twin=models.Exists(
+                    UserProfile.objects.filter(username__iexact=models.OuterRef('username')).exclude(
+                        id=models.OuterRef('id')))
+            ).values_list('_type', '_name', '_twin')
+            self._member_owners = list(requester.union(orgs, all=True))
+        return self._member_owners
 
     def is_global_scope(self):
         return self.kwargs.get('org', None) is None and self.kwargs.get('user', None) is None
@@ -1130,7 +1204,10 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             results = results.filter(visibility_criteria)
         # an org search in the requester's own scope reads the index's members, so it's checked as well
         self.search_checks_access = visibility_criteria is not None or self.is_org_document()
-        faceted_criterion = self.get_faceted_criterion()
+        # with ignore_retired_filter, the facets apply the retired rule and the `retired` filter (get_retired_criterion)
+        faceted_criterion = self.get_faceted_criterion(params={
+            key: value for key, value in self.request.query_params.dict().items() if to_snake_case(key) != 'retired'
+        } if ignore_retired_filter else None)
         if faceted_criterion:
             results = results.filter(faceted_criterion)
         return results
@@ -1411,9 +1488,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         The hits the requester can view, as the database has them now: a hit whose index document is stale, such as a
         repository made private before it was reindexed, is left out, and so is a concept or mapping of a source the
         requester can't view (a source made private commits before its save signal makes them private). One query for
-        the page (one per model for the repo search, whose hits are sources and collections). Like the search's access
-        filter, it keeps the repositories, concepts and mappings the requester created. The page can then hold fewer
-        hits than its limit, while num_found stays the index's count.
+        the page (one per model for the repo search, whose hits are sources and collections). The page can then hold
+        fewer hits than its limit, while num_found stays the index's count.
         """
         user = self.request.user
         if not isinstance(hits, models.QuerySet):  # the repo search's sources and collections
@@ -1428,9 +1504,6 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
             from core.sources.models import Source
             parents = Source.get_viewable(Source.objects.filter(id__in=hits.order_by().values('parent_id')), user)
             viewable = viewable.filter(parent_id__in=parents.values('id'))
-        if user.is_authenticated and not user.is_staff and (
-                self.is_concept_container_document_model() or self.is_source_child_document_model()):
-            viewable = hits.filter(models.Q(id__in=viewable.values('id')) | models.Q(created_by_id=user.id))
         return viewable
 
     def get_search_results_qs(self):

@@ -351,6 +351,14 @@ class FhirResolveCases(ResolverCorpusMixin):  # pylint: disable=too-many-public-
         self.assertEqual(FhirResolver().resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/v1/').id, public_v1.id)
         self.assertEqual(FhirResolver().resolve('CodeSystem', '/orgs/HL7/CodeSystem/newest/').id, public_v1.id)
 
+    def test_a_retired_release_named_by_its_ocl_path_is_served_beside_a_live_one(self):
+        source(self.hl7, 'aging')
+        retired = source(self.hl7, 'aging', 'v1', released=True, retired=True)
+        live = source(self.hl7, 'aging', 'v2', released=True)
+        for path in ('/orgs/HL7/sources/aging/v1/', '/orgs/HL7/CodeSystem/aging/v1/', '/orgs/HL7/CodeSystem/aging/|v1'):
+            self.assertEqual(FhirResolver().resolve('CodeSystem', path).id, retired.id)
+        self.assertEqual(FhirResolver().resolve('CodeSystem', '/orgs/HL7/CodeSystem/aging/').id, live.id)
+
     def test_query_counts(self):
         """
         A hot path: these counts may only fall. Without the registry: the toggle, the repository and its latest

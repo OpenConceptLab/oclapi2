@@ -1,17 +1,20 @@
 import logging
 import re
 import time
+from contextlib import suppress
 
 from django.conf import settings
 from django.http.response import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
-from django.core.exceptions import SuspiciousOperation
+from django.core.exceptions import DisallowedHost, SuspiciousOperation
+from django.urls import Resolver404, resolve
 from pydash import get
 from request_logging.middleware import LoggingMiddleware
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from core.capacity.logs import emit
 from core.common.authentication import OCLAuthentication
 from core.common.constants import VERSION_HEADER, REQUEST_USER_HEADER, RESPONSE_TIME_HEADER, REQUEST_URL_HEADER, \
     REQUEST_METHOD_HEADER
@@ -89,6 +92,41 @@ class FixMalformedLimitParamMiddleware(BaseMiddleware):
                 request.GET = query_dict_copy
 
         return self.get_response(request)
+
+
+class SlowRequestLogMiddleware(BaseMiddleware):
+    """
+    Next to the outermost middleware, so it times the whole request, authentication included. A request taking
+    SLOW_REQUEST_LOG_MS or more (0 turns this off) writes one JSON line to the API log, where CloudWatch metric filters
+    count slow requests by view. The line has the URL pattern, not the path: a path can carry a user's name or a token.
+    """
+    def __call__(self, request):
+        start = time.monotonic()
+        response = self.get_response(request)
+        ms = int((time.monotonic() - start) * 1000)
+        if settings.SLOW_REQUEST_LOG_MS and ms >= settings.SLOW_REQUEST_LOG_MS:
+            with suppress(Exception):  # a log line never fails the request it describes
+                self.log(request, response, ms)
+        return response
+
+    @staticmethod
+    def log(request, response, ms):
+        match = getattr(request, 'resolver_match', None)
+        # answered before URL resolution, e.g. by a failure in authentication; the FHIR host serves only FHIR paths
+        if match is None:
+            with suppress(Resolver404, DisallowedHost):
+                if is_fhir_path(request.path) or not on_fhir_host(request):
+                    match = resolve(request.path_info, getattr(request, 'urlconf', None))
+        view = getattr(match, 'func', None)
+        view = getattr(view, 'view_class', view)
+        emit({
+            'event': 'slow_request',
+            'view': getattr(view, '__name__', type(view).__name__) if view else None,
+            'route': getattr(match, 'route', None),
+            'method': request.method,
+            'status': response.status_code,
+            'ms': ms,
+        })
 
 
 class ResponseHeadersMiddleware(BaseMiddleware):
