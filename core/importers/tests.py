@@ -7835,22 +7835,28 @@ class IsolatedVersionImportTest(OCLTestCase):
                 self.assertEqual(queued, dispatched)
 
     def test_parallel_snapshot_retirement_leaves_no_hierarchy_work_queued(self):
-        """The next snapshot must not race the hierarchy of a retired revision or of the parent revisions it makes."""
+        """
+        The next snapshot must not race the hierarchy of a retired revision or of the parent revisions it makes, and
+        parallel parts must not make those revisions inside their own transactions, where they contend for parents.
+        """
         self.run_import([self.concept('G'), self.concept('P', parents=['G']), self.concept('R', parents=['P'])],
                         isolated_version=False)
+        parent_versions = Concept.objects.filter(mnemonic='P')
         with override_settings(TEST_MODE=False), \
                 patch('core.concepts.models.process_hierarchy_for_concept_version.apply_async') as hierarchy, \
                 patch('core.concepts.models.process_hierarchy_for_new_parent_concept_version.apply_async') as children:
             result = bulk_import_parts_inline.run(
                 [{**self.concept('R'), '__action': 'DELETE'}], 'ocladmin', True, index=False, snapshot_boundary=True)
-        self.assertEqual(len(result['json']['deleted']), 1)
+            self.assertEqual(len(result['json']['deleted']), 1)
+            self.assertEqual(parent_versions.count(), 2)
+            BulkImportParallelRunner.run_hierarchy_tasks(result['hierarchy_tasks'])
         hierarchy.assert_not_called()
         children.assert_not_called()
         retired = Concept.objects.get(mnemonic='R', is_latest_version=True)
         parent = Concept.objects.get(mnemonic='P', is_latest_version=True)
         self.assertTrue(retired.retired)
         self.assertFalse(retired.parent_concepts.exists())  # as the inline path of TEST_MODE leaves it
-        self.assertEqual(Concept.objects.filter(versioned_object_id=parent.versioned_object_id).count(), 3)
+        self.assertEqual(parent_versions.count(), 3)
         self.assertTrue(parent.parent_concepts.filter(mnemonic='G').exists())
 
     def test_parallel_version_boundary_preserves_other_sources_pending_links(self):
@@ -7945,7 +7951,8 @@ class IsolatedVersionImportTest(OCLTestCase):
         del updated['parent_concept_urls']
         with override_settings(TEST_MODE=False), \
                 patch('core.concepts.models.process_hierarchy_for_concept_version.apply_async') as hierarchy:
-            bulk_import_parts_inline.run([updated], 'ocladmin', True, index=False, snapshot_boundary=True)
+            result = bulk_import_parts_inline.run([updated], 'ocladmin', True, index=False, snapshot_boundary=True)
+            BulkImportParallelRunner.run_hierarchy_tasks(result['hierarchy_tasks'])
         hierarchy.assert_not_called()
         self.assertEqual(set(Concept.objects.get(mnemonic='C', is_latest_version=True)
                              .parent_concepts.values_list('mnemonic', flat=True)), {'P'})

@@ -29,7 +29,7 @@ from core.common.tasks import bulk_import_parts_inline, delete_organization, bat
     post_import_update_resource_counts, index_concepts_mapped_codes, get_batch_index_relations, \
     run_deferred_import_indexing
 from core.common.utils import drop_version, is_url_encoded_string, encode_string, to_parent_uri, chunks
-from core.concepts.models import Concept
+from core.concepts.models import Concept, DEFERRED_HIERARCHY
 from core.importers.constants import DEFERRED_INDEX_LOCK_KEY, DEFERRED_INDEX_LOCK_SECONDS, \
     DEFERRED_INDEX_MAX_ATTEMPTS, DEFERRED_INDEX_RETRY_SECONDS, DEFERRED_INDEX_FLAGS_SECONDS, \
     DEFERRED_INDEX_REJECTED_RETRY_SECONDS, DEFERRED_INDEX_RUN_SECONDS, DEFERRED_INDEX_BEAT_SECONDS
@@ -2161,6 +2161,18 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.update_elapsed_seconds()
             self.notify_progress()
 
+    @staticmethod
+    def run_hierarchy_tasks(tasks):
+        """Apply the hierarchy work parallel parts deferred, and what it defers in turn, one at a time and in order."""
+        pending = deque(tasks)
+        token = DEFERRED_HIERARCHY.set(pending)
+        try:
+            while pending:
+                name, args = pending.popleft()
+                app.tasks[name](*args)
+        finally:
+            DEFERRED_HIERARCHY.reset(token)
+
     def wait_for_source_version(self, part, version_line):
         """Wait for the seed of the exact version; a rerun may find it created with its seed unfinished or failed."""
         result = get(part.results[0].result, 'json', {})
@@ -2213,6 +2225,8 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             description = f'Source Version {part_list[0].get("id")}' if part_type == 'source version' else \
                 'Parallel snapshot import part'
             self.wait_for_snapshot_tasks(part.results, description)
+            self.run_hierarchy_tasks(
+                [task for result in part.results for task in get(result.result, 'hierarchy_tasks') or []])
             if part_type == 'concept':
                 self.collect_snapshot_hierarchy(part_list, pending_hierarchy, (task.result for task in part.results))
             elif part_type == 'source version':
