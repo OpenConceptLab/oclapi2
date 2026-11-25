@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from contextlib import nullcontext
@@ -1654,6 +1655,7 @@ def default_expansion_parameters():
 class Expansion(VersionCompareMixin, BaseResourceModel):
     # expansions are rebuilt in place and are too dynamic to be worth persisting a changelog for
     PERSIST_CHANGELOG = False
+    SYSTEM_VERSION_UNRESOLVED_TYPE = 'expansion.parameters.system-version'
     REPO_VERSION_RELATIONS = (
         'explicit_source_versions', 'evaluated_source_versions',
         'explicit_collection_versions', 'evaluated_collection_versions'
@@ -1994,6 +1996,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         evaluated_valueset_versions = []
         evaluated_system_versions = []
         unresolved_repo_versions = []
+        # what this add evaluated: earlier entries for these are replaced by what it finds now
+        evaluated_entry_keys = set()
+        existing_unresolved_repo_versions = list(self.unresolved_repo_versions or [])
         _system_version_cache = {}
 
         if not is_adding_all:
@@ -2054,13 +2059,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
         if should_reevaluate and system_versions:
             namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+            evaluated_entry_keys.add((self.SYSTEM_VERSION_UNRESOLVED_TYPE,))
             for _system, version in self.resolve_system_version_entries(system_versions, namespace):
                 # unresolved is None here too, as a reference resolving the same URL itself would get
                 _system_version_cache[f"{namespace or 'NONE'}-{_system}-NONE"] = version if version.id else None
                 if version.id:
                     include_system_versions.append(version)
                 else:
-                    unresolved_repo_versions.append({'url': _system, 'type': 'expansion.parameters.system-version'})
+                    unresolved_repo_versions.append({'url': _system, 'type': self.SYSTEM_VERSION_UNRESOLVED_TYPE})
 
         def get_ref_system_version(ref):
             if ref.system:
@@ -2084,6 +2090,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             nonlocal evaluated_system_versions
             nonlocal evaluated_valueset_versions
             nonlocal unresolved_repo_versions
+            evaluated_entry_keys.update(self.get_unresolved_entry_keys_of(ref, should_reevaluate))
             if valueset_locks is not None:
                 ref.set_valueset_locks(valueset_locks)
                 valueset_locked_refs.append(ref)
@@ -2212,8 +2219,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         self.explicit_source_versions.add(*compact(explicit_system_versions))
         self.evaluated_collection_versions.add(*compact(evaluated_valueset_versions))
         self.evaluated_source_versions.add(*compact(evaluated_system_versions))
-        if unresolved_repo_versions:
-            self.unresolved_repo_versions = unresolved_repo_versions
+        merged_unresolved_repo_versions = self.merge_unresolved_entries(
+            self.unresolved_repo_versions or [], unresolved_repo_versions, evaluated_entry_keys)
+        if merged_unresolved_repo_versions != existing_unresolved_repo_versions:
+            self.unresolved_repo_versions = merged_unresolved_repo_versions
             # only what this add found: a whole-row save from a copy loaded during a build would restore is_processing
             self.save(update_fields=['unresolved_repo_versions', 'updated_at'])
         self.dedupe_resources()
@@ -2372,6 +2381,37 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 self.index_resources(list(concept_ids), list(mapping_ids))
                 self.full_index_resources(
                     list(previous_concept_ids - concept_ids), list(previous_mapping_ids - mapping_ids))
+
+    @classmethod
+    def get_unresolved_entry_key(cls, entry):
+        entry_type = entry.get('type')
+        if entry_type == cls.SYSTEM_VERSION_UNRESOLVED_TYPE:
+            return (entry_type,)
+        if entry_type == 'reference.system':
+            return entry_type, entry.get('url'), entry.get('version') or None
+        return entry_type, entry.get('url')
+
+    @staticmethod
+    def get_unresolved_entry_keys_of(reference, is_reevaluating):
+        """The unresolved entry keys a reference's evaluation decides, whether it resolves them or not"""
+        keys = {('reference.valueset', valueset) for valueset in reference.valueset or []}
+        if reference.system:
+            keys.add(('reference.system', reference.system, reference.version or None))
+        if is_reevaluating:
+            keys.add((UNRESOLVED_RESOURCE_VERSION_TYPE, reference.expression))
+        return keys
+
+    @classmethod
+    def merge_unresolved_entries(cls, existing, found, evaluated_keys):
+        """Earlier entries this add didn't evaluate, then what it found unresolved, without duplicates"""
+        merged, seen = [], set()
+        kept = [entry for entry in existing if cls.get_unresolved_entry_key(entry) not in evaluated_keys]
+        for entry in [*kept, *found]:
+            identity = json.dumps(entry, sort_keys=True, default=str)
+            if identity not in seen:
+                seen.add(identity)
+                merged.append(entry)
+        return merged
 
     def drop_unresolved_entries_of_deleted_references(self):
         """A deleted reference's unresolved entries go with it, so deleting it clears what it left unresolved. The

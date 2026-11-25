@@ -4309,6 +4309,55 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(reference.unresolved_reason, REFERENCE_VERSION_NOT_HELD)
         self.assertEqual(list(expansion.concepts.all()), [old])
 
+    @staticmethod
+    def _system_reference(collection, system, version):
+        reference = CollectionReference(
+            expression=f'{system}{version}/concepts/c1/', collection=collection, system=system, version=version,
+            code='c1')
+        reference.save()
+        return reference
+
+    def test_add_references_keeps_earlier_unresolved_entries(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        first = self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')
+        second = self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')
+
+        expansion.add_references([first], index=False)
+        expansion.add_references([second], index=False)
+        expansion.add_references([CollectionReference.objects.get(id=first.id)], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual(
+            [(entry['url'], entry['version']) for entry in entries],
+            [('/orgs/missing/sources/one/', 'v1'), ('/orgs/missing/sources/two/', 'v1')])
+
+    def test_add_references_drops_an_unresolved_entry_once_it_resolves(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        resolving = self._system_reference(collection, source.uri, 'v1')
+        missing = self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')
+        expansion.add_references([resolving, missing], index=False)
+        self.assertEqual(len(Expansion.objects.get(id=expansion.id).unresolved_repo_versions), 2)
+        OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
+
+    def test_rebuild_starts_unresolved_entries_from_empty(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.add_references(
+            [self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')], index=False)
+        CollectionReference.objects.filter(collection=collection).delete()
+
+        expansion.add_references(collection.references.all(), index=False, is_adding_all=True, force_reevaluate=True)
+
+        self.assertEqual(Expansion.objects.get(id=expansion.id).unresolved_repo_versions, [])
+
     def test_add_references_marks_include_references_that_add_nothing(self):
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source)
