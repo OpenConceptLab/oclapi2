@@ -2543,11 +2543,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.unresolved_repo_versions or [])
 
     def get_resolved_repo_version_diff_with_latest_updates(self):
+        """Each recorded repo version a rebuild would move, with what its repository resolves to now"""
         diff = {}
+        kept_ids = self.get_repo_version_ids_a_rebuild_keeps()
 
         def update_diffs(rel):
             for version in get(self, rel).filter():
-                if version.url in diff:
+                if version.url in diff or version.id in kept_ids[rel]:
                     continue
                 repo_url = drop_version(version.url)
                 resolved, _ = ConceptContainerModel.resolve_reference_expression(repo_url)
@@ -2558,6 +2560,37 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             update_diffs(relation)
 
         return diff
+
+    def get_repo_version_ids_a_rebuild_keeps(self):
+        """By relation, the recorded versions a rebuild keeps: those references name (unless through a concept or
+        mapping version, re-resolved), those system-version names, and a lock-built expansion's value set locks"""
+        re_resolved_repos = set()
+        resource_versioned = self.collection_version.references.exclude(
+            models.Q(resource_version__isnull=True) | models.Q(resource_version='') | models.Q(system__isnull=True)
+        ).filter(models.Q(version__isnull=True) | models.Q(version='')).order_by('system', 'id').distinct('system')
+        for reference in resource_versioned:
+            version = reference.resolve_expression_system_version
+            if version:
+                re_resolved_repos.add(drop_version(version.uri))
+        kept = {
+            'explicit_source_versions': {
+                version.id for version in self.explicit_source_versions.filter()
+                if drop_version(version.uri) not in re_resolved_repos
+            },
+            'explicit_collection_versions': set(self.explicit_collection_versions.values_list('id', flat=True)),
+            'evaluated_source_versions': set(),
+            'evaluated_collection_versions': set(
+                self.evaluated_collection_versions.filter(is_active=True).values_list('id', flat=True)
+            ) if self.built_with == VERSION_EXPANSION_LOCK else set(),
+        }
+        system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
+        if system_versions:
+            namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+            kept['evaluated_source_versions'] = {
+                version.id for _, version in self.resolve_system_version_entries(system_versions, namespace)
+                if version.id
+            }
+        return kept
 
     def dry_run_rebuild(self):
         """What a rebuild would change. Rolled back, so nothing is saved or indexed"""
