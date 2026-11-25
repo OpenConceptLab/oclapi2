@@ -491,7 +491,12 @@ class ConceptRetrieveUpdateDestroyView(ConceptHierarchyMixin, ConceptBaseView, R
             )
 
         parent = concept.parent
+        from core.collections.models import Expansion
+        # a raw delete takes the membership rows without the model's delete, so expansions holding them go first
+        after_delete = Expansion.mark_health_not_current_for_members(
+            'concepts', list(concepts.values_list('id', flat=True)))
         result = concepts.delete()
+        after_delete()
         parent.update_concepts_count()
         return Response(result, status=status.HTTP_204_NO_CONTENT)
 

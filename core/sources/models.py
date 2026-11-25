@@ -13,6 +13,7 @@ from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
 
+from core.collections.constants import HEALTH_RELEVANT_VERSION_FIELDS
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
@@ -373,6 +374,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 update_active_count(self.__class__, self.id, field)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+        from core.collections.models import Expansion
         from core.mappings.models import Mapping
         to_index = {Concept: [], Mapping: []}
         with transaction.atomic():
@@ -394,6 +396,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                         source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
                     if model is Concept:
                         HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
+                    # they left HEAD, which changes their class in the expansions that hold them
+                    Expansion.mark_health_out_of_date_for_members(
+                        f'{model.__name__.lower()}s', [*chunk, *latest_ids])
                     to_index[model] += [*chunk, *latest_ids]
 
         if to_index[Concept] or to_index[Mapping]:
@@ -1016,6 +1021,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         if self.id and 'canonical_url' in dirty_fields:
             self.resolve_url_registry_entries_later()
+        if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
+            from core.collections.models import Expansion
+            Expansion.mark_health_not_current_for_repository(self)
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):

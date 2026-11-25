@@ -311,9 +311,13 @@ ES_CONCEPTS_REPLICAS = int(os.environ.get('ES_CONCEPTS_REPLICAS', 0))
 ES_MAPPINGS_SHARDS = int(os.environ.get('ES_MAPPINGS_SHARDS', 1))
 ES_MAPPINGS_REPLICAS = int(os.environ.get('ES_MAPPINGS_REPLICAS', 0))
 # Bulk imports of up to this many lines index what they import as each part finishes, unless the request's `index`
-# param says otherwise. Bigger ones leave it to a release or a reindex unless asked, as indexing them saturates the
-# shared indexing worker for hours (and re-embeds every row of a semantic HEAD).
+# param says otherwise. Bigger ones, unless sent with index=true, leave it to an off-peak job (DeferredImportIndex), as
+# indexing them at once saturates the shared indexing worker for hours (and re-embeds every row of a semantic HEAD).
+# So do imports sent with index=false.
 IMPORT_INDEX_MAX_LINES = int(os.environ.get('IMPORT_INDEX_MAX_LINES', 5000))
+# When that off-peak job runs: 'HH:MM-HH:MM' in UTC, spanning midnight if the end is earlier than the start. Empty, or
+# shorter than beat's 10 minutes between runs, pauses it. The default keeps clear of the nightly export windows.
+IMPORT_INDEX_WINDOW = os.environ.get('IMPORT_INDEX_WINDOW', '01:00-04:30')
 
 CID_GENERATE = True
 CID_RESPONSE_HEADER = None
@@ -498,7 +502,8 @@ CELERY_TASK_ROUTES = {
     'core.common.tasks.handle_m2m_changed': {'queue': 'indexing'},
     'core.common.tasks.handle_pre_delete': {'queue': 'indexing'},
     'core.common.tasks.populate_indexes': {'queue': 'indexing'},
-    'core.common.tasks.rebuild_indexes': {'queue': 'indexing'}
+    'core.common.tasks.rebuild_indexes': {'queue': 'indexing'},
+    'core.common.tasks.run_deferred_import_indexing': {'queue': 'indexing'},
 }
 
 CELERY_RESULT_BACKEND_ALWAYS_RETRY = True

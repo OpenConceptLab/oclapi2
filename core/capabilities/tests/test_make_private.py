@@ -428,7 +428,7 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
         for repo in (self.source, self.collection):
             model = type(repo)
             model.objects.filter(id=repo.id).update(public_access=ACCESS_TYPE_VIEW)
-            change = Mock(side_effect=lambda *args, _model=model, _id=repo.id: _model.objects.filter(id=_id).update(
+            change = Mock(side_effect=lambda *args, model=model, repo=repo: model.objects.filter(id=repo.id).update(
                 public_access=ACCESS_TYPE_NONE))
             with self.subTest(uri=repo.uri), patch('core.common.models.check_make_private', change):
                 response = self.request('patch', repo.uri, {'name': 'Renamed'})
