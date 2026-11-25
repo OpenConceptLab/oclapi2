@@ -177,6 +177,25 @@ class MappingTest(OCLTestCase):
             f'/orgs/{source.organization.mnemonic}/sources/{source.mnemonic}/mappings/{mapping.mnemonic}/'
         )
 
+    def test_persist_new_autoid_sequential_goes_past_ids_set_by_hand_and_dropped(self):
+        source = OrganizationSourceFactory(version=HEAD, autoid_mapping_mnemonic='sequential')
+        concept1 = ConceptFactory(parent=source)
+        concept2 = ConceptFactory(parent=source)
+
+        def persist(map_type, **kwargs):
+            return Mapping.persist_new({
+                **factory.build(dict, FACTORY_CLASS=MappingFactory), 'from_concept': concept1,
+                'to_concept': concept2, 'map_type': map_type, 'parent_id': source.id, **kwargs
+            }, source.created_by)
+
+        self.assertEqual(persist('same-as').mnemonic, '1')
+        self.assertEqual(persist('close-to', mnemonic='40').mnemonic, '40')
+        self.assertEqual(persist('narrower-than').mnemonic, '41')
+        dropped = MappingFactory(parent=source, mnemonic='80')
+        dropped.sources.clear()
+        self.assertEqual(persist('broader-than').mnemonic, '81')
+        self.assertEqual(persist('related-to').mnemonic, '82')
+
     def test_persist_new_autoid_sequential(self):
         source = OrganizationSourceFactory(
             version=HEAD, autoid_mapping_mnemonic='sequential', autoid_mapping_external_id='sequential')
