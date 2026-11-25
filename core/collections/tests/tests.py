@@ -4268,8 +4268,9 @@ class ExpansionTest(OCLTestCase):
         self._rebuild(collection, expansion)
 
         self.assertEqual(list(expansion.concepts.all()), [old])
-        recorded = [*expansion.explicit_source_versions.all(), *expansion.evaluated_source_versions.all()]
-        self.assertEqual(recorded, [v1])
+        # a version named in system without a version field is recorded as evaluated
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
+        self.assertEqual(expansion.explicit_source_versions.count(), 0)
         self.assertEqual(expansion.unresolved_repo_versions, [])
 
     def test_rebuild_drops_resource_version_held_by_older_release_with_toggle_off(self):

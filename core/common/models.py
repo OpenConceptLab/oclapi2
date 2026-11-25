@@ -34,7 +34,7 @@ from core.common.utils import reverse_resource, reverse_resource_version, parse_
     to_parent_uri, is_canonical_uri, get_export_service, from_string_to_date, get_truthy_values, \
     canonical_url_to_url_and_version, get_current_authorized_user, encode_string, decode_string, \
     normalize_public_access, get_export_key_pattern, EXPORT_KEY_TIMESTAMP_PATTERN
-from core.common.utils import to_owner_uri, chunks, is_versioned_uri
+from core.common.utils import to_owner_uri, chunks
 from core.common.constants import VERSION_UNCOPYABLE_EXTRAS, SERIALIZATION_RETRY_ATTEMPTS, REINDEX_CHUNK_SIZE
 from core.settings import DEFAULT_LOCALE
 from . import ERRBIT_LOGGER
@@ -1884,8 +1884,10 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
             uri = resolution_url if resolution_url.endswith('/') else resolution_url + '/'
-            # a version named by its own URL still resolves once it's retired, as url|version does
-            criteria = models.Q(is_active=True, uri=uri) if is_versioned_uri(uri) else criteria & models.Q(uri=uri)
+            # a version named by its own URL (/orgs/O/sources/S/v1/, by position) still resolves once it's retired,
+            # as url|version does
+            names_version = uri.strip('/').count('/') == 4
+            criteria = models.Q(is_active=True, uri=uri) if names_version else criteria & models.Q(uri=uri)
 
         return cls.resolve_repo(
             resolution.repository(criteria), version, is_canonical, resolution_url, resolution), registry_entry

@@ -1551,7 +1551,7 @@ class SourceTest(OCLTestCase):
         head = OrganizationSourceFactory(mnemonic='source', organization=org)
         retired = OrganizationSourceFactory(
             mnemonic='source', organization=org, version='v1', released=True, retired=True)
-        inactive = OrganizationSourceFactory(mnemonic='source', organization=org, version='v2', is_active=False)
+        OrganizationSourceFactory(mnemonic='source', organization=org, version='v2', is_active=False)
 
         resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/v1/')
         self.assertEqual(resolved.id, retired.id)
@@ -1564,7 +1564,13 @@ class SourceTest(OCLTestCase):
         self.assertIsNone(resolved.id)
         resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/')
         self.assertEqual(resolved.id, head.id)
-        self.assertIsNotNone(inactive.id)
+
+    def test_resolve_reference_expression_relative_url_of_a_retired_head_of_an_owner_named_like_a_resource(self):
+        owner = OrganizationFactory(mnemonic='sources')
+        OrganizationSourceFactory(mnemonic='source', organization=owner, retired=True)
+
+        resolved, _ = Source.resolve_reference_expression('/orgs/sources/sources/source/')
+        self.assertIsNone(resolved.id)
 
     def test_resolve_reference_expression_with_canonical_url(self):  # pylint:disable=too-many-statements,too-many-locals
         org1 = OrganizationFactory(mnemonic='org1')
