@@ -24,6 +24,10 @@ REFERENCE_NAMED_VERSION_NOT_HELD_FMT = 'The reference is saved in collection {},
                                        'resource version {}'
 REFERENCE_EXCLUDED_BY_PARAMETERS_FMT = "The reference is saved in collection {}, but the expansion's parameters " \
                                        "exclude everything it resolved to in {}"
+REFERENCE_ADDED_AFTER_RELEASE_FMT = 'The reference is saved in collection {}, but its {} is not in {}, the release ' \
+                                    'the collection resolves through, because it was added after that release. ' \
+                                    'To include it, create a new release of {} or pin the reference to a version ' \
+                                    'that holds it'
 REFERENCE_FOUND_NOTHING = 'found_nothing'
 REFERENCE_EXCLUDED_BY_PARAMETERS = 'excluded_by_parameters'
 REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'

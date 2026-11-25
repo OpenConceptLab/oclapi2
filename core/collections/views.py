@@ -26,7 +26,8 @@ from core.collections.constants import (
     SOURCE_MAPPINGS,
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
     REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
-    REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS)
+    REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS,
+    REFERENCE_ADDED_AFTER_RELEASE_FMT)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
@@ -60,7 +61,8 @@ from core.common.swagger_parameters import q_param, compress_header, page_param,
 from core.common.tasks import add_references, export_collection, delete_collection, index_expansion_concepts, \
     index_expansion_mappings, seed_children_to_expansion, collection_version_compare, expansion_compare
 from core.common.throttling import ThrottleUtil
-from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values, to_int
+from core.common.utils import compact_dict_by_values, parse_boolean_query_param, get_truthy_values, to_int, \
+    drop_version
 from core.common.views import BaseAPIView, BaseLogoView, ConceptContainerExtraRetrieveUpdateDestroyView
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
@@ -585,7 +587,14 @@ class CollectionReferencesView(
         for reference in unresolved_refs:
             reason = unresolved_reasons[reference.id]
             item = {'added': True, 'resolved': False, 'expression': reference.expression}
-            if reason == REFERENCE_VERSION_NOT_HELD:
+            release = None if reason == REFERENCE_EXCLUDED_BY_PARAMETERS else reference.get_release_added_after(
+                expansion, user, system_version_cache)
+            if release:
+                item['repo_versions'] = [release.uri]
+                item['message'] = REFERENCE_ADDED_AFTER_RELEASE_FMT.format(
+                    collection.name, 'mapping' if reference.is_mapping else 'concept', release.uri,
+                    drop_version(release.uri))
+            elif reason == REFERENCE_VERSION_NOT_HELD:
                 named_version = reference.resolve_expression_system_version if reference.names_repo_version else None
                 named_version = named_version if named_version and named_version.has_view_access(user) else None
                 item['repo_versions'] = [named_version.uri if named_version else reference.system]
@@ -637,18 +646,18 @@ class CollectionReferencesView(
         resource_type = get(expression_parts, '5')
 
         if is_version_specified(expression):
-            return self.resource_version_added_message_by_type(resource_type)
+            return self.resource_version_added_message_by_type(resource_type, self.parent_resource.name)
 
         resource_name = get(expression_parts, '6')
         return self.resource_added_message_by_type(resource_name, self.parent_resource.name, resource_type)
 
     @staticmethod
-    def resource_version_added_message_by_type(resource_type):
+    def resource_version_added_message_by_type(resource_type, collection_name):
         if resource_type == 'concepts':
             return CONCEPT_VERSION_ADDED_TO_COLLECTION
         if resource_type == 'mappings':
             return MAPPING_VERSION_ADDED_TO_COLLECTION
-        return UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT.format('')
+        return UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT.format(collection_name)
 
     @staticmethod
     def resource_added_message_by_type(resource_name, collection_name, resource_type):

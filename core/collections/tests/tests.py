@@ -4237,9 +4237,9 @@ class ExpansionTest(OCLTestCase):
 
 
     @staticmethod
-    def _expansion_with_resource_version_reference(source, concept_version):
+    def _expansion_with_resource_version_reference(source, concept_version, mnemonic='e1'):
         collection = OrganizationCollectionFactory()
-        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion = ExpansionFactory(collection_version=collection, mnemonic=mnemonic)
         collection.expansion_uri = expansion.uri
         collection.save()
         reference = CollectionReference(
@@ -4419,6 +4419,50 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual(reference.unresolved_reason, REFERENCE_VERSION_NOT_HELD)
         self.assertEqual(list(expansion.concepts.all()), [old])
+
+    def test_add_references_marks_pinned_reference_no_version_holds_on_an_auto_generated_expansion(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        old.sources.remove(v1)
+
+        for is_resolution_on, reason in ((True, REFERENCE_VERSION_NOT_HELD), (False, REFERENCE_FOUND_NOTHING)):
+            with self.subTest(is_resolution_on=is_resolution_on), patch.object(
+                    CollectionReference, 'is_resource_version_repo_resolution_on', return_value=is_resolution_on), \
+                    patch.object(Expansion, 'index_resources'):
+                _, expansion, reference = self._expansion_with_resource_version_reference(
+                    source, old, 'autoexpand-HEAD')
+                self.assertTrue(expansion.is_auto_generated)
+                expansion.add_references([reference])
+
+                self.assertEqual(reference.unresolved_reason, reason)
+                self.assertEqual(expansion.concepts.count(), 0)
+
+    def test_release_added_after_is_the_release_missing_what_head_holds(self):
+        source = OrganizationSourceFactory()
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        user = collection.created_by
+
+        def reference(**kwargs):
+            return CollectionReference(collection=collection, system=source.uri, **kwargs)
+
+        self.assertEqual(reference(code='c1').get_release_added_after(expansion, user), release)
+        # with the resolution toggle on, it would resolve in HEAD instead
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=False):
+            self.assertEqual(
+                reference(code='c1', resource_version=concept.get_latest_version().version).get_release_added_after(
+                    expansion, user),
+                release)
+        self.assertIsNone(reference(code='c2').get_release_added_after(expansion, user))
+        self.assertIsNone(reference(code='c1', version='v1').get_release_added_after(expansion, user))
+        self.assertIsNone(reference(filter=[{'property': 'q', 'value': 'c1'}]).get_release_added_after(
+            expansion, user))
+
+        release.released = False
+        release.save()
+        self.assertIsNone(reference(code='c1').get_release_added_after(expansion, user))
 
     def test_add_references_marks_include_references_that_add_nothing(self):
         source = OrganizationSourceFactory()
