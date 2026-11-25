@@ -865,10 +865,18 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.update_concepts_count(sync)
         self.update_mappings_count(sync)
 
+    def clear_counted_cache(self, field):
+        # a version's cached lists carry its stored count; HEAD's lists aren't cached
+        if not self.is_head:
+            (self.clear_concepts_cache if field == 'active_concepts' else self.clear_mappings_cache)()
+
     def update_mappings_count(self, sync=False):
         if sync or get(settings, 'TEST_MODE'):
+            before = self.active_mappings
             self.set_active_mappings()
             self.save(update_fields=['active_mappings'])
+            if before != self.active_mappings:
+                self.clear_counted_cache('active_mappings')
         elif self.__class__.__name__ == 'Source':
             self.queue_count_task(update_source_active_mappings_count)
         elif self.__class__.__name__ == 'Collection':
@@ -876,8 +884,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     def update_concepts_count(self, sync=False):
         if sync or get(settings, 'TEST_MODE'):
+            before = self.active_concepts
             self.set_active_concepts()
             self.save(update_fields=['active_concepts'])
+            if before != self.active_concepts:
+                self.clear_counted_cache('active_concepts')
         elif self.__class__.__name__ == 'Source':
             self.queue_count_task(update_source_active_concepts_count)
         elif self.__class__.__name__ == 'Collection':

@@ -98,9 +98,8 @@ class MappingListView(MappingBaseView, ListWithHeadersMixin, CreateModelMixin):
                 through_qs = Mapping.sources.through.objects.filter(source_id=parent.id)
                 filters = Mapping.get_filters_for_criterion(
                     {k: v for k, v in self.params.items() if k not in ['is_latest']}, 'mapping')
-                exclude_retired = 'mapping__retired' in filters  # filters will have it false to exclude
-                self.total_count = through_qs.filter(
-                    mapping__retired=False, mapping__is_active=True).count() if exclude_retired else through_qs.count()
+                self.total_count = self.count_repo_version_members(
+                    through_qs, filters, 'mapping', parent.active_mappings)
                 queryset = Mapping.objects.filter(
                     id__in=through_qs.filter(
                         **filters, mapping__is_active=True

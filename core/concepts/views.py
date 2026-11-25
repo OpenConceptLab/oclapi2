@@ -257,9 +257,9 @@ class ConceptListView(ConceptHierarchyMixin, ConceptBaseView, ListWithHeadersMix
                 through_qs = Concept.sources.through.objects.filter(source_id=parent.id)
                 filters = Concept.get_filters_for_criterion(
                     {k: v for k, v in self.params.items() if k not in ['is_latest']}, 'concept')
-                exclude_retired = 'concept__retired' in filters  # filters will have it false to exclude
-                self.total_count = through_qs.filter(
-                    concept__retired=False, concept__is_active=True).count() if exclude_retired else through_qs.count()
+                only_parent_less = self.request.query_params.get('onlyParentLess', False) in TRUTHY
+                self.total_count = self.count_repo_version_members(
+                    through_qs, filters, 'concept', None if only_parent_less else parent.active_concepts)
                 queryset = Concept.objects.filter(
                     id__in=through_qs.filter(
                         **filters, concept__is_active=True

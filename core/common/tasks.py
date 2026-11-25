@@ -1103,6 +1103,7 @@ def update_active_count(model, instance_id, field):
             if before != getattr(instance, field):
                 # an update, not a save: search documents hold no counts, so there's nothing to index
                 model.objects.filter(id=instance_id).update(**{field: getattr(instance, field)})
+                transaction.on_commit(lambda: instance.clear_counted_cache(field))
 
 
 @app.task(base=QueueOnceCustomTask, once=COUNT_TASK_ONCE)
