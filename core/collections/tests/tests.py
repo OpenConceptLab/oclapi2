@@ -4236,6 +4236,42 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
         self.assertEqual(expansion.unresolved_repo_versions, [])
 
+    def test_rebuild_keeps_a_retired_version_system_version_names_by_its_url(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        for entry in (f'{source.uri}v1/', f'{source.uri}|v1'):
+            with self.subTest(entry=entry):
+                collection = OrganizationCollectionFactory()
+                expansion = ExpansionFactory(
+                    collection_version=collection, mnemonic='e1', parameters={'system-version': entry})
+                collection.expansion_uri = expansion.uri
+                collection.save()
+                CollectionReference(
+                    expression=source.uri + 'concepts/c1/', collection=collection, system=source.uri,
+                    code='c1').save()
+                Source.objects.filter(id=v1.id).update(retired=True)
+
+                self._rebuild(collection, expansion)
+
+                self.assertEqual(list(expansion.concepts.all()), [old])
+                self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
+                self.assertEqual(expansion.unresolved_repo_versions, [])
+
+    def test_rebuild_resolves_a_reference_whose_system_names_a_retired_version_by_its_url(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        CollectionReference(expression=v1.uri + 'concepts/c1/', collection=collection, system=v1.uri, code='c1').save()
+        Source.objects.filter(id=v1.id).update(retired=True)
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        recorded = [*expansion.explicit_source_versions.all(), *expansion.evaluated_source_versions.all()]
+        self.assertEqual(recorded, [v1])
+        self.assertEqual(expansion.unresolved_repo_versions, [])
+
     def test_rebuild_drops_resource_version_held_by_older_release_with_toggle_off(self):
         source, old, _, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
         collection, expansion, _ = self._expansion_with_resource_version_reference(source, old)
