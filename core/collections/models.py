@@ -2782,9 +2782,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 health=None, health_is_current=None, health_revision=F('health_revision') + 1)
         default = expansions.filter(uri=collection_version.expansion_uri).only('id', 'is_processing').first() \
             if collection_version.expansion_uri else None
-        if default and default.is_processing:
-            # its build computes health once it ends
-            cls.mark_health_not_current([default.id])
+        if default and default.is_processing and cls.is_health_on():
+            # out of date, not None: its build computes health once it ends
+            expansions.filter(id=default.id).update(
+                health_is_current=False, health_revision=F('health_revision') + 1)
         elif default:
             default.mark_health_out_of_date()
 

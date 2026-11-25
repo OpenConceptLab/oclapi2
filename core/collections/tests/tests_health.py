@@ -716,6 +716,29 @@ class ExpansionHealthStorageTest(OCLTestCase):
             Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id),
             ({'state': EMPTY}, True))
 
+    def test_a_new_default_still_building_is_marked_out_of_date_until_its_build_ends(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+        revision = Expansion.objects.values_list('health_revision', flat=True).get(id=new_default.id)
+
+        with patch.object(ExpansionHealth, 'compute') as compute:
+            self.set_default(new_default)
+
+        compute.assert_not_called()
+        health_revision, health, is_current = Expansion.objects.values_list(
+            'health_revision', 'health', 'health_is_current').get(id=new_default.id)
+        self.assertGreater(health_revision, revision)
+        self.assertEqual((health, is_current), (None, False))
+
+    def test_a_new_default_still_building_with_health_off_is_only_marked_not_current(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+
+        with patch.object(Expansion, 'is_health_on', return_value=False):
+            self.set_default(new_default)
+
+        self.assertIsNone(Expansion.objects.values_list('health_is_current', flat=True).get(id=new_default.id))
+
     def test_a_build_of_the_old_default_ending_after_the_switch_stores_no_health(self):
         new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
         rebuilding = Expansion.objects.get(id=self.expansion.id)
