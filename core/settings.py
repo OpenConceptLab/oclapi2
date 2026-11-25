@@ -198,6 +198,7 @@ REDOC_SETTINGS = {
 
 MIDDLEWARE = [
     'core.middlewares.middlewares.FhirErrorMiddleware',  # outermost: a FHIR path's error is an OperationOutcome
+    'core.middlewares.middlewares.SlowRequestLogMiddleware',  # next, so it times the whole request
     'django.middleware.gzip.GZipMiddleware',
     'cid.middleware.CidMiddleware',
     'core.middlewares.middlewares.CustomLoggerMiddleware',
@@ -597,6 +598,9 @@ FHIR_VALUE_SET_REFERENCE_LIMIT = int(os.environ.get('FHIR_VALUE_SET_REFERENCE_LI
 FHIR_CONCEPT_MAP_MAPPING_LIMIT = int(os.environ.get('FHIR_CONCEPT_MAP_MAPPING_LIMIT', 1000))
 FHIR_EXPAND_MAX_COUNT = int(os.environ.get('FHIR_EXPAND_MAX_COUNT', 1000))
 FHIR_TRANSLATE_MATCH_LIMIT = int(os.environ.get('FHIR_TRANSLATE_MATCH_LIMIT', 1000))
+# A request taking this long or longer writes a `slow_request` line to the API log (SlowRequestLogMiddleware); 0 turns
+# it off
+SLOW_REQUEST_LOG_MS = int(os.environ.get('SLOW_REQUEST_LOG_MS', 2000))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 200*1024*1024  # i.e. 200MBs before throwing RequestDataTooBig
 FILE_UPLOAD_MAX_MEMORY_SIZE = 25*1024*1024  # i.e. 25MBs before file is streamed directly to temp file
 
