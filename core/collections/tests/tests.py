@@ -4332,6 +4332,30 @@ class ExpansionTest(OCLTestCase):
             [(entry['url'], entry['version']) for entry in entries],
             [('/orgs/missing/sources/one/', 'v1'), ('/orgs/missing/sources/two/', 'v1')])
 
+    def test_add_references_merges_into_the_stored_entries_not_a_stale_copy(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.add_references(
+            [self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')], index=False)
+        stale = Expansion.objects.get(id=expansion.id)
+        # what a delete of that reference writes while the add runs
+        Expansion.objects.filter(id=expansion.id).update(unresolved_repo_versions=[])
+
+        stale.add_references([self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
+
+    def test_merge_unresolved_entries_keeps_their_order(self):
+        def entry(url):
+            return {'url': url, 'namespace': None, 'version': 'v1', 'type': 'reference.system'}
+        evaluated = {('reference.system', '/b/', 'v1'), ('reference.system', '/d/', 'v1')}
+
+        merged = Expansion.merge_unresolved_entries(
+            [entry('/a/'), entry('/b/'), entry('/c/')], [entry('/d/'), entry('/b/'), entry('/b/')], evaluated)
+
+        self.assertEqual([item['url'] for item in merged], ['/a/', '/b/', '/c/', '/d/'])
+
     def test_add_references_drops_an_unresolved_entry_once_it_resolves(self):
         source = OrganizationSourceFactory()
         collection = OrganizationCollectionFactory()

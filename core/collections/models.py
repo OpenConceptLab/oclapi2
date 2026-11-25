@@ -1998,7 +1998,6 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         unresolved_repo_versions = []
         # what this add evaluated: earlier entries for these are replaced by what it finds now
         evaluated_entry_keys = set()
-        existing_unresolved_repo_versions = list(self.unresolved_repo_versions or [])
         _system_version_cache = {}
 
         if not is_adding_all:
@@ -2219,11 +2218,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         self.explicit_source_versions.add(*compact(explicit_system_versions))
         self.evaluated_collection_versions.add(*compact(evaluated_valueset_versions))
         self.evaluated_source_versions.add(*compact(evaluated_system_versions))
-        merged_unresolved_repo_versions = self.merge_unresolved_entries(
-            self.unresolved_repo_versions or [], unresolved_repo_versions, evaluated_entry_keys)
-        if merged_unresolved_repo_versions != existing_unresolved_repo_versions:
-            self.unresolved_repo_versions = merged_unresolved_repo_versions
-            # only what this add found: a whole-row save from a copy loaded during a build would restore is_processing
+        # merged into the stored row, not this copy, so what a delete dropped meanwhile stays dropped
+        stored_unresolved_repo_versions = list(Expansion.objects.filter(id=self.id).values_list(
+            'unresolved_repo_versions', flat=True).first() or [])
+        self.unresolved_repo_versions = self.merge_unresolved_entries(
+            [] if force_reevaluate and is_adding_all else stored_unresolved_repo_versions,
+            unresolved_repo_versions, evaluated_entry_keys)
+        if self.unresolved_repo_versions != stored_unresolved_repo_versions:
+            # only this field: a whole-row save from a copy loaded during a build would restore is_processing
             self.save(update_fields=['unresolved_repo_versions', 'updated_at'])
         self.dedupe_resources()
         if force_reevaluate and is_adding_all:
@@ -2403,15 +2405,29 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
     @classmethod
     def merge_unresolved_entries(cls, existing, found, evaluated_keys):
-        """Earlier entries this add didn't evaluate, then what it found unresolved, without duplicates"""
-        merged, seen = [], set()
-        kept = [entry for entry in existing if cls.get_unresolved_entry_key(entry) not in evaluated_keys]
-        for entry in [*kept, *found]:
+        """Earlier entries in place, each this add evaluated replaced by what it found for it now, then the new
+        ones, without duplicates"""
+        found_by_key = {}
+        for entry in found:
+            found_by_key.setdefault(cls.get_unresolved_entry_key(entry), []).append(entry)
+        merged, placed = [], set()
+        for entry in existing:
+            key = cls.get_unresolved_entry_key(entry)
+            if key not in evaluated_keys:
+                merged.append(entry)
+            elif key not in placed:
+                placed.add(key)
+                merged += found_by_key.get(key, [])
+        for key, entries in found_by_key.items():
+            if key not in placed:
+                merged += entries
+        unique, seen = [], set()
+        for entry in merged:
             identity = json.dumps(entry, sort_keys=True, default=str)
             if identity not in seen:
                 seen.add(identity)
-                merged.append(entry)
-        return merged
+                unique.append(entry)
+        return unique
 
     def drop_unresolved_entries_of_deleted_references(self):
         """A deleted reference's unresolved entries go with it, so deleting it clears what it left unresolved. The
