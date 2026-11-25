@@ -12,7 +12,7 @@ from core.collections.health import (
     ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.constants import EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
-from core.collections.models import CollectionReference, Expansion
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
 from core.common.tasks import seed_children_to_new_version, recheck_expansion_health
@@ -666,6 +666,36 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertIsNone(other.update_health())
         self.assertEqual(Expansion.objects.values_list('health', 'health_is_current').get(id=other.id), (None, None))
         self.assertTrue(self.stored()[1])
+
+    def set_default(self, expansion):
+        collection = Collection.objects.get(id=self.collection.id)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+    def test_a_new_default_gets_health_now_and_the_old_default_drops_its_own(self):
+        self.assertTrue(self.stored()[1])
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        self.assertEqual(
+            Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id), (None, None))
+
+        self.set_default(new_default)
+
+        health, is_current = Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id)
+        self.assertTrue(is_current)
+        self.assertEqual(health['state'], EMPTY)
+        self.assertEqual(self.stored(), (None, None))
+
+    def test_a_new_default_with_health_off_is_only_marked_not_current(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+
+        with patch.object(Expansion, 'is_health_on', return_value=False), \
+                patch.object(ExpansionHealth, 'compute') as compute:
+            self.set_default(new_default)
+
+        compute.assert_not_called()
+        self.assertEqual(
+            Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id), (None, None))
+        self.assertEqual(self.stored(), (None, None))
 
     def test_a_change_while_it_computes_is_not_stored_as_current(self):
         computed = []

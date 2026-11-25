@@ -181,6 +181,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.resolve_url_registry_entries_later()
         if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
             Expansion.mark_health_not_current_for_repository(self)
+        if self.id and not is_new and 'expansion_uri' in dirty_fields:
+            Expansion.on_default_expansion_change(self, dirty_fields['expansion_uri'])
 
     def post_create_actions(self):
         if self.should_auto_expand:
@@ -2769,6 +2771,20 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         ).values_list('id', flat=True).distinct())
         cls.mark_health_not_current(expansion_ids)
         return expansion_ids
+
+    @classmethod
+    def on_default_expansion_change(cls, collection_version, previous_uri):
+        """Only the default keeps health: the one that stops being it drops its stored health, and the new default
+        is recomputed now rather than by the nightly recheck"""
+        expansions = cls.objects.filter(collection_version_id=collection_version.id)
+        if previous_uri and previous_uri != collection_version.expansion_uri:
+            # bumped, so a run that started while it was the default can't store its result
+            expansions.filter(uri=previous_uri).update(
+                health=None, health_is_current=None, health_revision=F('health_revision') + 1)
+        default = expansions.filter(uri=collection_version.expansion_uri).first() \
+            if collection_version.expansion_uri else None
+        if default:
+            default.mark_health_out_of_date()
 
     @classmethod
     def mark_health_not_current_for_value_set(cls, collection_version):
