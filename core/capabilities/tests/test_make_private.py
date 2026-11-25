@@ -401,8 +401,9 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
 
     def test_a_rest_edit_that_sends_no_access_doesn_t_write_the_access_column(self):
         """
-        So a concurrent write's access stays whenever it commits, with no row lock: the edit runs under autocommit, as
-        other REST writes do. An edit that sends the access it loaded doesn't write it either; one that changes it does.
+        So a concurrent write's access stays whenever it commits, with no row lock. An edit that sends the access it
+        loaded doesn't write it either; one that changes it does, and a source's locks its row first, so an overlapping
+        access edit waits for it.
         """
         PrivateGatePolicy.refuse = False
         for repo in (self.source, self.collection):
@@ -421,7 +422,8 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                              '"name" = ' in sql and sql.endswith(row)]
                     self.assertEqual(len(saves), 1, saves)
                     self.assertEqual('"public_access" = ' in saves[0], writes)
-                    self.assertEqual([sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')], [])
+                    locks = [sql for sql in sqls if sql.endswith('FOR NO KEY UPDATE')]
+                    self.assertEqual(len(locks), int(writes and repo is self.source), locks)
 
     def test_a_rest_edit_that_sends_no_access_keeps_an_access_changed_between_its_read_and_its_save(self):
         """Its save leaves the column out, and it answers with the access the row has after it."""
@@ -655,13 +657,28 @@ class IndexEnqueueUnderAutocommitTest(OCLAPITransactionTestCase):
 class RestEditIndexEnqueueTest(MakePrivateTestMixin, OCLAPITransactionTestCase):
     @patch('core.common.models.handle_save')
     def test_a_failed_index_enqueue_reaches_a_rest_edit_that_sends_no_access(self, handle_save_task):
-        """The edit runs under autocommit, so the broker's error reaches it rather than being only logged."""
+        """The broker's error reaches the edit rather than being only logged."""
         handle_save_task.apply_async.side_effect = ConnectionError('broker down')
 
         for repo in (self.source, self.collection):
             with self.subTest(uri=repo.uri), override_settings(TEST_MODE=False, ES_SYNC=True):
                 with self.assertRaises(ConnectionError):
                     self.request('patch', repo.uri, {'name': 'Renamed'})
+
+
+class RestEditOfBlankAccessIndexEnqueueTest(MakePrivateTestMixin, OCLAPITransactionTestCase):
+    @patch('core.common.models.handle_save')
+    def test_a_failed_index_enqueue_reaches_a_rest_edit_of_a_row_stored_blank(self, handle_save_task):
+        """That edit saves the row under a lock, in a transaction: the broker's error still reaches it."""
+        handle_save_task.apply_async.side_effect = ConnectionError('broker down')
+
+        for repo in (self.source, self.collection):
+            type(repo).objects.filter(id=repo.id).update(public_access='')
+            with self.subTest(uri=repo.uri), override_settings(TEST_MODE=False, ES_SYNC=True):
+                with self.assertRaises(ConnectionError):
+                    self.request('patch', repo.uri, {'name': 'Renamed'})
+            repo.refresh_from_db()
+            self.assertEqual(repo.public_access, ACCESS_TYPE_NONE)
 
 
 @override_settings(CAPABILITY_POLICY=PRIVATE_GATE_POLICY)
