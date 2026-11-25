@@ -4045,19 +4045,47 @@ class ExpansionTest(OCLTestCase):
     def test_resolved_repo_updates_leave_out_a_version_a_reference_names(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
-        _, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        source, (source_v1, source_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
         expansion.explicit_source_versions.add(source_v1)
+        # no reference names it any more, so a rebuild drops it
+        self.assertEqual(
+            expansion.get_resolved_repo_version_diff_with_latest_updates(), {source_v1.url: source_v2.url})
+
+        CollectionReference(
+            expression=f'{source.uri}v1/concepts/c1/', collection=collection, system=source.uri, version='v1',
+            code='c1').save()
 
         self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
 
-    def test_resolved_repo_updates_list_a_version_reached_through_a_concept_version(self):
+    def test_resolved_repo_updates_leave_out_a_version_a_reference_s_system_names(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection)
-        source, (source_v1, source_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        _, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
         CollectionReference(
-            expression=f'{source.uri}concepts/c1/123/', collection=collection, system=source.uri, code='c1',
-            resource_version='123').save()
-        expansion.explicit_source_versions.add(source_v1)
+            expression=f'{source_v1.uri}concepts/c1/', collection=collection, system=source_v1.uri, code='c1').save()
+        expansion.evaluated_source_versions.add(source_v1)
+
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+    def test_resolved_repo_updates_leave_out_the_release_holding_a_concept_version(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        _, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        expansion.explicit_source_versions.add(v1)
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True):
+            self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+        # with the toggle off a rebuild records the latest release instead
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=False):
+            self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {v1.url: v2.url})
+
+    def test_resolved_repo_updates_with_no_parameters(self):
+        collection = OrganizationCollectionFactory()
+        _, (source_v1, source_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.evaluated_source_versions.add(source_v1)
+        Expansion.objects.filter(id=expansion.id).update(parameters=None)
+        expansion.refresh_from_db()
 
         self.assertEqual(
             expansion.get_resolved_repo_version_diff_with_latest_updates(), {source_v1.url: source_v2.url})
@@ -4092,6 +4120,9 @@ class ExpansionTest(OCLTestCase):
         other, (other_v1,) = self._released_versions(OrganizationSourceFactory, 'v1')
         expansion = ExpansionFactory(collection_version=collection, parameters={'system-version': f'{other.uri}|HEAD'})
         # HEAD named by a reference's version, and by system-version
+        CollectionReference(
+            expression=f'{source.uri}HEAD/concepts/c1/', collection=collection, system=source.uri, version='HEAD',
+            code='c1').save()
         expansion.explicit_source_versions.add(source)
         expansion.evaluated_source_versions.add(other)
 

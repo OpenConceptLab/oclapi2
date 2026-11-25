@@ -2561,35 +2561,76 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
 
         return diff
 
-    def get_repo_version_ids_a_rebuild_keeps(self):
-        """By relation, the recorded versions a rebuild keeps: those references name (unless through a concept or
-        mapping version, re-resolved), those system-version names, and a lock-built expansion's value set locks"""
-        re_resolved_repos = set()
-        resource_versioned = self.collection_version.references.exclude(
-            models.Q(resource_version__isnull=True) | models.Q(resource_version='') | models.Q(system__isnull=True)
-        ).filter(models.Q(version__isnull=True) | models.Q(version='')).order_by('system', 'id').distinct('system')
-        for reference in resource_versioned:
-            version = reference.resolve_expression_system_version
-            if version:
-                re_resolved_repos.add(drop_version(version.uri))
+    def get_repo_version_ids_a_rebuild_keeps(self):  # pylint: disable=too-many-locals,too-many-branches
+        """By relation, the recorded versions a rebuild records again: those references or system-version name, the
+        release a concept or mapping version picks, and a lock-built expansion's value set locks"""
+        from core.sources.models import Source
+        default_namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+        system_versions = [
+            version for _, version in self.resolve_system_version_entries(
+                get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM), default_namespace) if version.id
+        ]
+        overridden_repos = {drop_version(version.uri) for version in system_versions}
         kept = {
-            'explicit_source_versions': {
-                version.id for version in self.explicit_source_versions.filter()
-                if drop_version(version.uri) not in re_resolved_repos
-            },
-            'explicit_collection_versions': set(self.explicit_collection_versions.values_list('id', flat=True)),
-            'evaluated_source_versions': set(),
+            'explicit_source_versions': set(),
+            'explicit_collection_versions': set(),
+            'evaluated_source_versions': {version.id for version in system_versions},
             'evaluated_collection_versions': set(
                 self.evaluated_collection_versions.filter(is_active=True).values_list('id', flat=True)
             ) if self.built_with == VERSION_EXPANSION_LOCK else set(),
         }
-        system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
-        if system_versions:
-            namespace = self.get_system_version_namespace(self.collection_version.parent_url)
-            kept['evaluated_source_versions'] = {
-                version.id for _, version in self.resolve_system_version_entries(system_versions, namespace)
-                if version.id
-            }
+        resolved = {}
+
+        def resolve(klass, url, namespace, version=None):
+            key = (klass, url, namespace, version)
+            if key not in resolved:
+                repo_version = klass.resolve_reference_expression(url, namespace, version)[0]
+                resolved[key] = repo_version if repo_version.id else None
+            return resolved[key]
+
+        evaluated_versions, resource_versioned = [*system_versions], {}
+        references = self.collection_version.references.filter(
+            models.Q(system__isnull=False) | models.Q(valueset__isnull=False))
+        no_resource_version = models.Q(resource_version__isnull=True) | models.Q(resource_version='')
+        # each distinct way of naming repositories once; only concept or mapping version references in full
+        named = references.filter(no_resource_version).values_list(
+            'system', 'version', 'namespace', 'valueset').order_by().distinct()
+        for reference in [
+                *(CollectionReference(system=system, version=version, namespace=namespace, valueset=valueset)
+                  for system, version, namespace, valueset in named),
+                *references.exclude(no_resource_version)]:
+            namespace = reference.namespace or default_namespace
+            for valueset in reference.valueset or []:
+                version = resolve(Collection, valueset, namespace) \
+                    if valueset and CollectionReference.is_explicit_valueset(valueset) else None
+                if version:  # explicit or evaluated, as the toggle classified it, a named version stays
+                    kept['explicit_collection_versions'].add(version.id)
+                    kept['evaluated_collection_versions'].add(version.id)
+            if not reference.system:
+                continue
+            if reference.can_resolve_to_repo_version_with_resource_version:
+                latest = resolve(Source, reference.system, namespace)
+                if latest:
+                    resource_versioned.setdefault(latest.id, (latest, []))[1].append(reference)
+                continue
+            version = resolve(Source, reference.system, namespace, reference.version or None)
+            if not version:
+                continue
+            if not reference.is_versionless_expression:
+                kept['explicit_source_versions'].add(version.id)
+                continue
+            evaluated_versions.append(version)
+            # a version its system names, unless system-version decides that repository; a bare one moves
+            if reference.names_repo_version and drop_version(version.uri) not in overridden_repos:
+                kept['evaluated_source_versions'].add(version.id)
+        if CollectionReference.is_resource_version_repo_resolution_on():
+            for latest, references in resource_versioned.values():
+                holders = CollectionReference.get_repo_versions_holding_resource_versions(references, latest)
+                for reference in references:
+                    picked = CollectionReference.pick_repo_version_with_resource_version(
+                        holders.get(reference.resource_version_key, []), evaluated_versions)
+                    if picked:
+                        kept['explicit_source_versions'].add(picked.id)
         return kept
 
     def dry_run_rebuild(self):
