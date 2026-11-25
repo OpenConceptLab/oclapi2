@@ -1217,6 +1217,24 @@ class SourceChildMixin(ChecksumModel):
         if self.versioned_object_id:
             list(self.__class__.objects.select_for_update().filter(id=self.versioned_object_id).only('id'))
 
+    def keep_source_access_on_commit(self):
+        """Once this row commits, takes any access an open edit of its source sets: that edit's cascade can't reach a
+        row inserted after the cascade began. It runs after the commit, so it waits holding no lock of the caller's."""
+        transaction.on_commit(self._take_committed_source_access, robust=True)
+
+    def _take_committed_source_access(self):
+        with transaction.atomic():
+            # FOR SHARE waits for an access edit still open on the source, and holds off the next until this commits
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT public_access FROM sources WHERE id = %s FOR SHARE', [self.parent_id])
+                row = cursor.fetchone()
+            if not row or not self.__class__.objects.filter(id=self.id).exclude(
+                    public_access=row[0]).update(public_access=row[0]):
+                return
+        self.public_access = row[0]
+        if self.should_index:
+            self.index()
+
     def _lock_and_get_latest_versions(self):
         """
         Locks the versioned object so concurrent new versions of it run one at a time, then returns its versions flagged
@@ -1262,6 +1280,7 @@ class SourceChildMixin(ChecksumModel):
                 self.save(**kwargs)
 
                 if self.id:
+                    self.keep_source_access_on_commit()
                     self.post_version_create(parent, parent_concept_uris)
                     if not prev_latest or _hierarchy_processing:
                         self.set_checksums()
