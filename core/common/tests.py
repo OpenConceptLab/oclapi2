@@ -4162,15 +4162,19 @@ class ViewableCollectionFacetURLsTest(OCLTestCase):
         from core.common.views import BaseAPIView
         head = OrganizationCollectionFactory()
         v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        expansion = ExpansionFactory(collection_version=v1, mnemonic='e1')
         ownerless = OrganizationCollectionFactory(mnemonic=head.mnemonic, version='v2')
+        ExpansionFactory(collection_version=ownerless, mnemonic='e1')
         Collection.objects.filter(id=ownerless.id).update(
             organization=None, user=None, uri=f'/collections/{head.mnemonic}/')
 
         urls = BaseAPIView.get_viewable_collection_facet_urls(
-            {'collection': {head.mnemonic}, 'collection_version': {HEAD, 'v1', 'v2'}}, [head.mnemonic], Q())
+            {'collection': {head.mnemonic}, 'collection_version': {HEAD, 'v1', 'v2'}, 'expansion': {'e1'}},
+            [head.mnemonic], Q())
 
         self.assertEqual(urls, {
             ('collection', head.mnemonic): {head.uri, v1.uri},
             ('collection_version', HEAD): {head.uri},
             ('collection_version', 'v1'): {v1.uri},
+            ('expansion', 'e1'): {expansion.uri},
         })
