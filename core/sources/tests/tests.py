@@ -3599,6 +3599,47 @@ class SourceHeadExportKeyTest(OCLTestCase):
         self.assertIsNotNone(Collection.objects.get(id=collection.id).last_child_removal_at)
 
 
+class SourceNumericMnemonicIndexTest(OCLTestCase):
+    @staticmethod
+    def explain_max_query(table, get_max):
+        with CaptureQueriesContext(connection) as context:
+            get_max()
+        sql = next(query['sql'] for query in context.captured_queries if '::bigint' in query['sql'])
+        with transaction.atomic(), connection.cursor() as cursor:
+            # tiny tables let the planner read by any parent_id index; hide the others, then roll back
+            cursor.execute(
+                "select indexname from pg_indexes where tablename = %s and indexname <> %s "
+                "and indexdef not like 'CREATE UNIQUE%%'", [table, f'{table}_parent_numeric_mnemonic_idx'])
+            for (index,) in cursor.fetchall():
+                cursor.execute(f'drop index {index}')
+            cursor.execute('set local enable_seqscan = off')
+            cursor.execute(f'explain {sql}')
+            plan = '\n'.join(row[0] for row in cursor.fetchall())
+            transaction.set_rollback(True)
+        return plan
+
+    def test_indexes_exist(self):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'select tablename, indexname from pg_indexes where indexname in %s order by tablename',
+                [('concepts_parent_numeric_mnemonic_idx', 'mappings_parent_numeric_mnemonic_idx')])
+            self.assertEqual(cursor.fetchall(), [
+                ('concepts', 'concepts_parent_numeric_mnemonic_idx'),
+                ('mappings', 'mappings_parent_numeric_mnemonic_idx')])
+
+    def test_highest_mnemonic_is_read_from_its_index(self):
+        source = OrganizationSourceFactory()
+        MappingFactory(parent=source, mnemonic='7')
+        ConceptFactory(parent=source, mnemonic='9')
+
+        for table, get_max in (('mappings', source.get_max_mapping_mnemonic),
+                               ('concepts', source.get_max_concept_mnemonic)):
+            plan = self.explain_max_query(table, get_max)
+            self.assertIn(f'using {table}_parent_numeric_mnemonic_idx on {table}', plan, plan)
+        self.assertEqual(source.get_max_mapping_mnemonic(), 7)
+        self.assertEqual(source.get_max_concept_mnemonic(), 9)
+
+
 class SourceAccessCascadeMixin:
     """A REST edit of a source's access, watched from another connection. One test per class, as a transaction test's
     flush removes the fixtures."""
