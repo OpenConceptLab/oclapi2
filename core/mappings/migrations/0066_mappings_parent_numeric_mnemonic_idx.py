@@ -1,0 +1,50 @@
+"""A source's highest numeric mnemonic is read by a backward scan of this index. On a large table, build it by hand
+before deploying (CREATE_NEW_INDEX), so a build that outlasts the health check can't leave it INVALID."""
+from django.db import migrations
+
+TABLE = 'mappings'
+NEW_INDEX = 'mappings_parent_numeric_mnemonic_idx'
+CREATE_NEW_INDEX = (
+    f'create index concurrently if not exists {NEW_INDEX} on {TABLE} (parent_id, ((mnemonic)::bigint)) '
+    "where id = versioned_object_id and mnemonic::text ~ '^\\d{1,18}$';"
+)
+MAX_ROWS_TO_BUILD_HERE = 3_000_000
+MAX_BYTES_TO_BUILD_HERE = 1024 ** 3  # for a table never analyzed, whose reltuples is -1
+
+
+def add_index(apps, schema_editor):  # pylint: disable=unused-argument
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute('select to_regclass(%s) is not null', [NEW_INDEX])
+        if not cursor.fetchone()[0]:
+            cursor.execute(
+                'select reltuples, pg_relation_size(oid) from pg_class where oid = %s::regclass', [TABLE])
+            rows, size = cursor.fetchone()
+            if rows > MAX_ROWS_TO_BUILD_HERE or (rows < 0 and size > MAX_BYTES_TO_BUILD_HERE):
+                found = f'about {rows:,.0f} rows' if rows >= 0 else f'{size / 1024 ** 3:,.1f} GB and was never analyzed'
+                raise RuntimeError(
+                    f'{TABLE} has {found}: build {NEW_INDEX} by hand before deploying, '
+                    f'then migrate again. {CREATE_NEW_INDEX}')
+            cursor.execute(CREATE_NEW_INDEX)
+
+        cursor.execute('select indisvalid from pg_index where indexrelid = %s::regclass', [NEW_INDEX])
+        if not cursor.fetchone()[0]:
+            raise RuntimeError(
+                f'{NEW_INDEX} is INVALID (an interrupted build). Run `drop index concurrently {NEW_INDEX};`, '
+                f'build it again, then migrate again. {CREATE_NEW_INDEX}')
+
+
+def drop_index(apps, schema_editor):  # pylint: disable=unused-argument
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(f'drop index concurrently if exists {NEW_INDEX};')
+
+
+class Migration(migrations.Migration):
+    atomic = False  # CREATE/DROP INDEX CONCURRENTLY can't run in a transaction
+
+    dependencies = [
+        ('mappings', '0065_mappings_parent_uncounted'),
+    ]
+
+    operations = [
+        migrations.RunPython(add_index, drop_index),
+    ]
