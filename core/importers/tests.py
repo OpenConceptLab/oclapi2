@@ -7813,6 +7813,7 @@ class IsolatedVersionImportTest(OCLTestCase):
                         isolated_version=False)
         parent_versions = Concept.objects.filter(mnemonic='P')
         with override_settings(TEST_MODE=False), \
+                patch('core.common.models.handle_m2m_changed.apply_async'), \
                 patch('core.concepts.models.process_hierarchy_for_concept_version.apply_async') as hierarchy, \
                 patch('core.concepts.models.process_hierarchy_for_new_parent_concept_version.apply_async') as children:
             result = bulk_import_parts_inline.run(
@@ -7920,6 +7921,7 @@ class IsolatedVersionImportTest(OCLTestCase):
         updated = self.concept('C', extras={'changed': True})
         del updated['parent_concept_urls']
         with override_settings(TEST_MODE=False), \
+                patch('core.common.models.handle_m2m_changed.apply_async'), \
                 patch('core.concepts.models.process_hierarchy_for_concept_version.apply_async') as hierarchy:
             result = bulk_import_parts_inline.run([updated], 'ocladmin', True, index=False, snapshot_boundary=True)
             BulkImportParallelRunner.run_hierarchy_tasks(result['hierarchy_tasks'])
