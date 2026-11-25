@@ -1666,6 +1666,32 @@ class CollectionReferenceTest(OCLTestCase):
             CollectionReference(
                 system='http://sys.com', resource_version='1').can_compute_against_other_system_version)
         self.assertTrue(CollectionReference().can_compute_against_other_system_version)
+        # a version in the system URL is named too, so system-version doesn't override it
+        self.assertFalse(
+            CollectionReference(system='/orgs/O/sources/S/v1/').can_compute_against_other_system_version)
+        self.assertFalse(CollectionReference(system='http://sys.com|v1').can_compute_against_other_system_version)
+
+    def test_names_repo_version_reads_the_system_as_the_resolver_does(self):
+        for system, version, expected in (
+                ('/orgs/O/sources/S/', None, False),
+                ('/orgs/O/sources/S', None, False),
+                ('/orgs/O/sources/S/', 'v1', True),
+                ('/orgs/O/sources/S/v1/', None, True),
+                ('/orgs/O/sources/S/v1', None, True),
+                ('/orgs/O/sources/S/v1/?q=a', None, True),
+                ('/users/u/collections/C/v1/', None, True),
+                ('/orgs/O/sources/S/|v1', None, True),
+                ('/orgs/O/sources/S/HEAD/', None, False),
+                ('/orgs/sources/sources/S/', None, False),
+                ('http://example.org/fhir/CodeSystem/S', None, False),
+                ('http://example.org/fhir/CodeSystem/S|v1', None, True),
+                ('http://example.org/orgs/O/sources/S/v1/', None, False),
+                (None, None, False),
+        ):
+            with self.subTest(system=system, version=version):
+                reference = CollectionReference(system=system, version=version)
+                self.assertEqual(reference.names_repo_version, expected)
+                self.assertEqual(reference.is_versionless_expression, not expected)
 
     def test_can_compute_against_system_version(self):
         source = OrganizationSourceFactory()
@@ -4268,10 +4294,51 @@ class ExpansionTest(OCLTestCase):
         self._rebuild(collection, expansion)
 
         self.assertEqual(list(expansion.concepts.all()), [old])
-        # a version named in system without a version field is recorded as evaluated
-        self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
-        self.assertEqual(expansion.explicit_source_versions.count(), 0)
+        # a version named in system is named, as a version field is
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+        self.assertEqual(expansion.evaluated_source_versions.count(), 0)
         self.assertEqual(expansion.unresolved_repo_versions, [])
+
+    @staticmethod
+    def _expansion_locked_to(version):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.evaluated_source_versions.add(version)
+        return collection, expansion
+
+    def test_add_references_evaluates_a_reference_in_the_version_its_system_names(self):
+        _, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        for system in (v1.uri, v1.uri.rstrip('/')):
+            with self.subTest(system=system):
+                collection, expansion = self._expansion_locked_to(v2)
+                reference = CollectionReference(
+                    expression=v1.uri + 'concepts/c1/', collection=collection, system=system, code='c1')
+                reference.save()
+
+                with patch.object(Expansion, 'index_resources'), patch.object(Expansion, 'full_index_resources'):
+                    expansion.add_references([reference])
+
+                self.assertEqual(list(expansion.concepts.all()), [old])
+                self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+                self.assertEqual(list(expansion.evaluated_source_versions.all()), [v2])
+                self.assertEqual(expansion.get_source_versions_resolved_by(reference, v1), [v1])
+
+    def test_system_version_parameter_does_not_override_a_version_the_system_names(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(
+            collection_version=collection, mnemonic='e1', parameters={'system-version': f'{source.uri}|v2'})
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        CollectionReference(expression=v1.uri + 'concepts/c1/', collection=collection, system=v1.uri, code='c1').save()
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+        self.assertNotIn(v2.id, expansion.evaluated_source_versions.values_list('id', flat=True))
 
     def test_rebuild_drops_resource_version_held_by_older_release_with_toggle_off(self):
         source, old, _, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
