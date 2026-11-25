@@ -901,7 +901,9 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         expansions' URIs (to_parent_kwargs_from_uri).
         """
         from core.collections.models import Collection, Expansion
-        versions = Collection.objects.filter(viewable, mnemonic__in=collections)
+        # a version with no owner has a URL no document names
+        versions = Collection.objects.filter(viewable, mnemonic__in=collections).exclude(
+            organization__isnull=True, user__isnull=True)
         urls = {}
         for uri in versions.values_list('uri', flat=True):
             parts = uri.strip('/').split('/')
