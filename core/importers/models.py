@@ -840,7 +840,8 @@ class ConceptImporter(BaseResourceImporter):
 
     def get_assigned_hierarchy(self, result):
         """A new concept's parents when the import assigned its id, so the version commit can link it."""
-        if self.isolated and self.assigns_id and result == CREATED and get(self, 'instance.uri'):
+        if ((self.isolated or self.sync_hierarchy) and self.assigns_id and result == CREATED
+                and get(self, 'instance.uri')):
             return {drop_version(self.instance.uri): self.line_parent_urls}
         return {}
 
@@ -1605,6 +1606,8 @@ class BulkImportInline(BaseImporter):
             self.result['seen'] = {
                 'concepts': sorted(self.seen_concept_ids), 'mappings': sorted(self.seen_mapping_ids),
                 'hierarchy': self.assigned_hierarchy, 'superseded': self.indexer.deferred_superseded_ids}
+        elif self.snapshot_boundary and self.assigned_hierarchy:
+            self.result['assigned_hierarchy'] = self.assigned_hierarchy
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
@@ -1905,7 +1908,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             self.wait_for_snapshot_tasks([seed.celery_result], f'Source Version {version.uri} seed')
 
     @staticmethod
-    def collect_snapshot_hierarchy(part_list, pending_hierarchy):
+    def collect_snapshot_hierarchy(part_list, pending_hierarchy, results):
         """Group explicit hierarchy by source identity; a repository mnemonic may itself be 'concepts'."""
         by_target = {}
         for line in part_list:
@@ -1914,6 +1917,13 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
         for target, lines in by_target.items():
             pending_hierarchy.setdefault(target, {}).update(
                 Concept.get_import_hierarchy_map(lines, include_parentless=True))
+        targets_by_uri = {f'/{kind}s/{owner}/sources/{source}': (kind, owner, source)
+                          for kind, owner, source in by_target}
+        for result in results:
+            for uri, parents in result.get('assigned_hierarchy', {}).items():
+                target = targets_by_uri.get(uri.rsplit('/', 3)[0])
+                if target and parents:
+                    pending_hierarchy[target][uri] = parents
 
     def run_part(self, part_list, pending_hierarchy):
         """Run one part and collect version-bound hierarchy only after its tasks complete."""
@@ -1931,7 +1941,7 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
                 'Parallel snapshot import part'
             self.wait_for_snapshot_tasks(part.results, description)
             if part_type == 'concept':
-                self.collect_snapshot_hierarchy(part_list, pending_hierarchy)
+                self.collect_snapshot_hierarchy(part_list, pending_hierarchy, (task.result for task in part.results))
             elif part_type == 'source version':
                 self.wait_for_source_version(part, part_list[0])
         if is_child:
