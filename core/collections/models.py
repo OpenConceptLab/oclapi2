@@ -2659,7 +2659,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return None
         from core.collections.health import ExpansionHealth
         expansions = Expansion.objects.filter(id=self.id)
-        if not self.is_default:
+        # read now, not from the version a build loaded at its start: the default may have changed since
+        if not Collection.objects.filter(id=self.collection_version_id, expansion_uri=self.uri).exists():
             expansions.update(health=None, health_is_current=None)
             self.health = None
             return None
@@ -2675,7 +2676,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return None
         # the store bumps it too, so an older run that ends after a newer one (a rebuild's) can't overwrite it. Never
         # during a build, which may have cleared the members: the build computes its own once it ends
-        if not expansions.filter(health_revision=revision, is_processing=False).update(
+        if not expansions.filter(
+                health_revision=revision, is_processing=False, collection_version__expansion_uri=F('uri')).update(
                 health=health, health_is_current=True, health_revision=F('health_revision') + 1):
             # marked, or stored by a newer run, while it computed: a fresh run reads the change
             if not expansions.filter(is_processing=True).exists():
@@ -2781,9 +2783,12 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             # bumped, so a run that started while it was the default can't store its result
             expansions.filter(uri=previous_uri).update(
                 health=None, health_is_current=None, health_revision=F('health_revision') + 1)
-        default = expansions.filter(uri=collection_version.expansion_uri).first() \
+        default = expansions.filter(uri=collection_version.expansion_uri).only('id', 'is_processing').first() \
             if collection_version.expansion_uri else None
-        if default:
+        if default and default.is_processing:
+            # its build computes health once it ends
+            cls.mark_health_not_current([default.id])
+        elif default:
             default.mark_health_out_of_date()
 
     @classmethod
