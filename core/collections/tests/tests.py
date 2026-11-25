@@ -4116,6 +4116,20 @@ class ExpansionTest(OCLTestCase):
         with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=False):
             self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {v1.url: v2.url})
 
+    def test_resolved_repo_updates_leave_out_a_version_a_concept_version_reference_s_system_names(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        source, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        CollectionReference(
+            expression=f'{source.uri}v1/concepts/c1/1/', collection=collection, system=source.uri, version='v1',
+            code='c1', resource_version='1').save()
+        expansion.explicit_source_versions.add(source_v1)
+
+        for resolution_on in (False, True):
+            with patch.object(
+                    CollectionReference, 'is_resource_version_repo_resolution_on', return_value=resolution_on):
+                self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
     def test_resolved_repo_updates_with_no_parameters(self):
         collection = OrganizationCollectionFactory()
         _, (source_v1, source_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')

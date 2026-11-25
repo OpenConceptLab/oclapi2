@@ -2588,13 +2588,18 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         references = self.collection_version.references.filter(
             models.Q(system__isnull=False) | models.Q(valueset__isnull=False))
         no_resource_version = models.Q(resource_version__isnull=True) | models.Q(resource_version='')
-        # each distinct way of naming repositories once; only concept or mapping version references in full
-        named = references.filter(no_resource_version).values_list(
+        resolution_on = CollectionReference.is_resource_version_repo_resolution_on()
+        # each distinct way of naming repositories once. Concept or mapping version references are loaded only for
+        # the release pick; without it they keep just what their system or value sets name, as any reference does
+        named = (references.filter(no_resource_version) if resolution_on else references).values_list(
             'system', 'version', 'namespace', 'valueset').order_by().distinct()
+        resource_version_references = references.exclude(no_resource_version).only(
+            'system', 'version', 'namespace', 'valueset', 'code', 'resource_version', 'reference_type', 'expression'
+        ) if resolution_on else []
         for reference in [
                 *(CollectionReference(system=system, version=version, namespace=namespace, valueset=valueset)
                   for system, version, namespace, valueset in named),
-                *references.exclude(no_resource_version)]:
+                *resource_version_references]:
             namespace = reference.namespace or default_namespace
             for valueset in reference.valueset or []:
                 version = resolve(Collection, valueset, namespace) \
@@ -2616,7 +2621,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 kept['explicit_source_versions'].add(version.id)
                 continue
             evaluated_versions.append(version)
-        if CollectionReference.is_resource_version_repo_resolution_on():
+        if resolution_on:
             for latest, references in resource_versioned.values():
                 holders = CollectionReference.get_repo_versions_holding_resource_versions(references, latest)
                 for reference in references:
