@@ -905,6 +905,8 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         urls = {}
         for uri in versions.values_list('uri', flat=True):
             parts = uri.strip('/').split('/')
+            if len(parts) < 4:  # a version with no owner, whose URL no document names
+                continue
             for facet, name in [('collection', parts[3]), ('collection_version', parts[4] if len(parts) > 4 else HEAD)]:
                 if facet in facets and (facet == 'collection' or name in facets[facet]):
                     urls.setdefault((facet, name), set()).add(uri)

@@ -4153,3 +4153,24 @@ class ExtraURLConfsTest(OCLTestCase):
         self.assertEqual(resolve('/consume/').func.view_class, CapabilityConsumeView)
         self.assertEqual(resolve('/capabilities/consume/').func.view_class, CapabilityConsumeView)
         self.assertEqual(urls.urlpatterns[-1].urlconf_name.__name__, 'core.capabilities.urls')
+
+
+class ViewableCollectionFacetURLsTest(OCLTestCase):
+    def test_a_version_with_no_owner_is_skipped(self):
+        from django.db.models import Q
+        from core.collections.models import Collection
+        from core.common.views import BaseAPIView
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        ownerless = OrganizationCollectionFactory(mnemonic=head.mnemonic, version='v2')
+        Collection.objects.filter(id=ownerless.id).update(
+            organization=None, user=None, uri=f'/collections/{head.mnemonic}/')
+
+        urls = BaseAPIView.get_viewable_collection_facet_urls(
+            {'collection': {head.mnemonic}, 'collection_version': {HEAD, 'v1', 'v2'}}, [head.mnemonic], Q())
+
+        self.assertEqual(urls, {
+            ('collection', head.mnemonic): {head.uri, v1.uri},
+            ('collection_version', HEAD): {head.uri},
+            ('collection_version', 'v1'): {v1.uri},
+        })
