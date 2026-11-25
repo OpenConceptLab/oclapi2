@@ -1,3 +1,5 @@
+from contextvars import ContextVar
+
 from django.conf import settings
 from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
@@ -25,6 +27,13 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
 from core.services.storages.postgres import PostgresQL
+
+# Set by a bulk-import part that a Source Version snapshot waits on: no hierarchy work may be left queued behind it.
+INLINE_HIERARCHY = ContextVar('inline_hierarchy', default=False)
+
+
+def is_hierarchy_inline():
+    return INLINE_HIERARCHY.get() or get(settings, 'TEST_MODE', False)
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -637,7 +646,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     @classmethod
     def create_new_version_for(
             cls, instance, data, user, create_parent_version=True, add_prev_version_children=True,
-            _hierarchy_processing=False, is_patch=False, isolated=False, sync_hierarchy=False
+            _hierarchy_processing=False, is_patch=False, isolated=False
     ):  # pylint: disable=too-many-arguments,too-many-locals
         mappings_payload = data.pop('mappings_payload', None)
         prev_latest = Concept.objects.filter(
@@ -650,7 +659,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         instance.set_version_fields(
             data, ('datatype', 'extras', 'external_id', 'retire_reason', 'retired'), isolated)
         instance._isolated = isolated  # pylint: disable=protected-access
-        instance._sync_hierarchy = sync_hierarchy  # pylint: disable=protected-access
         if is_patch:
             prev = instance.versions.exclude(id=instance.id).filter(is_latest_version=True).first()
             new_names = ConceptName.build(data.get('names', [])) if 'names' in data else (
@@ -1161,7 +1169,6 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         if parent_concept_uris:
             parent_concept_uris = cls.get_viewable_parent_uris(parent_concept_uris, user)
         skip_hierarchy_tasks = data.pop('_skip_hierarchy_tasks', False)
-        sync_hierarchy = data.pop('_sync_hierarchy', False)
         mappings_payload = data.pop('mappings_payload', None) or data.pop('mappings', None) or []
         mappings_result = []
         has_mapping_errors = False
@@ -1227,7 +1234,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
             if parent_concept_uris and not skip_hierarchy_tasks:
-                if sync_hierarchy or get(settings, 'TEST_MODE', False):
+                if is_hierarchy_inline():
                     process_hierarchy_for_new_concept(
                         concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
                 else:
@@ -1295,7 +1302,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
     def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children=True):
         if add_prev_version_children:
             task = process_hierarchy_for_new_parent_concept_version
-            if get(settings, 'TEST_MODE', False):
+            if is_hierarchy_inline():
                 task(prev_latest.id, self.id)
             else:
                 task.apply_async((prev_latest.id, self.id), queue='concurrent', permanent=False)
@@ -1305,7 +1312,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             return
         task = process_hierarchy_for_concept_version
         args = (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
-        if get(self, '_sync_hierarchy', False) or get(settings, 'TEST_MODE', False):
+        if is_hierarchy_inline():
             task(*args)
         else:
             task.apply_async(args, queue='concurrent', permanent=False)

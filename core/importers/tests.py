@@ -7786,6 +7786,65 @@ class IsolatedVersionImportTest(OCLTestCase):
         child = release.concepts.exclude(mnemonic='P').get()
         self.assertEqual(set(child.parent_concepts.values_list('mnemonic', flat=True)), {'P'})
 
+    def test_parallel_snapshot_links_generated_child_after_the_last_version(self):
+        child_line = self.concept('Generated', parents=['P'])
+        del child_line['id']
+        runner = self.run_parallel_snapshot_import(
+            [self.source_line, self.version('v1'), child_line, self.concept('P')])
+        self.assertEqual(runner.report['created'], 4)
+        self.assertEqual(self.members('v1'), set())
+        child = Concept.objects.filter(parent__mnemonic='LOINC', is_latest_version=True).exclude(mnemonic='P').get()
+        self.assertEqual(set(child.parent_concepts.values_list('mnemonic', flat=True)), {'P'})
+
+    @patch('core.importers.models.post_import_update_resource_counts.apply_async')
+    @patch('core.importers.models.time.sleep')
+    def test_parallel_snapshot_does_not_cross_an_existing_versions_unfinished_seed(self, sleep_mock, _counts):
+        """A rerun finds the version created; its seed may still be reading HEAD, or may have failed."""
+        self.run_import([self.version('v1')], isolated_version=False)
+        release = Source.objects.get(mnemonic='LOINC', version='v1')
+        for state, dispatched in (('PENDING', ['v1', 'Later']), ('FAILURE', ['v1'])):
+            with self.subTest(state=state):
+                Task.objects.create(id=f'seed-{state}', name='core.common.tasks.seed_children_to_new_version',
+                                    args=['source', release.id, True, False], state=state)
+                seed_result = Mock(state=state)
+                sleep_mock.side_effect = lambda _, result=seed_result: setattr(result, 'state', 'SUCCESS')
+                queued = []
+
+                def queue(part, _is_child, **_):
+                    queued.append(part[0]['id'])
+                    if part[0]['id'] == 'Later':
+                        self.assertEqual(seed_result.state, 'SUCCESS')
+                    return Mock(results=[Mock(state='SUCCESS', result={'json': {'exists': [part[0]]}})])
+
+                runner = BulkImportParallelRunner([self.version('v1'), self.concept('Later')], 'ocladmin', True)
+                with override_settings(TEST_MODE=False), patch.object(runner, 'queue_tasks', side_effect=queue), \
+                        patch.object(Task, 'celery_result', new_callable=PropertyMock, return_value=seed_result):
+                    if state == 'FAILURE':
+                        with self.assertRaisesRegex(RuntimeError, state):
+                            runner.run()
+                    else:
+                        runner.run()
+                self.assertEqual(queued, dispatched)
+
+    def test_parallel_snapshot_retirement_leaves_no_hierarchy_work_queued(self):
+        """The next snapshot must not race the hierarchy of a retired revision or of the parent revisions it makes."""
+        self.run_import([self.concept('G'), self.concept('P', parents=['G']), self.concept('R', parents=['P'])],
+                        isolated_version=False)
+        with override_settings(TEST_MODE=False), \
+                patch('core.concepts.models.process_hierarchy_for_concept_version.apply_async') as hierarchy, \
+                patch('core.concepts.models.process_hierarchy_for_new_parent_concept_version.apply_async') as children:
+            result = bulk_import_parts_inline.run(
+                [{**self.concept('R'), '__action': 'DELETE'}], 'ocladmin', True, index=False, snapshot_boundary=True)
+        self.assertEqual(len(result['json']['deleted']), 1)
+        hierarchy.assert_not_called()
+        children.assert_not_called()
+        retired = Concept.objects.get(mnemonic='R', is_latest_version=True)
+        parent = Concept.objects.get(mnemonic='P', is_latest_version=True)
+        self.assertTrue(retired.retired)
+        self.assertFalse(retired.parent_concepts.exists())  # as the inline path of TEST_MODE leaves it
+        self.assertEqual(Concept.objects.filter(versioned_object_id=parent.versioned_object_id).count(), 3)
+        self.assertTrue(parent.parent_concepts.filter(mnemonic='G').exists())
+
     def test_parallel_version_boundary_preserves_other_sources_pending_links(self):
         """An unrelated release must not consume links whose parent is still to be imported."""
         other_parent = '/orgs/Regen/sources/OTHER/concepts/P/'

@@ -355,11 +355,16 @@ def import_finisher(task_id):
 def bulk_import_parts_inline(  # pylint: disable=too-many-arguments
         self, input_list, username, update_if_exists, index=True, isolated=False, snapshot_boundary=False):
     from core.importers.models import BulkImportInline
-    return BulkImportInline(
-        content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
-        self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index, isolated=isolated,
-        snapshot_boundary=snapshot_boundary
-    ).run()
+    from core.concepts.models import INLINE_HIERARCHY
+    token = INLINE_HIERARCHY.set(snapshot_boundary)
+    try:
+        return BulkImportInline(
+            content=None, username=username, update_if_exists=update_if_exists, input_list=input_list,
+            self_task_id=self.request.id, skip_hierarchy_tasks=True, index=index, isolated=isolated,
+            snapshot_boundary=snapshot_boundary
+        ).run()
+    finally:
+        INLINE_HIERARCHY.reset(token)
 
 
 @app.task
