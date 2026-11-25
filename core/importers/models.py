@@ -1882,8 +1882,6 @@ class BulkImportInline(BaseImporter):
 
 
 class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
-    SNAPSHOT_WAIT_TIMEOUT_SECONDS = 60 * 60
-
     def __init__(
             self, content, username, update_if_exists, parallel=None, self_task_id=None, index=None,
             isolated_version=False
@@ -2142,7 +2140,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
     def wait_for_snapshot_tasks(self, tasks, description):
         """Wait for success, not just a terminal state or a live worker."""
         pending = list(tasks)
-        deadline = time.monotonic() + self.SNAPSHOT_WAIT_TIMEOUT_SECONDS
         while pending:
             incomplete = []
             for task in pending:
@@ -2155,8 +2152,6 @@ class BulkImportParallelRunner(BaseImporter):  # pragma: no cover
             pending = incomplete
             if not pending:
                 return
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f'{description}: timed out awaiting task {pending[0].id}')
             time.sleep(5)
             self.update_elapsed_seconds()
             self.notify_progress()
