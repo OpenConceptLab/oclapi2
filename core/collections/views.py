@@ -104,6 +104,10 @@ class CollectionBaseView(BaseAPIView):
     def set_parent_resource(self):
         self.kwargs['parent_resource'] = self.parent_resource = self.get_owner_from_kwargs()
 
+    def filter_retired_members(self, queryset):
+        """A list of the collection's concepts or mappings: retired ones are left out only for includeRetired=false"""
+        return queryset.filter(retired=False) if self._should_exclude_retired_from_search_results() else queryset
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context.update({'request': self.request, INCLUDE_REFERENCES_PARAM: self.should_include_references()})
@@ -365,7 +369,7 @@ class CollectionReferenceConceptsView(CollectionReferenceAbstractResourcesView):
         return ConceptVersionDetailSerializer if self.is_verbose() else ConceptVersionListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().concepts
+        return self.filter_retired_members(super().get_queryset().concepts)
 
 
 class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
@@ -380,7 +384,7 @@ class CollectionReferenceMappingsView(CollectionReferenceAbstractResourcesView):
         return MappingVersionDetailSerializer if self.is_verbose() else MappingVersionListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().mappings
+        return self.filter_retired_members(super().get_queryset().mappings)
 
 
 class CollectionReferencesMixin:
@@ -681,6 +685,7 @@ class CollectionReferencesPreview(CollectionBaseView):
 
         collection = self.get_object()
         data, cascade, transform = self.get_data()
+        label_context = {'user': self.request.user}  # whose source versions the concepts and mappings name
         results = []
         for reference in collection.parse_expressions(
                 data, self.request.user, cascade, transform, collection=collection):
@@ -696,9 +701,11 @@ class CollectionReferencesPreview(CollectionBaseView):
                     {
                         'reference': ref.expression,
                         'concepts': ConceptListSerializer(
-                            concepts.order_by('mnemonic')[:25], many=True).data if has_concepts else [],
+                            concepts.order_by('mnemonic')[:25], many=True, context=label_context
+                        ).data if has_concepts else [],
                         'mappings': MappingListSerializer(
-                            mappings.order_by('mnemonic')[:25], many=True).data if has_mappings else [],
+                            mappings.order_by('mnemonic')[:25], many=True, context=label_context
+                        ).data if has_mappings else [],
                         'concepts_count': concepts.count() if has_concepts else 0,
                         'mappings_count': mappings.count() if has_mappings else 0,
                         'exclude': not ref.include
@@ -1228,7 +1235,7 @@ class CollectionVersionExpansionConceptsView(CollectionVersionExpansionChildrenV
         return ConceptDetailSerializer if self.is_verbose() else ConceptListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().concepts.filter()
+        return self.filter_retired_members(super().get_queryset().concepts.filter())
 
 
 class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenView):
@@ -1246,7 +1253,7 @@ class CollectionVersionExpansionMappingsView(CollectionVersionExpansionChildrenV
         return MappingDetailSerializer if self.is_verbose() else MappingListSerializer
 
     def get_queryset(self):
-        return super().get_queryset().mappings.filter()
+        return self.filter_retired_members(super().get_queryset().mappings.filter())
 
 
 class ExpansionResourcesIndexView(CollectionVersionExpansionBaseView, IndexingTaskMixin):
@@ -1290,7 +1297,7 @@ class CollectionVersionConceptsView(CollectionBaseView, ListWithHeadersMixin):
         expansion = self.get_object()
         queryset = Concept.objects.none()
         if expansion:
-            queryset = expansion.concepts.filter()
+            queryset = self.filter_retired_members(expansion.concepts.filter())
 
         return queryset
 
@@ -1359,7 +1366,7 @@ class CollectionVersionConceptMappingsView(CollectionVersionConceptRetrieveView,
 
         concept = queryset.first()
 
-        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM, False)
+        include_retired = self.request.query_params.get(INCLUDE_RETIRED_PARAM) in get_truthy_values()
         include_indirect_mappings = self.request.query_params.get(INCLUDE_INVERSE_MAPPINGS_PARAM, 'false') == 'true'
 
         mappings_queryset = expansion.get_mappings_for_concept(
@@ -1398,7 +1405,7 @@ class CollectionVersionMappingsView(CollectionBaseView, ListWithHeadersMixin):
         queryset = Mapping.objects.none()
 
         if expansion:
-            queryset = expansion.mappings.filter()
+            queryset = self.filter_retired_members(expansion.mappings.filter())
 
         return queryset
 

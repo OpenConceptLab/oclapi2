@@ -8,6 +8,7 @@ request is answered with a 422 and the issue code `exception`, logged at ERROR a
 (report_server_error), so monitoring still counts it.
 """
 import logging
+from collections.abc import Mapping
 from http import HTTPStatus
 
 from django.core.exceptions import BadRequest, SuspiciousOperation, ValidationError as DjangoValidationError, \
@@ -139,6 +140,25 @@ def detail_issues(detail, code='invalid', field=None):
     return [issue(code, str(detail), expression=field)]
 
 
+def body_message(body):
+    """
+    The message of a whole response body: its `detail`, else its `error_code`; a body that is a string is its own. Its
+    other values are data for client apps, not messages.
+    """
+    candidates = (body.get('detail'), body.get('error_code')) if isinstance(body, Mapping) else (body,)
+    return next((value for value in candidates if isinstance(value, str) and value.strip()), None)
+
+
+def api_exception_issues(exc, code):
+    """
+    The issues of an APIException's detail. An exception whose detail is a whole response body (`detail_is_body`) has
+    one: the body's message, else its status text, since an issue's text can't be empty.
+    """
+    if getattr(exc, 'detail_is_body', False):
+        return [issue(code, body_message(exc.detail) or status_text(exc.status_code))]
+    return detail_issues(exc.detail, code)
+
+
 def with_tx_issue_types(outcome):
     """An OperationOutcome built elsewhere, with a tx-issue-type coding and a code on every issue."""
     outcome = to_plain(outcome)
@@ -249,7 +269,7 @@ def outcome_for_exception(exc):
         if getattr(exc, 'wait', None):
             headers['Retry-After'] = str(int(exc.wait))
         status_code = exc.status_code
-        outcome = operation_outcome(*detail_issues(exc.detail, status_issue_code(exc.status_code)))
+        outcome = operation_outcome(*api_exception_issues(exc, status_issue_code(status_code)))
         if status_code >= 500:
             report_server_error(status_code, exc)
     else:

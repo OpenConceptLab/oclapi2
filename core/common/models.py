@@ -1909,7 +1909,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
-            criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
+            uri = resolution_url if resolution_url.endswith('/') else resolution_url + '/'
+            # a version named by its own URL (/orgs/O/sources/S/v1/, by position) still resolves once it's retired,
+            # as url|version does
+            names_version = uri.strip('/').count('/') == 4
+            criteria = models.Q(is_active=True, uri=uri) if names_version else criteria & models.Q(uri=uri)
 
         return cls.resolve_repo(
             resolution.repository(criteria), version, is_canonical, resolution_url, resolution), registry_entry
