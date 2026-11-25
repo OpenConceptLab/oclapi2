@@ -637,6 +637,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         initial_version._index = concept._index  # pylint: disable=protected-access
         initial_version.comment = concept.comment
         initial_version.save(**kwargs)
+        initial_version.keep_source_access_on_commit()
         initial_version.version = initial_version.id
         initial_version.released = True
         initial_version.is_latest_version = True
@@ -1128,6 +1129,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.errors = {}
             self.save()
             if self.id:
+                self.keep_source_access_on_commit()
                 next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
                 if parent.is_sequential_concepts_mnemonic:
                     try:
@@ -1209,6 +1211,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.is_latest_version = not create_initial_version
             concept.public_access = parent.public_access
             concept.save()
+            concept.keep_source_access_on_commit()
             concept.full_clean()
 
             initial_version = None
@@ -1420,6 +1423,16 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 '_op_type': 'update', '_index': index_name, '_id': concept.id, 'retry_on_conflict': 3,
                 'doc': mapped_codes.get_fields(concept),
             }
+
+    @staticmethod
+    def get_latest_flags_fields(instances):
+        """
+        The mapped codes prepare() gives these rows now, by row id (MappedCodes), release_map_codes included: once a row
+        isn't the latest, its own codes come from its public releases rather than HEAD, and so do the releases listed.
+        """
+        from core.concepts.documents import MappedCodes
+        mapped_codes = MappedCodes(instances)
+        return {instance.id: mapped_codes.get_fields(instance) for instance in instances}
 
     @classmethod
     def get_unreleased_older_ids(cls, versioned_object_ids):

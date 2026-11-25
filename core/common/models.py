@@ -26,7 +26,8 @@ from elasticsearch import ApiError, TransportError
 from elasticsearch.helpers import BulkIndexError, parallel_bulk, streaming_bulk
 from pydash import get
 
-from core.capabilities.writes import check_make_private
+from core.capabilities.constants import WRITE_ACTION_PUBLISH
+from core.capabilities.writes import check_make_private, check_publish
 from core.celery import app as celery_app
 from core.common.tasks import update_collection_active_concepts_count, update_collection_active_mappings_count, \
     delete_s3_objects, batch_index_resources
@@ -311,6 +312,26 @@ class BaseModel(models.Model):
         self.public_access = normalize_public_access(self.public_access, self.public_access_for_retired_edit)
         super().save(
             *args, force_insert=force_insert, force_update=force_update, using=using, update_fields=update_fields)
+
+    def is_same_access(self, public_access):
+        """Whether `public_access` is the access this row has as loaded, in any case, the retired Edit as stored"""
+        def normalized(value):
+            return (normalize_public_access(value, self.public_access_for_retired_edit) or '').lower()
+        return normalized(public_access) == normalized(self.public_access)
+
+    @classmethod
+    def get_fields_but_access(cls):
+        """Every column a save writes but public_access"""
+        fields = cls._meta.concrete_fields
+        return [field.name for field in fields if not field.primary_key and field.name != 'public_access']
+
+    def save_keeping_access(self):
+        """
+        Saves every column but public_access, so a concurrent write's access stays (a write that never sets the access,
+        from a row loaded at request start), then reads back the access the row has now.
+        """
+        self.save(update_fields=self.get_fields_but_access())
+        self.refresh_from_db(fields=['public_access'])
 
     @property
     def is_versioned(self):
@@ -625,7 +646,7 @@ class CommonLogoModel(models.Model):
     def upload_base64_logo(self, data, name):
         name = self.uri[1:] + name
         self.logo_path = get_export_service().upload_base64(data, name, False, True)
-        self.save()
+        self.save_keeping_access()
 
 
 class BaseResourceModel(BaseModel, CommonLogoModel):
@@ -982,18 +1003,17 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         ).order_by('-created_at')
 
     def delete(self, using=None, keep_parents=False, force=False, sync=False):  # pylint: disable=arguments-differ
+        from core.collections.models import Expansion
         other_versions = list(self.versions.exclude(id=self.id)) if self.is_head else []
         deleting = {self.id, *(version.id for version in other_versions)}
         export_paths = self.get_export_paths_to_delete(deleting)
         deleted_urls = [self.url]
-        deleted_ids = [self.id]
         canonical_urls = {self.canonical_url}
         if self.is_head:
             for other_version in other_versions:
                 other_version.clear_cache()
                 export_paths += other_version.get_export_paths_to_delete(deleting)
                 deleted_urls.append(other_version.url)
-                deleted_ids.append(other_version.id)
                 canonical_urls.add(other_version.canonical_url)
         elif self.is_latest_version:
             prev_version = self.prev_version
@@ -1003,7 +1023,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 prev_version.is_latest_version = True
                 prev_version.save()
 
-        registry_entry_ids = self.unlink_url_registry_entries(deleted_ids)
+        # before the rows go, while expansions still record these versions and their locks
+        after_delete = Expansion.before_repository_delete(self, [self, *other_versions])
+        registry_entry_ids = self.unlink_url_registry_entries(deleting)
         if self.is_head:
             self.versions.exclude(id=self.id).delete()
 
@@ -1013,6 +1035,7 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         self.delete_version_checksum_maps(deleted_urls)
 
         super().delete(using=using, keep_parents=keep_parents)
+        after_delete()
         self.delete_export_paths(export_paths, sync)
         self.post_delete_actions()
         self.relink_url_registry_entries(registry_entry_ids, canonical_urls - {None, ''})
@@ -1374,12 +1397,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
                 def enqueue_seed_task():
                     """Queue snapshot seeding only after its repository version is committed."""
-                    seed_children_to_new_version.apply_async(
+                    obj.send_processing_task(task, lambda: seed_children_to_new_version.apply_async(
                         task_args,
                         task_id=task.id,
                         queue='default',
                         persist_args=True
-                    )
+                    ))
 
                 transaction.on_commit(enqueue_seed_task)
 
@@ -1407,12 +1430,27 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         Saves `obj` over its stored row. With keep_private=True the save never makes a private row viewable: it reads
         the stored row under a row lock held through the save, and keeps that row's access when it's private, so a
         concurrent write that makes it private isn't overwritten (a FHIR update, whose resource carries no access).
-        keep_access=True keeps the stored row's access whatever it is, under the same lock (a REST edit that sends no
-        access). The tasks the save queues go once its transaction ends.
+        The tasks the save queues go once its transaction ends. keep_access=True keeps the stored row's access whatever
+        it is (a REST edit that sends no access): the save leaves the column out, so a concurrent write's access stays
+        with no lock. A blank access is stored as None instead, so that save writes it, under the lock. A save that
+        sets an access others can view, when the request's own check didn't ask about publishing (a version under a
+        private HEAD), reads the stored row under the lock too and asks then, so a write that made it viewable
+        meanwhile, such as publishing its HEAD, isn't published unasked. A source's save, and the cascade of its access
+        and activity to its concepts and mappings, run in one transaction. Outside a caller's transaction, a failed
+        enqueue of the row's search index is raised once the save commits, unless keep_private=True, which only logs it.
         """
         keep_private = kwargs.pop('keep_private', False)
         keep_access = kwargs.pop('keep_access', False)
-        lock = keep_private or keep_access
+        sets_viewable_access = not keep_private and not keep_access and obj.public_can_view and get(
+            obj, '_checked_write_action') != WRITE_ACTION_PUBLISH
+        lock = keep_private or sets_viewable_access or (
+            keep_access and cls.objects.filter(id=obj.id, public_access='').exists())
+        is_source = cls.__name__ == 'Source'
+        # a source's concepts and mappings take its access in its save's transaction, so lists never show them apart
+        cascade_atomically = is_source and not lock
+        # a REST edit gets a failed enqueue of its search index, as under autocommit; a FHIR update only logs it
+        reports_enqueue_error = not keep_private and not transaction.get_connection().in_atomic_block
+        obj._index_enqueue_error = None  # pylint: disable=protected-access
         errors = {}
         parent_resource = kwargs.pop('parent_resource', obj.parent)
         if not parent_resource:
@@ -1420,15 +1458,16 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
         queue_schema_update_task = obj.is_validation_necessary()
         try:
-            with transaction.atomic() if lock else nullcontext():
+            with transaction.atomic() if lock or cascade_atomically else nullcontext():
                 stored_rows = cls.objects.filter(id=obj.id)
-                # no key update, so a concurrent child write's foreign-key check on the row isn't blocked
-                original_repo = (stored_rows.select_for_update(no_key=True) if lock else stored_rows).first()
+                # an access edit locks before comparing, so an overlapping one waits and sees its access; one sending
+                # no access doesn't. No key update, so a child write's foreign-key check isn't blocked
+                locks_row = lock or (cascade_atomically and not keep_access)
+                original_repo = (stored_rows.select_for_update(no_key=True) if locks_row else stored_rows).first()
                 if keep_access or (keep_private and not original_repo.public_can_view):
                     obj.public_access = original_repo.public_access
                 obj.store_blank_access_as_none()
 
-                is_source = cls.__name__ == 'Source'
                 should_reindex_resources = is_source and obj.released != original_repo.released
                 concepts_reindex_filters = obj.get_concepts_reindex_filters(original_repo) if is_source else None
                 should_sync_vectors = is_source and (
@@ -1449,11 +1488,24 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                     obj.updated_by = updated_by
                 # a row made private, or moved while private: the capability policy may refuse it
                 check_make_private(obj.updated_by, obj, original_repo)
+                if sets_viewable_access:  # as stored now, which a concurrent write may have changed
+                    check_publish(obj.updated_by, obj, original_repo)
                 if queue_schema_update_task:
                     target_schema = obj.custom_validation_schema
                     obj.custom_validation_schema = original_schema
 
-                obj.save(**kwargs)
+                if keep_access and not lock:
+                    kwargs['update_fields'] = cls.get_fields_but_access()
+                obj._index_enqueue_reaches_write = reports_enqueue_error  # pylint: disable=protected-access
+                try:
+                    obj.save(**kwargs)
+                finally:
+                    obj._index_enqueue_reaches_write = False  # pylint: disable=protected-access
+                if keep_access and not lock:  # the access the row has now, which a concurrent write may have changed
+                    obj.refresh_from_db(fields=['public_access'])
+
+            if obj._index_enqueue_error:  # pylint: disable=protected-access
+                raise obj._index_enqueue_error  # pylint: disable=protected-access
 
             if queue_schema_update_task:
                 from core.tasks.models import Task
@@ -1558,6 +1610,20 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 self._background_process_ids = []
             self._background_process_ids.append(process_id)
 
+    def send_processing_task(self, task, send):
+        """Calls `send` to queue `task`, which marks this row processing. If it can't be queued, the mark goes and the
+        task is failed, so the row isn't left processing, and the error is raised."""
+        try:
+            send()
+        except Exception as ex:
+            from core.tasks.models import Task
+            self.remove_processing(task.id)
+            try:
+                Task.on_failure(ex, task.id, None, None, None)
+            except Exception as cleanup_ex:  # pylint: disable=broad-exception-caught
+                ERRBIT_LOGGER.log(cleanup_ex)  # the write gets the enqueue's error, not this one
+            raise
+
     def remove_processing(self, process_id):
         if self.id:
             try:
@@ -1661,8 +1727,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @cached_property
     def version_export_path(self):
-        last_update = self.last_child_update.strftime('%Y-%m-%d_%H%M%S')
-        return self.get_version_export_path(suffix=f"{last_update}.zip")
+        return self.get_version_export_path_at(self.last_child_update)
+
+    def get_version_export_path_at(self, last_child_update):
+        """The key of this version's export of its content as of last_child_update"""
+        return self.get_version_export_path(suffix=f"{last_child_update.strftime('%Y-%m-%d_%H%M%S')}.zip")
 
     def get_version_export_path(self, suffix='*', with_expansion=True):
         owner = self.parent
@@ -1870,7 +1939,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
             if namespace:
                 criteria &= models.Q(models.Q(user__uri=namespace) | models.Q(organization__uri=namespace))
         else:
-            criteria &= models.Q(uri=(resolution_url if resolution_url.endswith('/') else resolution_url + '/'))
+            uri = resolution_url if resolution_url.endswith('/') else resolution_url + '/'
+            # a version named by its own URL (/orgs/O/sources/S/v1/, by position) still resolves once it's retired,
+            # as url|version does
+            names_version = uri.strip('/').count('/') == 4
+            criteria = models.Q(is_active=True, uri=uri) if names_version else criteria & models.Q(uri=uri)
 
         return cls.resolve_repo(
             resolution.repository(criteria), version, is_canonical, resolution_url, resolution), registry_entry
@@ -2077,21 +2150,36 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         return RepoExternalExport.upsert(self, key, file, user, description)
 
 
+def on_commit_reaching_write(instance, send):
+    """
+    Calls `send` once the transaction commits, at once under autocommit, where its error reaches the write. In a
+    transaction it's robust, so later callbacks (a version's seed task) still run. In persist_changes' own transaction,
+    the error is kept on the instance for persist_changes to raise once committed, as the write's.
+    """
+    reaches_write = getattr(instance, '_index_enqueue_reaches_write', False)
+
+    def call():
+        try:
+            send()
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            if not reaches_write:
+                raise
+            if not getattr(instance, '_index_enqueue_error', None):
+                instance._index_enqueue_error = ex  # pylint: disable=protected-access
+
+    connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
+    connection.on_commit(call, robust=connection.in_atomic_block)
+
+
 class CelerySignalProcessor(RealTimeSignalProcessor):
     def handle_save(self, sender, instance, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:
             if get(settings, 'TEST_MODE', False):
                 handle_save(instance.app_name, instance.model_name, instance.id)
             else:
-                # once committed, so the task reads the row as saved. Deferred in a transaction, it's robust, so a
-                # failed enqueue doesn't stop the transaction's other callbacks (a version's seed task); at once under
-                # autocommit, its error reaches the write, as before
-                args = (instance.app_name, instance.model_name, instance.id)
-                connection = transaction.get_connection(using=instance._state.db)  # pylint: disable=protected-access
-                connection.on_commit(
-                    lambda: handle_save.apply_async(args, queue='indexing', permanent=False),
-                    robust=connection.in_atomic_block,
-                )
+                args = (instance.app_name, instance.model_name, instance.id)  # once committed: the row as saved
+                on_commit_reaching_write(
+                    instance, lambda: handle_save.apply_async(args, queue='indexing', permanent=False))
 
     def handle_m2m_changed(self, sender, instance, action, **kwargs):
         if settings.ES_SYNC and instance.__class__ in registry.get_models() and instance.should_index:

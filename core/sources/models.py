@@ -13,10 +13,11 @@ from django.db.models.functions import Cast
 from django.utils import timezone
 from pydash import get, compact
 
+from core.collections.constants import HEALTH_RELEVANT_VERSION_FIELDS
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import HEAD, LATEST, VERSION_UNCOPYABLE_EXTRAS
 from core.common.fields import URIField
-from core.common.models import ConceptContainerModel
+from core.common.models import ConceptContainerModel, on_commit_reaching_write
 from core.common.tasks import update_mappings_source, index_source_concepts, index_source_mappings, \
     sync_source_concept_vectors, index_source_public_access, index_dropped_source_children, update_active_count
 from core.common.utils import split_canonical, to_camel_case, chunks
@@ -373,6 +374,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 update_active_count(self.__class__, self.id, field)
 
     def drop_unseen_children(self, seen_concept_ids, seen_mapping_ids):
+        from core.collections.models import Expansion
         from core.mappings.models import Mapping
         to_index = {Concept: [], Mapping: []}
         with transaction.atomic():
@@ -394,6 +396,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                         source_id=self.id, **{f'{model.__name__.lower()}_id__in': [*chunk, *latest_ids]}).delete()
                     if model is Concept:
                         HierarchicalConcepts.objects.filter(child_id__in=chunk).delete()
+                    # they left HEAD, which changes their class in the expansions that hold them
+                    Expansion.mark_health_out_of_date_for_members(
+                        f'{model.__name__.lower()}s', [*chunk, *latest_ids])
                     to_index[model] += [*chunk, *latest_ids]
 
         if to_index[Concept] or to_index[Mapping]:
@@ -822,15 +827,19 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     def index_public_access_async(self, user=None):
         """
         Queues the public_can_view re-index of this source's docs once the change is committed, marking the source
-        processing before the response goes out, and returns its Task. In TEST_MODE it runs inline: returns None.
+        processing before the response goes out, and returns its Task. In TEST_MODE it runs inline: returns None. If
+        it can't be queued, a REST edit gets the error; in another transaction (a FHIR update) it's only logged, as
+        the source's own index enqueue is.
         """
         if get(settings, 'TEST_MODE', False):
             index_source_public_access(self.id)  # pylint: disable=no-value-for-parameter
             return None
         task = Task.new(queue='indexing', user=user or self.updated_by, name=index_source_public_access.__name__)
         self.add_processing(task.id)
-        transaction.on_commit(lambda: index_source_public_access.apply_async(
-            (self.id, ), queue='indexing', persist_args=True, task_id=task.id))
+        def send():
+            index_source_public_access.apply_async((self.id, ), queue='indexing', persist_args=True, task_id=task.id)
+        # robust in a transaction, so the release's mapped-codes rebuild queued after it still goes
+        on_commit_reaching_write(self, lambda: self.send_processing_task(task, send))
         return task
 
     def flag_write_is_current(self, partial_doc=None, exclude_members_of=None):
@@ -1016,6 +1025,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
         if self.id and 'canonical_url' in dirty_fields:
             self.resolve_url_registry_entries_later()
+        if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
+            from core.collections.models import Expansion
+            Expansion.mark_health_not_current_for_repository(self)
 
     def __update_sequences(self, dirty_fields=[]):  # pylint: disable=dangerous-default-value
         def should_update(is_seq, field):
@@ -1171,7 +1183,8 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         return self.get_mappings_queryset().values_list('to_source_id', flat=True).distinct()
 
     def get_mapped_sources(self, exclude_self=True):
-        queryset = Source.objects.filter(id__in=self.get_mapped_source_ids(), is_active=True)
+        # The ids take a pass over all the repository's mappings: read them once, not for a list's count and its page
+        queryset = Source.objects.filter(id__in=list(self.get_mapped_source_ids()), is_active=True)
         if exclude_self:
             # mappings point at HEAD, so on a version leave out every version of this source
             queryset = queryset.exclude(

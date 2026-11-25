@@ -2724,6 +2724,7 @@ class TasksTest(OCLTestCase):
         self.assertEqual(list(copy.concepts.all()), [latest])
         self.assertEqual(list(collection_v1.references.first().concepts.all()), [latest])
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
     @patch('core.common.tasks.export_collection')
@@ -2909,6 +2910,7 @@ class TasksTest(OCLTestCase):
                 self.assertEqual(list(manual.concepts.all()), expected)
                 self.assertIsNone(references[0]._valueset_locks)  # pylint: disable=protected-access
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -2947,6 +2949,7 @@ class TasksTest(OCLTestCase):
         reference.concepts.add(concept)
         return collection, expansion, reference
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -2968,6 +2971,7 @@ class TasksTest(OCLTestCase):
         self.assertFalse(
             Task.objects.filter(name__iendswith='readd_references_to_expansion_on_references_removal').exists())
 
+    @patch('core.collections.models.Expansion.is_health_on', Mock(return_value=False))
     @override_settings(TEST_MODE=False)
     @patch('core.collections.models.batch_index_resources')
     @patch('core.collections.models.readd_references_to_expansion_on_references_removal')
@@ -4230,6 +4234,43 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual(list(expansion.concepts.all()), [old])
         self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
+        self.assertEqual(expansion.unresolved_repo_versions, [])
+
+    def test_rebuild_keeps_a_retired_version_system_version_names_by_its_url(self):
+        source, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        for entry in (f'{source.uri}v1/', f'{source.uri}|v1'):
+            with self.subTest(entry=entry):
+                collection = OrganizationCollectionFactory()
+                expansion = ExpansionFactory(
+                    collection_version=collection, mnemonic='e1', parameters={'system-version': entry})
+                collection.expansion_uri = expansion.uri
+                collection.save()
+                CollectionReference(
+                    expression=source.uri + 'concepts/c1/', collection=collection, system=source.uri,
+                    code='c1').save()
+                Source.objects.filter(id=v1.id).update(retired=True)
+
+                self._rebuild(collection, expansion)
+
+                self.assertEqual(list(expansion.concepts.all()), [old])
+                self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
+                self.assertEqual(expansion.unresolved_repo_versions, [])
+
+    def test_rebuild_resolves_a_reference_whose_system_names_a_retired_version_by_its_url(self):
+        _, old, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        CollectionReference(expression=v1.uri + 'concepts/c1/', collection=collection, system=v1.uri, code='c1').save()
+        Source.objects.filter(id=v1.id).update(retired=True)
+
+        self._rebuild(collection, expansion)
+
+        self.assertEqual(list(expansion.concepts.all()), [old])
+        # a version named in system without a version field is recorded as evaluated
+        self.assertEqual(list(expansion.evaluated_source_versions.all()), [v1])
+        self.assertEqual(expansion.explicit_source_versions.count(), 0)
         self.assertEqual(expansion.unresolved_repo_versions, [])
 
     def test_rebuild_drops_resource_version_held_by_older_release_with_toggle_off(self):

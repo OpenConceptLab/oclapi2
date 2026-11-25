@@ -10,9 +10,10 @@ from celery.states import FAILURE, REVOKED, SUCCESS
 from celery_once import AlreadyQueued
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import F
 from django.test import override_settings, tag
+from django.test.utils import CaptureQueriesContext
 from mock import patch, Mock, ANY, PropertyMock
 from mock.mock import call
 from rest_framework.exceptions import ErrorDetail
@@ -2557,6 +2558,28 @@ class SourceVersionMappedSourcesListViewTest(OCLAPITestCase):
         self.source_version = OrganizationSourceFactory(
             mnemonic=self.source.mnemonic, organization=self.source.organization, version='v1')
         self.token = self.source.created_by.get_token()
+
+    def test_count_and_page_share_one_read_of_the_mapped_source_ids(self):
+        """A large release's mapped source ids take one pass over its mappings, so the list reads them once."""
+        target = OrganizationSourceFactory(mnemonic='target')
+        concept = ConceptFactory(parent=self.source)
+        mapping = MappingFactory(
+            parent=self.source, from_concept=concept, to_concept=ConceptFactory(parent=target),
+            from_source=self.source, to_source=target)
+        self.source_version.mappings.add(mapping)
+
+        for repo in (self.source, self.source_version):
+            with self.subTest(repo=repo.version), CaptureQueriesContext(connection) as queries:
+                response = self.client.get(
+                    repo.url + 'mapped-sources/?excludeSelf=false&brief=true&limit=25&offset=0&page=1',
+                    HTTP_AUTHORIZATION=f'Token {self.token}'
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual([source['url'] for source in response.data], [target.url])
+                self.assertEqual(response['num_found'], '1')
+                reads = [query['sql'] for query in queries.captured_queries if '"to_source_id"' in query['sql']]
+                self.assertEqual(len(reads), 1, reads)
 
     def test_get_404(self):
         response = self.client.get(

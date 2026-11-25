@@ -33,6 +33,7 @@ from core.pins.models import Pin
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
+from core.sources.views import SourceListView
 from core.tasks.models import Task
 from core.url_registry.factories import GlobalURLRegistryFactory, OrganizationURLRegistryFactory, UserURLRegistryFactory
 from core.url_registry.models import URLRegistry
@@ -889,6 +890,60 @@ class CsvExportAccessTest(AccessTestMixin, OCLAPITestCase):
         self.assertNotIn(private_org.mnemonic, mnemonics)
         # the export is the search's, not the whole list
         self.assertNotIn(unmatched_org.mnemonic, mnemonics)
+
+    def export_rows(self, url, user):
+        """The rows of the CSV export at `url` for `user`, in file order."""
+        response = self.request('get', url, user)
+        self.assertEqual(response.status_code, 200, url)
+        with zipfile.ZipFile(io.BytesIO(self.exports[response.data['url'].removeprefix('https://exports.test/')])) \
+                as zip_file, zip_file.open(zip_file.namelist()[0]) as csv_file:
+            return list(csv.DictReader(io.TextIOWrapper(csv_file, 'utf-8-sig')))
+
+    def assert_repo_list_export(self, label, url, repos):
+        own_private, org_public, outsiders_private = repos
+        headers = [
+            'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
+            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
+        ]
+        self.assertEqual(self.export_columns(url, self.owner), headers)
+
+        uris = [row['URI'] for row in self.export_rows(url, self.owner)]
+        self.assertIn(org_public.uri, uris)
+        self.assertNotIn(outsiders_private.uri, uris)
+        self.assertEqual(uris.count(own_private.uri), 1)
+        rows = {row['URI']: row for row in self.export_rows(url, self.owner)}
+        row = rows[own_private.uri]
+        self.assertEqual(row['Owner'], self.owner.username)
+        self.assertEqual(row[f'{label} ID'], own_private.mnemonic)
+        self.assertEqual(row[f'{label} Name'], own_private.name)
+        self.assertEqual(row['Supported Locales'], 'en,fr')
+        self.assertEqual(row['Updated By'], own_private.updated_by.username)
+        self.assertEqual(rows[org_public.uri]['Owner'], self.org.mnemonic)
+
+        anonymous_uris = [row['URI'] for row in self.export_rows(url, None)]
+        self.assertIn(org_public.uri, anonymous_uris)
+        self.assertNotIn(own_private.uri, anonymous_uris)
+
+    def test_source_list(self):
+        self.assert_repo_list_export('Source', '/sources/?csv=true', (
+            UserSourceFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationSourceFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserSourceFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
+
+    def test_repo_list_rows_keep_the_list_order(self):
+        first, second = UserSourceFactory(user=self.owner), UserSourceFactory(user=self.owner)
+        rows = SourceListView().get_csv_rows(Source.objects.filter(id__in=[first.id, second.id]).order_by('-id'))
+
+        self.assertEqual([row['URI'] for row in rows], [second.uri, first.uri])
+
+    def test_collection_list(self):
+        # a signed-in non-staff requester's list is a union of public and own private collections
+        self.assert_repo_list_export('Collection', '/collections/?csv=true', (
+            UserCollectionFactory(user=self.owner, public_access=ACCESS_TYPE_NONE, supported_locales=['en', 'fr']),
+            OrganizationCollectionFactory(organization=self.org, public_access=ACCESS_TYPE_VIEW),
+            UserCollectionFactory(user=self.outsider, public_access=ACCESS_TYPE_NONE),
+        ))
 
     def export_columns(self, url, user):
         response = self.request('get', url, user)

@@ -11,6 +11,33 @@ from core.common.utils import get_export_service
 from core.repos.serializers import RepoExternalExportSerializer
 
 
+class RepoListCSVMixin:
+    """CSV export of a source or collection list: a row per listed repository, under display headers."""
+    csv_label = None  # 'Source' or 'Collection'
+    csv_type_field = None  # 'source_type' or 'collection_type'
+
+    def get_csv_headers(self):
+        label = self.csv_label
+        return [
+            'Owner', f'{label} ID', f'{label} Name', f'{label} Full Name', f'{label} Type', 'Description',
+            'Default Locale', 'Supported Locales', 'Website', 'External ID', 'Last Updated', 'Updated By', 'URI'
+        ]
+
+    def get_csv_rows(self, queryset):
+        """Read again by id, as the list may be a union, and kept in the list's order."""
+        headers = self.get_csv_headers()
+        ids = list(queryset.values_list('id', flat=True))
+        position = {repo_id: index for index, repo_id in enumerate(ids)}
+        repos = queryset.model.objects.filter(id__in=ids).select_related('organization', 'user', 'updated_by')
+        return [
+            dict(zip(headers, [
+                repo.parent.mnemonic, repo.mnemonic, repo.name, repo.full_name, getattr(repo, self.csv_type_field),
+                repo.description, repo.default_locale, ','.join(repo.supported_locales or []), repo.website,
+                repo.external_id, repo.updated_at, repo.updated_by.username, repo.uri
+            ])) for repo in sorted(repos, key=lambda repo: position[repo.id])
+        ]
+
+
 class RepoExternalExportMixin:
     permission_classes = (CanViewConceptDictionaryVersion, IsAuthenticated)
 

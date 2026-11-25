@@ -13,7 +13,7 @@ from core.common.constants import DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, HEAD, \
     INCLUDE_SUMMARY, INCLUDE_CLIENT_CONFIGS, INCLUDE_HIERARCHY_ROOT, INCLUDE_STATES, INCLUDE_TASKS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
 from core.common.serializers import AbstractRepoResourcesSerializer, AbstractResourceSerializer, PublicAccessField, \
-    RepoVerificationSerializerMixin
+    RepoVerificationSerializerMixin, get_requester_context
 from core.common.utils import get_truthy_values
 from core.orgs.models import Organization
 from core.settings import DEFAULT_LOCALE
@@ -222,11 +222,12 @@ class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSeria
             return instance
 
         original_schema = instance.custom_validation_schema
+        keep_access = 'public_access' not in validated_data or instance.is_same_access(validated_data['public_access'])
         source = self.prepare_object(validated_data, instance)
         user = self.context['request'].user
-        # an edit that sends no access keeps the row's current access, not the one read before a concurrent change
-        errors = Source.persist_changes(
-            source, user, original_schema, keep_access='public_access' not in validated_data)
+        # an edit that sends no access, or the one it loaded (a form's), keeps the row's current access, not the one
+        # read before a concurrent change
+        errors = Source.persist_changes(source, user, original_schema, keep_access=keep_access)
         self._errors.update(errors)
         return source
 
@@ -493,7 +494,7 @@ class SourceDetailSerializer(SourceCreateOrUpdateSerializer, AbstractRepoResourc
     def get_hierarchy_root(self, obj):
         if self.include_hierarchy_root:
             from core.concepts.serializers import ConceptDetailSerializer
-            return ConceptDetailSerializer(obj.hierarchy_root).data
+            return ConceptDetailSerializer(obj.hierarchy_root, context=get_requester_context(self.context)).data
         return None
 
     def to_representation(self, instance):  # used to be to_native

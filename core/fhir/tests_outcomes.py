@@ -88,6 +88,15 @@ class OutcomeNormalizationTest(SimpleTestCase):
         self.assertEqual(nested['issue'], [{'details': 'Nested failure'}])
 
 
+class BodyError(exceptions.APIException):
+    """A 403 whose detail is a whole response body, which can carry data for client apps besides its message."""
+    status_code = 403
+    detail_is_body = True
+
+    def __init__(self, body):  # pylint: disable=super-init-not-called
+        self.detail = body
+
+
 class ExceptionHandlerTest(SimpleTestCase):
     def handle(self, exc):
         response = outcomes.exception_handler(exc, {})
@@ -180,6 +189,34 @@ class ExceptionHandlerTest(SimpleTestCase):
         response = self.handle(DjangoValidationError('Bad parameters'))
         self.assertEqual(issue_summary(response.data), ['error|invalid|invalid-data|'])
         self.assertEqual(response.data['issue'][0]['details']['text'], 'Bad parameters')
+
+    def test_a_body_is_answered_with_its_detail(self):
+        body = {
+            'detail': 'Example message.', 'error_code': 'example_code', 'count': 3, 'at': None,
+            'items': ['First', 'Second'], 'links': {'docs': 'https://x', 'more': [{'title': 'Example'}]},
+        }
+        for exc in (BodyError(body), BodyError('Example message.')):
+            response = self.handle(exc)
+
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'])
+            self.assertEqual(response.data['issue'][0]['details']['text'], 'Example message.')
+
+    def test_a_body_without_a_detail_is_answered_with_its_error_code(self):
+        for body in ({'error_code': 'example_code', 'count': 3}, {'detail': ' ', 'error_code': 'example_code'},
+                     {'detail': {'title': 'Example'}, 'error_code': 'example_code'}):
+            response = self.handle(BodyError(body))
+
+            self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'], body)
+            self.assertEqual(response.data['issue'][0]['details']['text'], 'example_code', body)
+
+    def test_a_body_without_a_message_is_answered_with_its_status(self):
+        for body in ({'count': 3, 'at': None, 'links': {'docs': 'https://x'}}, {'detail': '', 'error_code': None},
+                     [{'title': 'Example'}], ''):
+            response = self.handle(BodyError(body))
+
+            self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'], body)
+            self.assertEqual(response.data['issue'][0]['details']['text'], 'Forbidden', body)
 
     def test_server_side_api_exceptions_never_return_a_5xx(self):
         class Unavailable(exceptions.APIException):

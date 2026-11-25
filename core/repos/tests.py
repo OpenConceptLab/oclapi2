@@ -19,8 +19,12 @@ from core.common.tests import OCLAPITestCase, OCLTestCase
 from core.orgs.tests.factories import OrganizationFactory
 from core.common.tasks import delete_s3_objects
 from core.common.utils import get_export_key_pattern
+from core.concepts.documents import ConceptDocument
+from core.concepts.tests.factories import ConceptFactory
 from core.services.storages.cloud.aws import S3
+from core.repos.documents import RepoDocument, REPO_INDEXES
 from core.repos.models import RepoExternalExport, Repository, VersionChangelog, VersionChecksumMap
+from core.repos.search import RepoFacetedSearch
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
@@ -647,6 +651,44 @@ class OrganizationRepoListViewDbFirstTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
+
+
+@tag('es')
+class ReposListRetiredFacetCountsTest(OCLAPITestCase):
+    def test_facets_follow_the_retired_rule(self):  # OpenConceptLab/ocl_issues#3057
+        org = OrganizationFactory(mnemonic='retired-facets-org')
+        OrganizationSourceFactory(organization=org, mnemonic='active-source')
+        OrganizationSourceFactory(organization=org, mnemonic='retired-source', retired=True)
+        OrganizationCollectionFactory(organization=org, mnemonic='active-collection')
+        SourceDocument().update(Source.objects.filter(organization=org))
+        CollectionDocument().update(Collection.objects.filter(organization=org))
+
+        def get_facet_counts(params):
+            response = self.client.get(org.uri + 'repos/?facetsOnly=true' + params)
+            self.assertEqual(response.status_code, 200)
+            facets = response.data['facets']['fields']
+            return (
+                {value: count for value, count, _ in facets['repoType']},
+                {value: count for value, count, _ in facets['retired']}
+            )
+
+        both = {'false': 2, 'true': 1}
+        self.assertEqual(len(self.client.get(org.uri + 'repos/').data), 2)
+        self.assertEqual(get_facet_counts(''), ({'Source': 1, 'Collection': 1}, both))
+        self.assertEqual(get_facet_counts('&includeRetired=true'), ({'Source': 2, 'Collection': 1}, both))
+        self.assertEqual(get_facet_counts('&retired=false'), ({'Source': 1, 'Collection': 1}, both))
+
+    def test_facets_search_only_repositories(self):
+        org = OrganizationFactory(mnemonic='repo-facets-only-org')
+        source = OrganizationSourceFactory(organization=org, mnemonic='repo-facets-only-source')
+        ConceptFactory(parent=source, retired=True)
+        SourceDocument().update(Source.objects.filter(organization=org))
+        ConceptDocument().update(source.concepts_set.all())
+
+        search = RepoFacetedSearch(
+            query='', _search=RepoDocument.search(index=REPO_INDEXES).filter('term', owner=org.mnemonic))
+
+        self.assertEqual(search.execute().facets.retired, [('false', 1, False)])
 
 
 @tag('es')

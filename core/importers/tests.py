@@ -47,7 +47,7 @@ from core.importers.models import BulkImport, BulkImportInline, BulkImportParall
     CREATED, UPDATED, DELETED, PERMISSION_DENIED, UNCHANGED, FAILED, NOT_FOUND, \
     BaseImporter, BaseResourceImporter, OrganizationImporter, SourceImporter, SourceVersionImporter, \
     CollectionImporter, CollectionVersionImporter, ConceptImporter, MappingImporter, ReferenceImporter, ImportIndexer, \
-    IsolatedVersionCommit, MappingMatcher
+    IsolatedVersionCommit, MappingMatcher, DeferredImportIndex
 from core.importers.views import csv_file_data_to_input_list, ImportRetrieveDestroyMixin
 from core.mappings.documents import MappingDocument
 from core.mappings.models import Mapping
@@ -2094,6 +2094,8 @@ class BulkImportInlineTest(OCLTestCase):
         self.assertEqual(Mapping.objects.filter(parent=source).count(), 2)
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
         self.assertFalse(Mapping.objects.filter(parent=source, _index=False).exists())
+        self.assertEqual(  # left to the off-peak job
+            set(DeferredImportIndex.objects.values_list('resource', flat=True)), {'concept', 'mapping'})
 
     @patch('core.importers.models.ImportIndexer.CHUNK_SIZE', 3)
     @patch('core.importers.models.batch_index_resources')
@@ -2152,6 +2154,8 @@ class BulkImportInlineTest(OCLTestCase):
 
         batch_index_resources_mock.apply_async.assert_not_called()
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())  # the deferral still ends
+        self.assertEqual(  # left to the off-peak job
+            set(DeferredImportIndex.objects.values_list('resource', flat=True)), {'concept'})
 
         BulkImportInline(content=None, username='ocladmin', update_if_exists=True, index=True, input_list=[
             self.concept_line(source, 'Fruit'), self.concept_line(source, 'Water')]).run()
@@ -5692,6 +5696,10 @@ class ImporterSubtaskTest(OCLTestCase):
         batch_index_resources_mock.apply_async.assert_not_called()
         self.assertEqual(Concept.objects.filter(parent=source).count(), 2)
         self.assertFalse(Concept.objects.filter(parent=source, _index=False).exists())
+        self.assertEqual(  # left to the off-peak job
+            sorted(DeferredImportIndex.objects.get().ids),
+            sorted(Concept.objects.filter(parent=source).values_list('id', flat=True))
+        )
 
     @patch.object(ResourceImporter, 'import_resource')
     @responses.activate

@@ -207,6 +207,32 @@ def add_references(  # pylint: disable=too-many-arguments,too-many-locals
     return [reference.id for reference in added_references], errors, unresolved
 
 
+# QueueOnce, as export_source: its after_return replaces AsyncTask's, which stores a result as str(), so the
+# task's record keeps this one as JSON for a queued conversion's caller. The same request twice at once gets 409
+@app.task(base=QueueOnceCustomTask, bind=True)
+def convert_references(self, user_id, collection_id, conversions):
+    """Swaps a HEAD collection's resource-versioned references for repo-versioned or unversioned ones"""
+    from core.users.models import UserProfile
+    from core.collections.models import Collection
+    from core.collections.reference_conversions import ReferenceConversions
+    from core.capabilities.constants import WRITE_ACTION_EDIT
+    from core.capabilities.writes import get_write_refusal, get_write_target
+    user = UserProfile.objects.get(id=user_id)
+    collection = Collection.objects.filter(id=collection_id).first()
+    if not collection:
+        return {'error': 'Collection not found'}
+    refusal = get_write_refusal(user, get_write_target(collection), WRITE_ACTION_EDIT)
+    if refusal is not None:  # writable when queued, the collection may be read-only by now
+        return {'refusal': refusal}
+    if not collection.has_edit_access(user):  # an editor when queued may not be one by now
+        return {'error': 'You no longer have edit access to this collection'}
+    collection.add_processing(self.request.id)
+    try:
+        return {'results': ReferenceConversions(collection, user).convert(conversions, user)}
+    finally:
+        collection.remove_processing(self.request.id)
+
+
 def __handle_save(instance):
     if instance:
         registry.update(instance)
@@ -475,6 +501,10 @@ def seed_children_to_new_version(self, resource, obj_id, export=True, sync=False
                     # A release request may have left its indexing here: it waits for a rerun, as on a failed seed
                     instance.record_seed_stage(None)
                     raise
+                if instance.released:
+                    # created released, it holds HEAD's members only now, which can change their class
+                    from core.collections.models import Expansion
+                    Expansion.mark_health_not_current_for_repository(instance)
             elif autoexpand:
                 if not seed_from_head:
                     instance.cascade_children_to_expansion(index=True, sync=sync)
@@ -508,6 +538,51 @@ def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False)
     if expansion:
         expansion.seed_children(index=index, force_reevaluate=force_reevaluate)
         expansion.clear_processing(True)
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def compute_expansion_health(expansion_id):
+    from core.collections.models import Expansion
+    expansion = Expansion.objects.filter(id=expansion_id).first()
+    if expansion:
+        expansion.update_health()
+
+
+@app.task(ignore_result=True)
+def recheck_expansion_health(limit=None):
+    """Nightly: queues, a batch at a time, a recompute of each default expansion whose health isn't current. A
+    release, retire or delete leaves them so, and a frozen release never gets another change. One with a run queued
+    (False) is taken too, in case that run never came: a duplicate is harmless, as a store checks the revision.
+    The ones tried longest ago, or never, go first, so rows that fail every night don't starve the rest; the runs are
+    spread over a window, one task each. Returns how many were queued"""
+    from django.db.models import F
+    from core.collections.constants import EXPANSION_HEALTH_RECHECK_LIMIT, EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
+    from core.collections.models import Expansion
+    if not Expansion.is_health_on():
+        return 0
+    expansion_ids = list(Expansion.objects.exclude(health_is_current=True).filter(
+        is_processing=False, is_active=True, collection_version__is_active=True,
+        collection_version__expansion_uri=F('uri')
+    ).order_by(F('health_checked_at').asc(nulls_first=True), 'id').values_list('id', flat=True)[
+        :EXPANSION_HEALTH_RECHECK_LIMIT if limit is None else min(limit, EXPANSION_HEALTH_RECHECK_LIMIT)])
+    if not expansion_ids:
+        return 0
+    spacing = EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS / len(expansion_ids)
+    queued = 0
+    for index, expansion_id in enumerate(expansion_ids):
+        if get(settings, 'TEST_MODE', False):
+            compute_expansion_health(expansion_id)
+        else:
+            try:
+                compute_expansion_health.apply_async((expansion_id,), queue='default', countdown=int(index * spacing))
+            except Exception:  # pylint: disable=broad-except
+                logger.exception('Could not queue expansion health for %s', expansion_id)
+                break
+        queued += 1
+    # only those queued count as tried, so the rest keep their place for tomorrow's batch
+    Expansion.objects.filter(id__in=expansion_ids[:queued]).update(health_checked_at=timezone.now())
+    return queued
 
 
 @app.task
@@ -665,6 +740,16 @@ def get_batch_index_relations(model):
 def index_concepts_mapped_codes(concept_ids):
     from core.concepts.models import Concept
     Concept.index_mapped_codes(Concept.objects.filter(id__in=concept_ids))
+
+
+@app.task(ignore_result=True)
+def run_deferred_import_indexing():
+    """
+    Indexes what large imports left for IMPORT_INDEX_WINDOW, while it's open (DeferredImportIndex.run). Beat sends it
+    every few minutes, routed to the indexing queue.
+    """
+    from core.importers.models import DeferredImportIndex
+    return DeferredImportIndex.run()
 
 
 def batch_index_with_summary(index_func, *args, **kwargs):
@@ -1234,6 +1319,8 @@ def readd_references_to_expansion_on_references_removal(expansion_id, removed_re
     if expansion and removed_reference_ids:
         reference_to_readd = expansion.collection_version.references.exclude(id__in=removed_reference_ids)
         expansion.add_references(reference_to_readd, True, True, False)
+        # re-adding changes members after the removal marked them, so its own recompute may have read them early
+        expansion.mark_health_out_of_date()
         current = Task.objects.filter(id=get(current_task, 'request.id')).first()
         if current:
             current.clear_superseded_readd_references_tasks()

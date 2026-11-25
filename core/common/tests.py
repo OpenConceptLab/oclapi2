@@ -2,13 +2,15 @@ import datetime
 import importlib
 import json
 import os
+import shutil
 import sys
 import time
 import unittest
 import uuid
 from collections import OrderedDict
 from types import SimpleNamespace
-from unittest.mock import patch, Mock, MagicMock, ANY
+from unittest.mock import patch, Mock, MagicMock, ANY, PropertyMock
+from zipfile import ZipFile
 
 import django
 import factory
@@ -18,6 +20,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group
 from django.core.files.base import File
 from django.core.management import call_command, CommandError
+from django.db import connection, transaction
 from django.http import HttpResponse
 from django.test import TestCase, override_settings, RequestFactory, tag
 from django.test.runner import DiscoverRunner
@@ -71,9 +74,10 @@ from core.common.utils import (
     get_resource_class_from_resource_uri, encode_string,
     to_parent_kwargs_from_uri, reverse_resource, reverse_resource_version, write_export_file, queue_bulk_import,
     get_bulk_import_celery_once_lock_key, generic_sort, get_embeddings, encode_texts, get_lm_model, cap_page_size,
-    write_csv_to_s3)
+    write_csv_to_s3, write_rows_to_csv, cd_temp)
 from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
+from core.mappings.models import Mapping
 from core.mappings.documents import MappingDocument
 from core.middlewares.middlewares import RequireAuthenticationMiddleware
 from core.orgs.models import Organization
@@ -1381,17 +1385,37 @@ class UtilsTest(OCLTestCase):
         self.assertEqual(len(export_dirs), 1)
         self.assertFalse(os.path.exists(export_dirs[0]))
 
+    def test_write_rows_to_csv(self):
+        """Rows are written under the headers with their serializers; None is blank and datetimes are ISO"""
+        cwd = cd_temp()
+        temp_dir = os.getcwd()
+        try:
+            csv_file = write_rows_to_csv(
+                [{'Name': 'a', 'Tags': ['x', 'y'], 'At': datetime.datetime(2026, 1, 2, 3, 4, 5), 'Note': None}],
+                ['Name', 'Tags', 'At', 'Note'], 'rows', {'Tags': ','.join})
+            with open(csv_file.name, encoding='utf-8-sig', newline='') as file:
+                content = file.read()
+        finally:
+            os.chdir(cwd)
+            shutil.rmtree(temp_dir)
+
+        self.assertEqual(csv_file.name, 'rows.csv')
+        self.assertEqual(content, 'Name,Tags,At,Note\r\na,"x,y",2026-01-02T03:04:05,\r\n')
+
     @patch('core.common.utils.get_export_service')
     @patch('core.common.utils.csv_file_for')
     def test_write_csv_to_s3_restores_working_directory(self, csv_file_for_mock, get_export_service_mock):
-        """The zipped CSV is uploaded from a temp directory and the working directory is restored afterwards"""
-        csv_file_for_mock.side_effect = fake_csv_file_for
+        """The zipped CSV is uploaded from a temp directory, then the working directory is restored and the temp
+        directory removed"""
+        export_dirs = []
+        csv_file_for_mock.side_effect = lambda *args, **kwargs: export_dirs.append(os.getcwd()) or fake_csv_file_for()
         get_export_service_mock.return_value.url_for.return_value = 'https://csv-url'
         cwd = os.getcwd()
 
         self.assertEqual(write_csv_to_s3([], 'ocladmin'), 'https://csv-url')
 
         self.assertEqual(os.getcwd(), cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
         upload_kwargs = get_export_service_mock.return_value.upload_file.call_args.kwargs
         self.assertTrue(upload_kwargs['key'].startswith('downloads/reader/ocladmin/'))
 
@@ -1399,8 +1423,9 @@ class UtilsTest(OCLTestCase):
     @patch('core.common.utils.csv_file_for')
     def test_write_csv_to_s3_restores_working_directory_when_upload_raises(
             self, csv_file_for_mock, get_export_service_mock):
-        """A failed CSV upload reaches the caller and does not leave the process inside the temp directory"""
-        csv_file_for_mock.side_effect = fake_csv_file_for
+        """A failed CSV upload reaches the caller, restores the working directory and removes the temp directory"""
+        export_dirs = []
+        csv_file_for_mock.side_effect = lambda *args, **kwargs: export_dirs.append(os.getcwd()) or fake_csv_file_for()
         get_export_service_mock.return_value.upload_file.side_effect = ExportUploadFailure()
         cwd = os.getcwd()
 
@@ -1408,6 +1433,7 @@ class UtilsTest(OCLTestCase):
             write_csv_to_s3([], 'ocladmin')
 
         self.assertEqual(os.getcwd(), cwd)
+        self.assertFalse(os.path.exists(export_dirs[0]))
 
     @patch('core.common.utils.settings')
     @patch('core.common.utils.requests.get')
@@ -1511,6 +1537,171 @@ class UtilsTest(OCLTestCase):
 
         sentence_transformer_mock.assert_called_once_with('some-model')
         sentence_transformer_mock.return_value.encode.assert_called_once_with(['a'], batch_size=64)
+
+
+class HeadExportSnapshotTest(OCLTestCase):
+    """
+    A HEAD export lists the repo as it was when the export started, however it's edited while the export runs:
+    each member exactly once, as the version it had then, and the export's key names that point in time.
+    The page size is patched down so the edits land between pages.
+    """
+    past = timezone.now().replace(microsecond=0) - datetime.timedelta(days=1)
+
+    @staticmethod
+    def export(version, on_log=None):
+        resource_type = version.resource_type.lower()
+        serializer = f'core.{resource_type}s.serializers.{version.resource_type}VersionExportSerializer'
+        export_service = Mock(upload_file=Mock(return_value=200), url_for=Mock(return_value='http://export.url'))
+        logger = Mock()
+        if on_log:
+            logger.info.side_effect = on_log
+        with patch('core.common.utils.get_export_service', return_value=export_service):
+            write_export_file(version, resource_type, serializer, logger, time.time())
+        upload = export_service.upload_file.call_args.kwargs
+        with ZipFile(upload['file_path']) as export:
+            return json.loads(export.read('export.json')), upload['key']
+
+    @staticmethod
+    def on_page(edits):
+        """A logger.info that runs edits[message] once, when the export logs that message (the start of a page)"""
+        def info(message, *_):
+            edit = edits.pop(message, None)
+            if edit:
+                edit()
+        return info
+
+    @staticmethod
+    def edit_concept(concept):
+        errors = Concept.create_new_version_for(
+            instance=concept.clone(), data={'names': [{'locale': 'en', 'name': f'edited {concept.mnemonic}'}]},
+            user=concept.created_by, create_parent_version=False)
+        assert not errors, errors
+
+    @staticmethod
+    def edit_mapping(mapping):
+        errors = Mapping.create_new_version_for(
+            mapping.clone(), {'map_type': mapping.map_type, 'extras': {'edited': True}}, mapping.created_by)
+        assert not errors, errors
+
+    @patch('core.common.utils.EXPORT_BATCH_SIZE', 2)
+    def test_source_head_edited_between_pages(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, names=1) for _ in range(5)]
+        mappings = [MappingFactory(parent=source) for _ in range(5)]
+        Concept.objects.filter(parent=source).update(updated_at=self.past)
+        Mapping.objects.filter(parent=source).update(updated_at=self.past)
+        before, _ = self.export(source)
+
+        exported, key = self.export(source, self.on_page({
+            'Serializing concepts 1 - 2...': lambda: [
+                self.edit_concept(concepts[0]), self.edit_concept(concepts[3]), ConceptFactory(parent=source)],
+            'Serializing concepts 3 - 4...': lambda: self.edit_concept(concepts[1]),
+            'Serializing mappings 1 - 2...': lambda: [self.edit_mapping(mappings[0]), self.edit_mapping(mappings[3])],
+            'Serializing mappings 3 - 4...': lambda: self.edit_mapping(mappings[1]),
+        }))
+
+        self.assertEqual(len(before['concepts']), 5)
+        self.assertEqual(len(before['mappings']), 5)
+        self.assertEqual(exported['concepts'], before['concepts'])
+        self.assertEqual(exported['mappings'], before['mappings'])
+        self.assertEqual(key, source.get_version_export_path(suffix=f"{self.past.strftime('%Y-%m-%d_%H%M%S')}.zip"))
+        self.assertGreater(source.last_child_update, self.past)
+        self.assertEqual(source.get_active_concepts().count(), 6)
+
+    def test_source_head_lists_one_version_when_two_are_flagged_latest(self):
+        """Earlier concurrent edits can leave two latest versions; the export lists the newer, as repair keeps"""
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, names=1)
+        mapping = MappingFactory(parent=source)
+        older_concept, older_mapping = concept.get_latest_version(), mapping.get_latest_version()
+        self.edit_concept(concept)
+        self.edit_mapping(mapping)
+        newer_concept, newer_mapping = concept.get_latest_version(), mapping.get_latest_version()
+        for older in (older_concept, older_mapping):
+            older.is_latest_version = True
+            older.save()
+            older.sources.add(source)
+
+        exported, _ = self.export(source)
+
+        self.assertNotEqual(older_concept.id, newer_concept.id)
+        self.assertEqual([entry['version'] for entry in exported['concepts']], [newer_concept.version])
+        self.assertEqual([entry['version'] for entry in exported['mappings']], [newer_mapping.version])
+
+    def test_source_head_lists_each_row_without_a_versioned_object(self):
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, names=1).get_latest_version() for _ in range(2)]
+        Concept.objects.filter(id__in=[concept.id for concept in concepts]).update(versioned_object_id=None)
+
+        exported, _ = self.export(source)
+
+        self.assertEqual(
+            sorted(entry['version'] for entry in exported['concepts']), sorted(concept.version for concept in concepts))
+
+    @patch('core.common.utils.EXPORT_BATCH_SIZE', 2)
+    @patch('core.collections.models.batch_index_resources', Mock())
+    def test_collection_head_references_changed_between_pages(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        source = OrganizationSourceFactory()
+        concepts = [ConceptFactory(parent=source, names=1) for _ in range(5)]
+        added = ConceptFactory(parent=source, names=1)
+        collection.add_expressions({'expressions': [concept.uri for concept in concepts]}, collection.created_by)
+        before, _ = self.export(collection)
+
+        exported, _ = self.export(collection, self.on_page({
+            'Serializing concepts 1 - 2...': lambda: collection.add_expressions(
+                {'expressions': [added.uri]}, collection.created_by),
+            'Serializing concepts 3 - 4...': lambda: collection.delete_references([concepts[4].uri]),
+            'Serializing references 1 - 2...': lambda: collection.delete_references([concepts[3].uri]),
+        }))
+
+        self.assertEqual(len(before['concepts']), 5)
+        self.assertEqual(len(before['references']), 5)
+        self.assertEqual(exported['concepts'], before['concepts'])
+        # a reference deleted before its page is read can't be exported; none is listed twice or added
+        deleted = {concepts[3].uri, concepts[4].uri}
+        self.assertEqual(
+            exported['references'], [ref for ref in before['references'] if ref['expression'] not in deleted])
+        self.assertEqual(collection.expansion.concepts.count(), 4)
+
+
+class HeadExportSnapshotTransactionTest(OCLAPITransactionTestCase):
+    def test_snapshot_reads_in_one_read_only_repeatable_read_transaction(self):
+        """
+        Outside a transaction, as in the export task, the snapshot's member lookups share one read-only REPEATABLE READ
+        transaction; the key's timestamp is read before it, and the pages after it
+        """
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source, names=1)
+        seen = []
+
+        def record(label):
+            with connection.cursor() as cursor:
+                cursor.execute('SHOW transaction_isolation')
+                isolation = cursor.fetchone()[0]
+                cursor.execute('SHOW transaction_read_only')
+                seen.append((label, isolation, cursor.fetchone()[0], connection.in_atomic_block))
+
+        def timestamp():
+            record('timestamp')
+            return timezone.now()
+
+        def lookup_chunks(items, size):
+            record('lookup')
+            return chunks(items, size)
+
+        with patch.object(Source, 'last_child_update', new_callable=PropertyMock, side_effect=timestamp), \
+                patch('core.common.utils.chunks', side_effect=lookup_chunks):
+            exported, _ = HeadExportSnapshotTest.export(source)
+
+        self.assertEqual(seen[:2], [
+            ('timestamp', 'read committed', 'off', False), ('lookup', 'repeatable read', 'on', True)])
+        self.assertEqual(seen[-1], ('lookup', 'read committed', 'off', False))
+        self.assertEqual(len(exported['concepts']), 1)
+        self.assertTrue(transaction.get_autocommit())
 
 
 @tag('es')
@@ -3962,3 +4153,28 @@ class ExtraURLConfsTest(OCLTestCase):
         self.assertEqual(resolve('/consume/').func.view_class, CapabilityConsumeView)
         self.assertEqual(resolve('/capabilities/consume/').func.view_class, CapabilityConsumeView)
         self.assertEqual(urls.urlpatterns[-1].urlconf_name.__name__, 'core.capabilities.urls')
+
+
+class ViewableCollectionFacetURLsTest(OCLTestCase):
+    def test_a_version_with_no_owner_is_skipped(self):
+        from django.db.models import Q
+        from core.collections.models import Collection
+        from core.common.views import BaseAPIView
+        head = OrganizationCollectionFactory()
+        v1 = OrganizationCollectionFactory(mnemonic=head.mnemonic, organization=head.organization, version='v1')
+        expansion = ExpansionFactory(collection_version=v1, mnemonic='e1')
+        ownerless = OrganizationCollectionFactory(mnemonic=head.mnemonic, version='v2')
+        ExpansionFactory(collection_version=ownerless, mnemonic='e1')
+        Collection.objects.filter(id=ownerless.id).update(
+            organization=None, user=None, uri=f'/collections/{head.mnemonic}/')
+
+        urls = BaseAPIView.get_viewable_collection_facet_urls(
+            {'collection': {head.mnemonic}, 'collection_version': {HEAD, 'v1', 'v2'}, 'expansion': {'e1'}},
+            [head.mnemonic], Q())
+
+        self.assertEqual(urls, {
+            ('collection', head.mnemonic): {head.uri, v1.uri},
+            ('collection_version', HEAD): {head.uri},
+            ('collection_version', 'v1'): {v1.uri},
+            ('expansion', 'e1'): {expansion.uri},
+        })
