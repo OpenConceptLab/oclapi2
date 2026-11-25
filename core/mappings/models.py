@@ -342,6 +342,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
         initial_version.created_by = initial_version.updated_by = mapping.created_by
         initial_version.comment = mapping.comment
         initial_version.save(**kwargs)
+        initial_version.keep_source_access_on_commit()
         initial_version.version = initial_version.id
         initial_version.released = False
         initial_version.is_latest_version = True
@@ -494,6 +495,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
             self.full_clean()
             self.save()
             if self.id:
+                self.keep_source_access_on_commit()
                 next_valid_seq = parent.mapping_mnemonic_next  # returns str of int or None
                 if parent.is_sequential_mappings_mnemonic:
                     try:
@@ -581,6 +583,7 @@ class Mapping(MappingValidationMixin, SourceChildMixin, VersionedModel):
                 mapping.external_id = parent.mapping_external_id_next
             mapping.public_access = parent.public_access
             mapping.save()
+            mapping.keep_source_access_on_commit()
             initial_version = cls.create_initial_version(mapping)
             if initial_version.id and not mapping._index:
                 mapping.latest_version_id = initial_version.id

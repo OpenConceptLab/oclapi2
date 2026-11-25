@@ -1,5 +1,7 @@
 import importlib
 import json
+import threading
+import time
 from types import SimpleNamespace
 
 import factory
@@ -8,11 +10,12 @@ from celery_once import AlreadyQueued
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction, connection, DatabaseError
-from django.db.models import QuerySet
+from django.db.models import QuerySet, F
 from django.test import override_settings, tag
 from mock import patch, Mock, ANY, PropertyMock, call
 from rest_framework import status
 from rest_framework.response import Response
+from rest_framework.test import APIClient
 
 from core.collections.models import Collection
 from core.collections.tests.factories import OrganizationCollectionFactory
@@ -3510,10 +3513,57 @@ class SourceAccessCascadeMixin:
         self.observer.autocommit = True
         self.addCleanup(self.observer.close)
 
-    def edit_access(self, public_access):
-        return self.client.patch(
+    def edit_access(self, public_access, client=None):
+        return (client or self.client).patch(
             self.source.uri, {'public_access': public_access}, HTTP_AUTHORIZATION='Token ' + self.user.get_token(),
             format='json')
+
+    @staticmethod
+    def in_thread(func):
+        """Runs func on its own database connection; returns the thread and a list that gets its result or error."""
+        outcome = []
+
+        def run():
+            try:
+                outcome.append(func())
+            except Exception as ex:  # pylint: disable=broad-except
+                outcome.append(ex)
+            finally:
+                connection.close()
+        thread = threading.Thread(target=run)
+        thread.start()
+        return thread, outcome
+
+    def wait_for_a_lock_wait(self, timeout=5):
+        """Until another connection waits on a lock, or the timeout passes."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self.observer.cursor() as cursor:
+                cursor.execute(
+                    "select count(*) from pg_stat_activity where wait_event_type = 'Lock' "
+                    "and datname = current_database()")
+                if cursor.fetchone()[0]:
+                    return
+            time.sleep(0.05)
+
+    def run_edit_with_a_write_during_its_cascade(self, public_access, write):
+        """The edit, with write started on another connection once the concepts' cascade has run, and awaited."""
+        update = QuerySet.update
+        started = []
+
+        def write_during_cascade(queryset, **kwargs):
+            if queryset.model is Mapping and not started and threading.current_thread() is threading.main_thread():
+                started.append(self.in_thread(write))
+                self.wait_for_a_lock_wait()
+            return update(queryset, **kwargs)
+
+        with patch.object(QuerySet, 'update', write_during_cascade):
+            response = self.edit_access(public_access)
+        thread, outcome = started[0]
+        thread.join(30)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(isinstance(outcome[0], Exception), outcome)
+        return response, outcome[0]
 
     def committed_access(self):
         """The accesses another connection, such as a list's, reads for the source, its concepts and its mappings."""
@@ -3577,3 +3627,46 @@ class SourceAccessCascadeIndexEnqueueTest(SourceAccessCascadeMixin, OCLAPITransa
         self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
         # the transaction's later callbacks still ran: the children's re-index went
         self.index_public_access.apply_async.assert_called_once()
+
+
+class SourceAccessCascadeChildCreatedMeanwhileTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    def test_a_concept_created_while_the_cascade_runs_takes_the_new_access(self):
+        data = {
+            **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'mnemonic': 'meanwhile', 'parent': self.source,
+            'names': [ConceptNameFactory.build(locale='en', name='Meanwhile', locale_preferred=True)]}
+
+        response, concept = self.run_edit_with_a_write_during_its_cascade(
+            ACCESS_TYPE_NONE, lambda: Concept.persist_new(data, self.user))
+
+        self.assertIn(response.status_code, (200, 202), response.data)
+        self.assertEqual(concept.errors, {})
+        self.assertEqual(Concept.objects.filter(parent_id=self.source.id, mnemonic='meanwhile').count(), 2)
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
+
+
+class SourceAccessCascadeVersionCreatedMeanwhileTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    def test_a_concept_version_created_while_the_cascade_runs_takes_the_new_access(self):
+        concept = Concept.objects.get(parent_id=self.source.id, id=F('versioned_object_id'))
+
+        def new_version():
+            version = concept.clone()
+            version.comment = 'meanwhile'
+            version.cloned_names = [ConceptNameFactory.build(locale='en', name='Meanwhile', locale_preferred=True)]
+            return version.save_as_new_version(self.user)
+
+        response, errors = self.run_edit_with_a_write_during_its_cascade(ACCESS_TYPE_NONE, new_version)
+
+        self.assertIn(response.status_code, (200, 202), response.data)
+        self.assertEqual(errors, {})
+        self.assertTrue(Concept.objects.filter(versioned_object_id=concept.id, comment='meanwhile').exists())
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)
+
+
+class SourceAccessCascadeOverlappingEditTest(SourceAccessCascadeMixin, OCLAPITransactionTestCase):
+    def test_an_access_edit_overlapping_another_cascades_from_what_that_one_committed(self):
+        response, overlapping = self.run_edit_with_a_write_during_its_cascade(
+            ACCESS_TYPE_NONE, lambda: self.edit_access(ACCESS_TYPE_VIEW, APIClient()))
+
+        self.assertIn(response.status_code, (200, 202), response.data)
+        self.assertIn(overlapping.status_code, (200, 202), overlapping.data)
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_VIEW}] * 3)

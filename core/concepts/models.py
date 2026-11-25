@@ -628,6 +628,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         initial_version._index = concept._index  # pylint: disable=protected-access
         initial_version.comment = concept.comment
         initial_version.save(**kwargs)
+        initial_version.keep_source_access_on_commit()
         initial_version.version = initial_version.id
         initial_version.released = True
         initial_version.is_latest_version = True
@@ -1119,6 +1120,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             self.errors = {}
             self.save()
             if self.id:
+                self.keep_source_access_on_commit()
                 next_valid_seq = parent.concept_mnemonic_next  # returns str of int or None
                 if parent.is_sequential_concepts_mnemonic:
                     try:
@@ -1200,6 +1202,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
             concept.is_latest_version = not create_initial_version
             concept.public_access = parent.public_access
             concept.save()
+            concept.keep_source_access_on_commit()
             concept.full_clean()
 
             initial_version = None
