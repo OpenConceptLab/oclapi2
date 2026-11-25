@@ -856,6 +856,23 @@ class ConceptTest(OCLTestCase):
         self.assertIsNotNone(concept.id)
         process_hierarchy_mock.assert_not_called()
 
+    def test_persist_new_with_autoid_sequential_goes_past_ids_set_by_hand_and_dropped(self):
+        source = OrganizationSourceFactory(version=HEAD, autoid_concept_mnemonic='sequential')
+
+        def persist(**kwargs):
+            return Concept.persist_new({
+                **factory.build(dict, FACTORY_CLASS=ConceptFactory), 'parent': source, 'mnemonic': None,
+                'names': [ConceptNameFactory.build(locale='en', name='English', locale_preferred=True)], **kwargs
+            })
+
+        self.assertEqual(persist().mnemonic, '1')
+        self.assertEqual(persist(mnemonic='40').mnemonic, '40')
+        self.assertEqual(persist().mnemonic, '41')
+        dropped = ConceptFactory(parent=source, mnemonic='80')
+        dropped.sources.clear()
+        self.assertEqual(persist().mnemonic, '81')
+        self.assertEqual(persist().mnemonic, '82')
+
     def test_persist_new_with_autoid_sequential(self):
         source = OrganizationSourceFactory(
             version=HEAD, autoid_concept_mnemonic='sequential', autoid_concept_external_id='sequential')
