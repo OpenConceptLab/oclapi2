@@ -24,7 +24,8 @@ from core.capacity.config import clear_cache, save_config
 from core.capacity.constants import HEADER_DECISION
 from core.capacity.limiter import RedisLanes
 from core.sources.models import CloneLimitExceeded
-from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
+from core.collections.models import CollectionReference
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, OPENMRS_VALIDATION_SCHEMA
 from core.common.mixins import FACETS_CACHE_SUFFIX
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
@@ -2348,6 +2349,18 @@ class ConceptMappingsViewTest(OCLAPITestCase):
             sorted([str(direct_mapping.id), str(indirect_mapping.id)])
         )
 
+    def test_retired_mappings_only_with_include_retired(self):
+        active = MappingFactory(parent=self.concept.parent, from_concept=self.concept)
+        retired = MappingFactory(parent=self.concept.parent, from_concept=self.concept, retired=True)
+        mappings_url = self.concept.uri + 'mappings/'
+
+        for query, expected in (('', [active]), ('?includeRetired=false', [active]),
+                                ('?includeRetired=true', [active, retired])):
+            response = self.client.get(mappings_url + query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(mapping['uuid'] for mapping in response.data), sorted(str(m.id) for m in expected), query)
+
 
 class ConceptCascadeViewTest(OCLAPITestCase):
     def test_get_200_for_source_version(self):  # pylint: disable=too-many-statements
@@ -3748,6 +3761,198 @@ class ConceptPropertyFilterViewTest(OCLAPITestCase):
         ordered = self.get_ordered_ids('?sort=id&limit=100')
         relevant = [_id for _id in ordered if _id in ('BoolFalse', 'BoolTrue')]
         self.assertEqual(relevant, ['BoolFalse', 'BoolTrue'])
+
+
+@tag('es')
+class ConceptRetiredFacetCountsTest(OCLAPITestCase):
+    """
+    Facet counts follow the retired rule the results follow, and the retired facet counts both values.
+    See OpenConceptLab/ocl_issues#3057.
+    """
+    def setUp(self):
+        super().setUp()
+        self.patch_concept_es_mapping_for_ci()
+        org = OrganizationFactory()
+        self.source = OrganizationSourceFactory(organization=org, mnemonic='RetiredFacetsSource')
+        concepts = [
+            ConceptFactory(mnemonic='ActiveA', parent=self.source, concept_class='classA'),
+            ConceptFactory(mnemonic='ActiveB', parent=self.source, concept_class='classB'),
+            ConceptFactory(mnemonic='RetiredA', parent=self.source, concept_class='classA', retired=True),
+        ]
+        versions = [concept.get_latest_version() for concept in concepts]
+        self.source.concepts.add(*versions)
+        self.collection = OrganizationCollectionFactory(organization=org, mnemonic='RetiredFacetsCollection')
+        self.expansion = ExpansionFactory(mnemonic='e1', collection_version=self.collection)
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        self.expansion.concepts.add(*versions)
+        ConceptDocument().update(self.source.concepts_set.all())
+
+    def get_facet_counts(self, url):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        facets = response.data['facets']['fields']
+        return (
+            {value: count for value, count, _ in facets['conceptClass']},
+            {value: count for value, count, _ in facets['retired']}
+        )
+
+    def get_ids(self, url):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        return sorted(concept['id'] for concept in response.data)
+
+    def test_source_facets(self):
+        url = self.source.concepts_url + '?facetsOnly=true'
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(self.get_facet_counts(url), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false'), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=true'), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&retired=false'), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&retired=true'), ({'classA': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '&conceptClass=classA&retired=false'),
+            ({'classA': 1}, {'false': 1, 'true': 1}))
+        self.assertEqual(
+            self.get_facet_counts(url + '&q=Active&includeRetired=true'), ({'classA': 1, 'classB': 1}, {'false': 2}))
+        self.assertEqual(self.get_facet_counts(url + '&retired=1'), ({'classA': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&retired=False'), ({'classA': 1, 'classB': 1}, both))
+        # the OCL Mapper sends includeRetired=false with its Retired filter
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false&retired=true'), ({'classA': 1}, both))
+
+    def test_source_facets_agree_with_results(self):
+        url = self.source.concepts_url + '?conceptClass=classA'
+
+        self.assertEqual(self.get_ids(url), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '&includeRetired=false'), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '&retired=false'), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '&includeRetired=true'), ['ActiveA', 'RetiredA'])
+        self.assertEqual(self.get_ids(url + '&retired=true'), ['RetiredA'])
+        self.assertEqual(self.get_ids(url + '&retired=True'), ['RetiredA'])
+        self.assertEqual(self.get_ids(url + '&retired=0'), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '&includeRetired=false&retired=true'), ['RetiredA'])
+
+    def test_expansion_facets(self):
+        url = self.expansion.url + 'concepts/?facetsOnly=true'
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(self.get_facet_counts(url), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=true'), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false'), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&retired=false'), ({'classA': 1, 'classB': 1}, both))
+
+    def test_expansion_results(self):
+        url = self.expansion.url + 'concepts/'
+
+        self.assertEqual(self.get_ids(url), ['ActiveA', 'ActiveB', 'RetiredA'])
+        self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveA', 'ActiveB'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&includeRetired=false'), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&retired=false'), ['ActiveA'])
+        self.assertEqual(self.get_ids(url + '?includeRetired=false&retired=true'), ['RetiredA'])
+
+    def test_collection_facets_agree_with_results(self):
+        url = self.collection.concepts_url
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(self.get_ids(url), ['ActiveA', 'ActiveB', 'RetiredA'])
+        self.assertEqual(self.get_facet_counts(url + '?facetsOnly=true'), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveA', 'ActiveB'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=false'), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&includeRetired=false'), ['ActiveA'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&includeRetired=true'), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&retired=false'), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&retired=false'), ['ActiveA'])
+
+    def test_collection_search_is_its_default_expansion(self):
+        other_member = ConceptFactory(mnemonic='OtherA', parent=self.source, concept_class='classA', retired=True)
+        ExpansionFactory(mnemonic='e2', collection_version=self.collection).concepts.add(
+            other_member.get_latest_version())
+        ConceptDocument().update(self.source.concepts_set.all())
+        url = self.collection.concepts_url
+
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true'), ({'classA': 2, 'classB': 1}, {'false': 2, 'true': 1}))
+
+    def test_reference_search_is_not_limited_to_the_default_expansion(self):
+        other_member = ConceptFactory(
+            mnemonic='OtherA', parent=self.source, concept_class='classA').get_latest_version()
+        ExpansionFactory(mnemonic='e2', collection_version=self.collection).concepts.add(other_member)
+        reference = CollectionReference(expression=other_member.uri, collection=self.collection)
+        reference.save()
+        reference.concepts.add(other_member)
+        ConceptDocument().update(self.source.concepts_set.all())
+
+        self.assertIn(
+            'OtherA', self.get_ids(self.collection.uri + f'references/{reference.id}/concepts/?conceptClass=classA'))
+        versioned_url = self.collection.uri + f'HEAD/references/{reference.id}/concepts/?conceptClass=classA'
+        self.assertNotIn('OtherA', self.get_ids(versioned_url))  # a version in the URL: its default expansion
+
+    def test_reference_members_follow_include_retired(self):
+        members = list(self.expansion.concepts.filter(mnemonic__in=['ActiveA', 'RetiredA']))
+        reference = CollectionReference(expression=members[0].uri, collection=self.collection)
+        reference.save()
+        reference.concepts.add(*members)
+        url = self.collection.uri + f'references/{reference.id}/concepts/'
+
+        self.assertEqual(self.get_ids(url), ['ActiveA', 'RetiredA'])  # the database list
+        self.assertEqual(self.get_ids(url + '?includeRetired=false'), ['ActiveA'])
+
+    def test_global_facets(self):
+        url = f'/concepts/?facetsOnly=true&owner={self.source.organization.mnemonic}'
+        both = {'false': 2, 'true': 1}
+
+        self.assertEqual(self.get_facet_counts(url), ({'classA': 1, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=true'), ({'classA': 2, 'classB': 1}, both))
+        self.assertEqual(self.get_facet_counts(url + '&includeRetired=false&retired=true'), ({'classA': 1}, both))
+
+    def test_user_shortcut_collection_search_is_its_default_expansion(self):
+        user = UserProfileFactory()
+        collection = UserCollectionFactory(user=user, mnemonic='RetiredFacetsUserCollection')
+        expansion = ExpansionFactory(mnemonic='e1', collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        expansion.concepts.add(*self.expansion.concepts.all())
+        ExpansionFactory(mnemonic='e2', collection_version=collection).concepts.add(ConceptFactory(
+            mnemonic='OtherA', parent=self.source, concept_class='classA', retired=True).get_latest_version())
+        ConceptDocument().update(self.source.concepts_set.all())
+        self.client.credentials(HTTP_AUTHORIZATION='Token ' + user.get_token())
+        url = '/user/collections/RetiredFacetsUserCollection/concepts/'
+
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA'), ['ActiveA', 'RetiredA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&includeRetired=false'), ['ActiveA'])
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true'), ({'classA': 2, 'classB': 1}, {'false': 2, 'true': 1}))
+
+    def test_collection_facet_viewable_recount_follows_the_retired_rule(self):
+        url = self.source.concepts_url + '?facetsOnly=true'
+        name = self.collection.mnemonic
+
+        def collection_count(query):
+            response = self.client.get(url + query)  # not staff: the collection facet is recounted
+            self.assertEqual(response.status_code, 200)
+            return {value: count for value, count, _ in response.data['facets']['fields']['collection']}.get(name)
+
+        self.assertEqual(collection_count(''), 2)
+        self.assertEqual(collection_count('&includeRetired=false'), 2)
+        self.assertEqual(collection_count('&includeRetired=true'), 3)
+
+    def test_retired_filter_key_in_any_case(self):
+        url = self.source.concepts_url
+
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&Retired=false'),
+            ({'classA': 1, 'classB': 1}, {'false': 2, 'true': 1}))
+        self.assertEqual(
+            self.get_facet_counts(url + '?facetsOnly=true&Retired=true'), ({'classA': 1}, {'false': 2, 'true': 1}))
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&Retired=true'), ['RetiredA'])
+        self.assertEqual(self.get_ids(url + '?conceptClass=classA&Retired=false&retired=true'), ['RetiredA'])
 
 
 class ConceptNameRetrieveUpdateDestroyViewTest(OCLAPITestCase):

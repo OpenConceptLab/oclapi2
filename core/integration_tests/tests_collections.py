@@ -280,8 +280,9 @@ class CollectionListViewTest(OCLAPITestCase):
         collection.refresh_from_db()
         self.assertEqual(collection.references.count(), 1)
         self.assertEqual(collection.expansion.concepts.count(), 1)
-        self.assertEqual(collection.expansion.active_concepts, 1)
-        self.assertEqual(collection.expansion.active_mappings, 0)
+        self.assertEqual(
+            collection.expansion.get_member_counts(),
+            {'active_concepts': 1, 'active_mappings': 0, 'retired_concepts': 0, 'retired_mappings': 0})
         self.assertTrue(collection.references.filter(expression=concept.uri).exists())
         self.assertEqual(
             response.data,
@@ -4429,6 +4430,19 @@ class CollectionVersionConceptMappingsViewTest(OCLAPITestCase):
             sorted([self.mapping.url, self.mapping2.url])
         )
 
+    def test_retired_mappings_only_with_include_retired(self):
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        retired = MappingFactory(from_concept=self.concept, parent=self.source, retired=True)
+        self.expansion.mappings.add(self.mapping, retired)
+        url = self.collection.url + f'concepts/{self.concept.mnemonic}/mappings/?brief=true'
+
+        for query, expected in (('', [self.mapping]), ('&includeRetired=false', [self.mapping]),
+                                ('&includeRetired=true', [self.mapping, retired])):
+            response = self.client.get(url + query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(sorted(data['url'] for data in response.data), sorted(m.url for m in expected), query)
+
     def test_get_404(self):
         self.collection.expansion_uri = self.expansion.uri
         self.collection.save()
@@ -4709,6 +4723,24 @@ class CollectionVersionExpansionViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(self.collection.expansions.count(), 1)
 
+    def test_get_summary_counts_retired_members_apart_from_active_ones(self):
+        source = OrganizationSourceFactory()
+        active = ConceptFactory(parent=source).get_latest_version()
+        retired = ConceptFactory(parent=source, retired=True).get_latest_version()
+        inactive = ConceptFactory(parent=source).get_latest_version()
+        Concept.objects.filter(id=inactive.id).update(is_active=False)
+        self.expansion.concepts.add(active, retired, inactive)
+        self.expansion.mappings.add(
+            MappingFactory(parent=source).get_latest_version(),
+            MappingFactory(parent=source, retired=True).get_latest_version())
+
+        response = self.client.get(self.expansion.url + '?includeSummary=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['summary'],
+            {'active_concepts': 1, 'active_mappings': 1, 'retired_concepts': 1, 'retired_mappings': 1})
+
 
     def test_post_re_evaluate_keeps_resource_version_held_by_older_release(self):
         source = OrganizationSourceFactory()
@@ -4912,7 +4944,9 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['id'], expansion.id)
         self.assertEqual(response.data[0]['mnemonic'], 'e1')
-        self.assertEqual(response.data[0]['summary'], {'active_concepts': 0, 'active_mappings': 0})
+        self.assertEqual(
+            response.data[0]['summary'],
+            {'active_concepts': 0, 'active_mappings': 0, 'retired_concepts': 0, 'retired_mappings': 0})
 
         response = self.client.get(
             self.collection.url + 'HEAD/expansions/?verbose=true&includeSummary=true',
@@ -4924,7 +4958,9 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(response.data[0]['id'], expansion.id)
         self.assertEqual(response.data[0]['mnemonic'], 'e1')
         self.assertEqual(response.data[0]['parameters'], expansion.parameters)
-        self.assertEqual(response.data[0]['summary'], {'active_concepts': 0, 'active_mappings': 0})
+        self.assertEqual(
+            response.data[0]['summary'],
+            {'active_concepts': 0, 'active_mappings': 0, 'retired_concepts': 0, 'retired_mappings': 0})
 
 
 class CollectionExpansionsViewTest(OCLAPITestCase):

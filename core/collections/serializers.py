@@ -328,10 +328,9 @@ class CollectionCreateSerializer(CollectionCreateOrUpdateSerializer):
         return collection
 
 
-class ExpansionSummarySerializer(ModelSerializer):
-    class Meta:
-        model = Expansion
-        fields = ('active_concepts', 'active_mappings')
+class ExpansionSummarySerializer(Serializer):  # pylint: disable=abstract-method
+    def to_representation(self, instance):
+        return instance.get_member_counts()
 
 
 class CollectionSummarySerializer(ModelSerializer):
