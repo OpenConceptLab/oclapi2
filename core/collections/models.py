@@ -323,7 +323,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         head = self.head
         if head:
             for reference in head.references.order_by('id'):
-                # copied, not resolved here: one HEAD never resolved stays unresolved
+                # copied, not resolved here: a reference HEAD never resolved stays unresolved
                 new_reference = reference.clone(last_resolved_at=reference.last_resolved_at, collection=self)
                 new_reference.save()
                 new_reference.concepts.set(reference.concepts.all())
