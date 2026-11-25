@@ -281,7 +281,7 @@ class ExpansionVersionLists:
 
     @staticmethod
     def is_explicit(reference):
-        return not reference.is_versionless_expression or reference.names_repo_version
+        return not reference.is_versionless_expression
 
     def add_resource_versioned_system_version(self, reference, version):
         repo_uri = drop_version(version.uri)
