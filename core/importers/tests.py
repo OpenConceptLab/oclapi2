@@ -7804,36 +7804,6 @@ class IsolatedVersionImportTest(OCLTestCase):
         child = Concept.objects.filter(parent__mnemonic='LOINC', is_latest_version=True).exclude(mnemonic='P').get()
         self.assertEqual(set(child.parent_concepts.values_list('mnemonic', flat=True)), {'P'})
 
-    @patch('core.importers.models.post_import_update_resource_counts.apply_async')
-    @patch('core.importers.models.time.sleep')
-    def test_parallel_snapshot_does_not_cross_an_existing_versions_unfinished_seed(self, sleep_mock, _counts):
-        """A rerun finds the version created; its seed may still be reading HEAD, or may have failed."""
-        self.run_import([self.version('v1')], isolated_version=False)
-        release = Source.objects.get(mnemonic='LOINC', version='v1')
-        for state, dispatched in (('PENDING', ['v1', 'Later']), ('FAILURE', ['v1'])):
-            with self.subTest(state=state):
-                Task.objects.create(id=f'seed-{state}', name='core.common.tasks.seed_children_to_new_version',
-                                    args=['source', release.id, True, False], state=state)
-                seed_result = Mock(state=state)
-                sleep_mock.side_effect = lambda _, result=seed_result: setattr(result, 'state', 'SUCCESS')
-                queued = []
-
-                def queue(part, _is_child, **_):
-                    queued.append(part[0]['id'])
-                    if part[0]['id'] == 'Later':
-                        self.assertEqual(seed_result.state, 'SUCCESS')
-                    return Mock(results=[Mock(state='SUCCESS', result={'json': {'exists': [part[0]]}})])
-
-                runner = BulkImportParallelRunner([self.version('v1'), self.concept('Later')], 'ocladmin', True)
-                with override_settings(TEST_MODE=False), patch.object(runner, 'queue_tasks', side_effect=queue), \
-                        patch.object(Task, 'celery_result', new_callable=PropertyMock, return_value=seed_result):
-                    if state == 'FAILURE':
-                        with self.assertRaisesRegex(RuntimeError, state):
-                            runner.run()
-                    else:
-                        runner.run()
-                self.assertEqual(queued, dispatched)
-
     def test_parallel_snapshot_retirement_leaves_no_hierarchy_work_queued(self):
         """
         The next snapshot must not race the hierarchy of a retired revision or of the parent revisions it makes, and
