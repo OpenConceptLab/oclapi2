@@ -1,4 +1,3 @@
-from collections import UserDict
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError as DjangoValidationError, PermissionDenied as DjangoPermissionDenied
@@ -7,7 +6,6 @@ from django.test import SimpleTestCase
 from fhir.resources.R4B.operationoutcome import OperationOutcome
 from rest_framework import exceptions
 
-from core.capabilities.exceptions import WriteRefused
 from core.common.exceptions import Http400
 from core.fhir import outcomes
 from core.fhir.outcomes import TX_ISSUE_TYPE_SYSTEM
@@ -88,6 +86,15 @@ class OutcomeNormalizationTest(SimpleTestCase):
         self.assertEqual(result['contained'][0]['issue'][0]['details']['text'], 'Nested failure')
         self.assertEqual(normalized['entry'][1]['resource'], code_system)
         self.assertEqual(nested['issue'], [{'details': 'Nested failure'}])
+
+
+class BodyError(exceptions.APIException):
+    """A 403 whose detail is a whole response body, which can carry data for client apps besides its message."""
+    status_code = 403
+    detail_is_body = True
+
+    def __init__(self, body):  # pylint: disable=super-init-not-called
+        self.detail = body
 
 
 class ExceptionHandlerTest(SimpleTestCase):
@@ -183,37 +190,30 @@ class ExceptionHandlerTest(SimpleTestCase):
         self.assertEqual(issue_summary(response.data), ['error|invalid|invalid-data|'])
         self.assertEqual(response.data['issue'][0]['details']['text'], 'Bad parameters')
 
-    def test_a_refusal_body_makes_issues_only_of_its_messages(self):
-        # a capability policy's 403 body can carry objects for client apps to render; they aren't messages
+    def test_a_body_is_answered_with_its_detail(self):
         body = {
-            'detail': 'Content is read-only.', 'error_code': 'content_read_only', 'limit': 0, 'used': 3,
-            'renews_at': None, 'scope': ['First', 2], 'steps': ['First', '', 'Second'],
-            'notice': {'title': 'Example notice', 'actions': [{'label': 'Example action', 'url': 'https://x'}]},
-            'links': {'docs': 'https://x'}, 'mixed': ['Example message', {'title': 'Example notice'}],
+            'detail': 'Example message.', 'error_code': 'example_code', 'count': 3, 'at': None,
+            'items': ['First', 'Second'], 'links': {'docs': 'https://x', 'more': [{'title': 'Example'}]},
         }
-        response = self.handle(WriteRefused(body))
+        for exc in (BodyError(body), BodyError('Example message.')):
+            response = self.handle(exc)
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            [(item['details']['text'], item.get('expression')) for item in response.data['issue']],
-            [('Content is read-only.', ['detail']), ('content_read_only', ['error_code']), ('0', ['limit']),
-             ('3', ['used']), ('None', ['renews_at']), ('First', ['scope']), ('2', ['scope']), ('First', ['steps']),
-             ('Second', ['steps'])])
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'])
+            self.assertEqual(response.data['issue'][0]['details']['text'], 'Example message.')
 
-    def test_a_refusal_body_listing_objects_makes_issues_only_of_its_messages(self):
-        response = self.handle(WriteRefused(['Example message', {'title': 'Example notice'}]))
+    def test_a_body_without_a_detail_is_answered_with_its_error_code(self):
+        for body in ({'error_code': 'example_code', 'count': 3}, {'detail': ' ', 'error_code': 'example_code'},
+                     {'detail': {'title': 'Example'}, 'error_code': 'example_code'}):
+            response = self.handle(BodyError(body))
 
-        self.assertEqual(
-            [(item['details']['text'], item.get('expression')) for item in response.data['issue']],
-            [('Example message', None)])
+            self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'], body)
+            self.assertEqual(response.data['issue'][0]['details']['text'], 'example_code', body)
 
-    def test_a_refusal_body_of_objects_only_is_answered_with_its_status(self):
-        bodies = (
-            {'notice': {'title': 'Example notice'}}, [{'title': 'Example notice'}],
-            {'detail': '', 'notice': UserDict({'title': 'Example notice'})}, '',
-        )
-        for body in bodies:
-            response = self.handle(WriteRefused(body))
+    def test_a_body_without_a_message_is_answered_with_its_status(self):
+        for body in ({'count': 3, 'at': None, 'links': {'docs': 'https://x'}}, {'detail': '', 'error_code': None},
+                     [{'title': 'Example'}], ''):
+            response = self.handle(BodyError(body))
 
             self.assertEqual(issue_summary(response.data), ['error|forbidden|invalid-data|'], body)
             self.assertEqual(response.data['issue'][0]['details']['text'], 'Forbidden', body)

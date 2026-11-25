@@ -14,6 +14,7 @@ class UsageRefused(APIException):
     """
     status_code = status.HTTP_403_FORBIDDEN
     default_code = 'capability_limit_reached'
+    detail_is_body = True  # `detail` is the whole response body, not a serializer-style error detail
 
     def __init__(self, detail, no_access=False):  # pylint: disable=super-init-not-called
         # set directly (as MapProjectCapacityExceeded does), so numbers stay numbers in the JSON
