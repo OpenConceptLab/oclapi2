@@ -389,7 +389,7 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         instance = self.get_object()
         instance.extras = get(instance, 'extras', {})
         instance.extras[key] = value
-        instance.save()
+        instance.save_keeping_access()
         instance.set_checksums()
         return Response({key: value})
 
@@ -399,7 +399,7 @@ class OrganizationExtraRetrieveUpdateDestroyView(OrganizationExtrasBaseView, Ret
         instance.extras = get(instance, 'extras', {})
         if key in instance.extras:
             del instance.extras[key]
-            instance.save()
+            instance.save_keeping_access()
             instance.set_checksums()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
