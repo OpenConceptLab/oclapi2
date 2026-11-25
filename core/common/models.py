@@ -867,6 +867,19 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                       models.Index(fields=['version'])
                   ] + VersionedModel.Meta.indexes
 
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        tracks_changes = hasattr(self, 'get_dirty_fields')  # sources and collections
+        if not force_insert and not self._state.adding and self.pk is not None and tracks_changes and (
+                'last_child_removal_at' not in self.get_dirty_fields()):  # pylint: disable=no-member
+            # written by its own update unless this instance set it, so a save from an older copy can't undo a mark
+            deferred = self.get_deferred_fields()
+            fields = update_fields if update_fields is not None else [
+                field.name for field in self._meta.concrete_fields
+                if not field.primary_key and field.attname not in deferred]
+            update_fields = [field for field in fields if field != 'last_child_removal_at']
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
+
     @property
     def is_collection(self):
         from core.collections.models import Collection

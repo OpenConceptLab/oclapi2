@@ -38,7 +38,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
-    RETIRED_ACCESS_TYPE_EDIT
+    RETIRED_ACCESS_TYPE_EDIT, HEAD
 from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion, \
     delete_collection
 from core.common.tasks import update_collection_active_concepts_count
@@ -7437,3 +7437,35 @@ class CollectionHeadExportKeyTest(OCLTestCase):
         with patch('core.collections.models.timezone', **{'now.return_value': self.later}):
             head.save(update_fields=['expansion_uri'])
         self.assertEqual(self.get_head().last_child_removal_at, self.later)
+
+    def test_a_value_set_update_saving_a_version_over_head_keeps_the_key(self):
+        """It saves a version instance with HEAD's id and expansion, which is no switch, and carries no mark of HEAD"""
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, mnemonic=self.collection.mnemonic, version='v1')
+        version.expansion_uri = ExpansionFactory(collection_version=version).uri
+        version.save()
+        version = Collection.objects.get(id=version.id)
+        head = self.get_head()
+        head.mark_own_child_removal()
+        marked_at = self.get_head().last_child_removal_at
+
+        version.id, version.version, version.released = head.id, HEAD, False
+        version.expansion_uri = head.expansion_uri
+        with self.later_clock(), patch('core.collections.models.timezone', **{'now.return_value': self.later}):
+            errors = Collection.persist_changes(version, version.created_by, None, keep_private=True)
+
+        self.assertEqual(errors, {})
+        self.assertEqual(self.get_head().last_child_removal_at, marked_at)
+
+    def test_a_save_from_an_older_copy_keeps_a_removal_mark(self):
+        for update_fields in (None, self.get_head().get_fields_but_access()):
+            with self.subTest(update_fields=update_fields):
+                older_copy = self.get_head()
+                self.get_head().mark_own_child_removal()
+                marked_at = self.get_head().last_child_removal_at
+                older_copy.name = 'Renamed'
+
+                older_copy.save(update_fields=update_fields)
+
+                head = self.get_head()
+                self.assertEqual((head.name, head.last_child_removal_at), ('Renamed', marked_at))

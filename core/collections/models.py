@@ -173,9 +173,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     ):
         is_new = not self.id
         dirty_fields = self.get_dirty_fields()
-        switches_expansion = dirty_fields.get('expansion_uri') and (
-            update_fields is None or 'expansion_uri' in update_fields)
-        if self.id and switches_expansion:
+        # as stored: an instance of another version saved over this row (a FHIR ValueSet update) isn't a switch
+        switches_expansion = self.id and dirty_fields.get('expansion_uri') and (
+            update_fields is None or 'expansion_uri' in update_fields) and Collection.objects.filter(
+            id=self.id).exclude(expansion_uri=self.expansion_uri).exists()
+        if switches_expansion:
             self.last_child_removal_at = timezone.now()  # another expansion may not list all of this one's members
             self.__dict__.pop('version_export_path', None)
             if update_fields is not None:
