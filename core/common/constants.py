@@ -79,6 +79,7 @@ INCLUDE_SUMMARY = 'includeSummary'
 INCLUDE_EXTERNAL_EXPORTS = 'includeExternalExports'
 INCLUDE_LOGS = 'includeLogs'
 INCLUDE_STATES = 'includeStates'
+INCLUDE_HEALTH = 'includeHealth'
 INCLUDE_TASKS = 'includeTasks'
 INCLUDE_VERBOSE_REFERENCES = 'includeReferences'
 INCLUDE_AUTH_GROUPS = 'includeAuthGroups'
@@ -170,4 +171,4 @@ VERIFICATION_HASH_REGEX = r'sha256:[0-9a-f]{64}'
 VERIFICATION_INVALID = 'Must have exactly verified_at (ISO 8601 date-time with seconds and Z or an offset), ' \
                        'process (1 to 64 letters, digits, . and -) and hash (sha256: and 64 lowercase hex characters).'
 VERIFICATION_ONLY_ON_VERSION = 'Can only be set on an existing repository version, not on HEAD.'
-VERSION_EXPORT_EXCLUDED_FIELDS = {'verification'}
+VERSION_EXPORT_EXCLUDED_FIELDS = {'verification', 'expansion_health'}

@@ -1585,6 +1585,32 @@ class SourceTest(OCLTestCase):
         self.assertEqual(resolved_version.canonical_url, None)
         self.assertFalse(resolved_version.is_fqdn)
 
+    def test_resolve_reference_expression_relative_url_of_a_retired_version(self):
+        org = OrganizationFactory(mnemonic='org')
+        head = OrganizationSourceFactory(mnemonic='source', organization=org)
+        retired = OrganizationSourceFactory(
+            mnemonic='source', organization=org, version='v1', released=True, retired=True)
+        OrganizationSourceFactory(mnemonic='source', organization=org, version='v2', is_active=False)
+
+        resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/v1/')
+        self.assertEqual(resolved.id, retired.id)
+        resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/v1')
+        self.assertEqual(resolved.id, retired.id)
+        resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/|v1')
+        self.assertEqual(resolved.id, retired.id)
+        # a deactivated version still doesn't resolve, nor does a retired one as a repository's latest
+        resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/v2/')
+        self.assertIsNone(resolved.id)
+        resolved, _ = Source.resolve_reference_expression('/orgs/org/sources/source/')
+        self.assertEqual(resolved.id, head.id)
+
+    def test_resolve_reference_expression_relative_url_of_a_retired_head_of_an_owner_named_like_a_resource(self):
+        owner = OrganizationFactory(mnemonic='sources')
+        OrganizationSourceFactory(mnemonic='source', organization=owner, retired=True)
+
+        resolved, _ = Source.resolve_reference_expression('/orgs/sources/sources/source/')
+        self.assertIsNone(resolved.id)
+
     def test_resolve_reference_expression_with_canonical_url(self):  # pylint:disable=too-many-statements,too-many-locals
         org1 = OrganizationFactory(mnemonic='org1')
         org2 = OrganizationFactory(mnemonic='org2')
@@ -3521,12 +3547,14 @@ class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
             cursor.execute('vacuum (analyze) mappings_sources')
 
         for repo, index in ((source, 'mappings_head_parent_to_source'), (version, 'mappings_id_incl_to_source')):
-            # only the mappings read: around it, tiny tables let the planner probe mappings by to_source_id instead
+            # tiny tables let the planner read mappings by the plain to_source_id index; hide it, then roll back
             sql, params = repo.get_mapped_source_ids().query.sql_with_params()
             with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute('drop index mappings_to_source_id_ee5ed6f2')
                 cursor.execute('set local enable_seqscan = off; set local enable_bitmapscan = off')
                 cursor.execute(f'explain {sql}', params)
                 plan = '\n'.join(row[0] for row in cursor.fetchall())
+                transaction.set_rollback(True)
 
             self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)
 

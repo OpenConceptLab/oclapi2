@@ -299,18 +299,33 @@ def get_collection_in_scope(context):
     return None
 
 
+def get_requester_context(context):
+    """
+    The context of a concept or mapping serialized inside another serializer: the requester, whose source versions it
+    names. A $cascade bundle passes its requester as `user`.
+    """
+    return {'user': get(context, 'request.user') or get(context, 'user')}
+
+
 class SourceVersionFieldMixin:
     """
-    latest_source_version for concepts and mappings: the latest released source version holding the row or, listed
-    in a collection, the source version the row's references there resolved to (ocl_issues#2770).
+    The source versions a concept or mapping is in, those the requester can view only. source_versions: their URIs.
+    latest_source_version: the latest one's name or, listed in a collection, the name of the source version the row's
+    references there resolved to (ocl_issues#2770).
     """
+    def get_requester(self):
+        return get_requester_context(self.context)['user']
+
+    def get_source_versions(self, obj):
+        return obj.get_source_versions(self.get_requester())
+
     def get_latest_source_version(self, obj):
         collection = get_collection_in_scope(self.context)
         if collection:
             if not hasattr(obj, '_collection_source_version'):
-                obj.load_collection_source_versions([obj], collection)
+                obj.load_collection_source_versions([obj], collection, self.get_requester())
             return get(obj, '_collection_source_version.version')
-        return get(obj.latest_source_version, 'version')
+        return obj.get_latest_source_version_name(self.get_requester())
 
 
 class SourceChildPageSerializer(ListSerializer):  # pylint: disable=abstract-method
@@ -403,7 +418,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.concepts.serializers import ConceptListSerializer
             queryset = self._paginate(
                 Concept.apply_attribute_based_filters(obj.get_concepts_queryset(), self.query_params), '-id')
-            results = self._serialize(queryset, ConceptListSerializer)
+            results = self._serialize(queryset, ConceptListSerializer, get_requester_context(self.context))
         return results
 
     def get_mappings(self, obj):
@@ -413,7 +428,7 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
             from core.mappings.serializers import MappingListSerializer
             queryset = self._paginate(
                 Mapping.apply_attribute_based_filters(obj.get_mappings_queryset(), self.query_params), '-id')
-            results = self._serialize(queryset, MappingListSerializer)
+            results = self._serialize(queryset, MappingListSerializer, get_requester_context(self.context))
         return results
 
     def get_references(self, obj):
@@ -427,5 +442,5 @@ class AbstractRepoResourcesSerializer(AbstractResourceSerializer):
         return queryset.order_by(order_by)[self.offset:self.offset + self.limit]
 
     @staticmethod
-    def _serialize(queryset, klass):
-        return klass(queryset, many=True).data
+    def _serialize(queryset, klass, context=None):
+        return klass(queryset, many=True, context=context or {}).data

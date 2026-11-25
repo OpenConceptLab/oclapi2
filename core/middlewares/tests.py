@@ -1,16 +1,19 @@
 import json
 import re
+import time
 from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse, JsonResponse
 from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.urls import resolve
 from rest_framework.exceptions import AuthenticationFailed
 
 from core.common.exceptions import DeactivatedAccountLoginRefused, SSOIdentityMismatchRefused, \
     SSOUsernameCaseMismatchRefused
-from core.middlewares.middlewares import CustomLoggerMiddleware, RequireAuthenticationMiddleware
+from core.middlewares.middlewares import CustomLoggerMiddleware, RequireAuthenticationMiddleware, \
+    SlowRequestLogMiddleware
 
 
 @override_settings(
@@ -351,3 +354,109 @@ class CustomLoggerMiddlewareTest(SimpleTestCase):
 
         self.assertTrue(any(REQUEST_MARKER in line for line in lines))
         self.assertTrue(any(RESPONSE_MARKER in line for line in lines))
+
+
+
+class SlowRequestLogMiddlewareTest(SimpleTestCase):
+    """A request taking SLOW_REQUEST_LOG_MS or more writes one slow_request line, for CloudWatch metric filters."""
+    path = '/orgs/CIEL/sources/CIEL/v2026-10-23/mapped-sources/'
+
+    def records(self, request, delay=0, status=200, resolved=True):
+        """Pass the request through the middleware to a view taking `delay` seconds; return the records logged."""
+        def view(req):
+            if resolved:
+                req.resolver_match = resolve(req.path)
+            time.sleep(delay)
+            return HttpResponse(status=status)
+
+        with patch('core.middlewares.middlewares.emit') as emit:
+            response = SlowRequestLogMiddleware(view)(request)
+
+        self.assertEqual(response.status_code, status)
+        return [logged.args[0] for logged in emit.call_args_list]
+
+    def test_wraps_every_middleware_but_fhir_errors_so_it_times_the_whole_request(self):
+        self.assertEqual(settings.MIDDLEWARE[:2], [
+            'core.middlewares.middlewares.FhirErrorMiddleware',
+            'core.middlewares.middlewares.SlowRequestLogMiddleware',
+        ])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=20)
+    def test_a_slow_request_logs_its_view_and_route(self):
+        request = RequestFactory().get(self.path + '?excludeSelf=false&brief=true', HTTP_AUTHORIZATION='Token secret')
+
+        records = self.records(request, delay=0.03, status=503)
+
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertGreaterEqual(record.pop('ms'), 20)
+        self.assertEqual(record, {
+            'event': 'slow_request', 'view': 'SourceVersionMappedSourcesListView',
+            'route': 'orgs/<str:org>/sources/<str:source>/<str:version>/mapped-sources/', 'method': 'GET',
+            'status': 503})
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_logs_no_value_from_the_path(self):
+        """A path can carry a user's name and a token, as email verification's does."""
+        records = self.records(RequestFactory().get('/users/someone/verify/a-secret-token/'), delay=0.01)
+
+        self.assertEqual(records[0]['route'], 'users/<str:user>/verify/<str:verification_token>/')
+        self.assertNotIn('someone', json.dumps(records))
+        self.assertNotIn('a-secret-token', json.dumps(records))
+
+    @override_settings(SLOW_REQUEST_LOG_MS=60000)
+    def test_a_request_under_the_threshold_logs_nothing(self):
+        self.assertEqual(self.records(RequestFactory().get(self.path)), [])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=0)
+    def test_zero_turns_it_off(self):
+        self.assertEqual(self.records(RequestFactory().get(self.path), delay=0.01), [])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_a_request_answered_before_url_resolution_still_names_its_view(self):
+        """A slow failure in authentication, before Django resolves the URL, still counts for its view."""
+        records = self.records(RequestFactory().get(self.path), delay=0.01, status=500, resolved=False)
+
+        self.assertEqual([(record['view'], record['route']) for record in records], [(
+            'SourceVersionMappedSourcesListView', 'orgs/<str:org>/sources/<str:source>/<str:version>/mapped-sources/')])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1, FHIR_SUBDOMAIN='fhir', ALLOWED_HOSTS=['*'])
+    def test_a_request_the_fhir_host_answered_before_url_resolution_names_no_view(self):
+        """The FHIR host refuses API paths before resolution: such a request isn't a read of the API view."""
+        records = self.records(
+            RequestFactory().get(self.path, HTTP_HOST='fhir.example.org'), delay=0.01, status=404, resolved=False)
+
+        self.assertEqual([(record['view'], record['route']) for record in records], [(None, None)])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1, FHIR_SUBDOMAIN='fhir', ALLOWED_HOSTS=['*'])
+    def test_a_fhir_request_on_the_fhir_host_answered_before_url_resolution_names_its_view(self):
+        records = self.records(
+            RequestFactory().get('/fhir/metadata/', HTTP_HOST='fhir.example.org'), delay=0.01, status=500,
+            resolved=False)
+
+        self.assertEqual(
+            [(record['view'], record['route']) for record in records], [('CapabilityStatementView', 'fhir/metadata/')])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1, FHIR_SUBDOMAIN='fhir', ALLOWED_HOSTS=['api.example.org'])
+    def test_a_disallowed_host_still_logs_the_slow_request(self):
+        records = self.records(
+            RequestFactory().get(self.path, HTTP_HOST='elsewhere.example.org'), delay=0.01, status=400, resolved=False)
+
+        self.assertEqual([(record['view'], record['status']) for record in records], [(None, 400)])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_an_unresolved_path_has_no_view_or_route(self):
+        records = self.records(RequestFactory().get('/no/such/path/'), delay=0.01, status=404, resolved=False)
+
+        self.assertEqual([(record['view'], record['route']) for record in records], [(None, None)])
+
+    @override_settings(SLOW_REQUEST_LOG_MS=1)
+    def test_a_log_that_fails_never_fails_the_request(self):
+        def view(_):
+            time.sleep(0.01)
+            return HttpResponse(status=201)
+
+        with patch('core.middlewares.middlewares.emit', side_effect=RuntimeError("can't start new thread")):
+            response = SlowRequestLogMiddleware(view)(RequestFactory().post('/orgs/'))
+
+        self.assertEqual(response.status_code, 201)

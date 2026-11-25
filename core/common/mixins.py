@@ -15,6 +15,7 @@ from django.http import HttpResponseForbidden, Http404
 from django.shortcuts import redirect
 from django.urls import resolve, Resolver404
 from django.utils.functional import cached_property
+from elasticsearch.helpers import BulkIndexError
 from ocldev.checksum import Checksum
 from psycopg2.errorcodes import QUERY_CANCELED
 from pydash import compact, get
@@ -29,14 +30,15 @@ from core.common.constants import HEAD, ACCESS_TYPE_NONE, INCLUDE_FACETS, \
     SEARCH_STATS_ONLY, INCLUDE_SEARCH_STATS, UPDATED_BY_USERNAME_PARAM, CHECKSUM_STANDARD_HEADER, \
     CHECKSUM_SMART_HEADER, SEARCH_LATEST_REPO_VERSION, SAME_STANDARD_CHECKSUM_ERROR, ACCESS_TYPE_VIEW, \
     INCLUDE_PARENT_CONCEPTS, INCLUDE_CHILD_CONCEPTS, INCLUDE_PARENT_CONCEPT_URLS, INCLUDE_CHILD_CONCEPT_URLS, \
-    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY
+    INCLUDE_HIERARCHY_PATH, INCLUDE_SUMMARY, INDEX_BATCH_SIZE
+from core.common.es import ESScript
 from core.common.permissions import HasPrivateAccess, HasOwnership, CanViewConceptDictionary, \
     CanViewConceptDictionaryVersion, CanEditConceptDictionary
 from .checksums import ChecksumModel
 from .exceptions import Http403, UnpaginatedListLimitReached
 from .utils import write_csv_to_s3, get_query_params_from_url_string, compact_dict_by_values, \
     to_owner_uri, parse_updated_since_param, get_export_service, to_int, get_truthy_values, generate_temp_version, \
-    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri, to_snake_case
+    canonical_url_to_url_and_version, decode_string, to_parent_kwargs_from_uri, to_snake_case, chunks
 from ..concepts.constants import PERSIST_CLONE_ERROR
 from ..toggles.models import Toggle
 
@@ -204,6 +206,38 @@ class ListWithHeadersMixin(ListModelMixin):
                 not any(to_snake_case(param) in collection_facets for param in params) and
                 get(self, 'parent_resource.is_latest_version', False))
 
+    # where a list's concepts and mappings embed others: a concept its mappings and hierarchy, a mapping its concepts
+    EMBEDDED_RESOURCE_FIELDS = ('mappings', 'parent_concepts', 'child_concepts', 'from_concept', 'to_concept')
+
+    def get_requester_labels(self, data):
+        """
+        A cached page as this requester sees it: the latest_source_version of each concept and mapping on it, embedded
+        ones too (EMBEDDED_RESOURCE_FIELDS), names only a version the requester can view, so it's read again for them,
+        in one query. One whose kind or uuid isn't known names none.
+        """
+        from core.concepts.models import Concept
+        from core.mappings.models import Mapping
+        models_by_kind = {Concept.OBJECT_TYPE: Concept, Mapping.OBJECT_TYPE: Mapping}
+        labelled = {}
+
+        def collect(items):
+            for item in items if isinstance(items, list) else [items]:
+                if not isinstance(item, dict):
+                    continue
+                if 'latest_source_version' in item:
+                    kind = item.get('type') if item.get('type') in models_by_kind else None
+                    labelled.setdefault(kind, []).append(item)
+                for field in self.EMBEDDED_RESOURCE_FIELDS:
+                    collect(item.get(field))
+        collect(data)
+        names = SourceChildMixin.get_latest_source_version_names({
+            models_by_kind[kind]: {to_int(item.get('uuid'), None) for item in items} - {None}
+            for kind, items in labelled.items() if kind}, self.request.user)
+        for kind, items in labelled.items():
+            for item in items:
+                item['latest_source_version'] = names.get((kind, to_int(item.get('uuid'), None)))
+        return data
+
     def list(self, request, *args, **kwargs):
         """
         The list, with its queries bounded by LIST_QUERY_TIMEOUT_MS: a list that can't finish answers 503 instead of
@@ -241,6 +275,8 @@ class ListWithHeadersMixin(ListModelMixin):
                 data = None
             if data and self.only_facets():  # cached as anyone sees them, so as this requester sees them
                 return Response({'facets': {'fields': self.get_requester_facets(data['facets']['fields'])}})
+            if data:  # cached as whoever asked first sees it
+                data = self.get_requester_labels(data)
 
         if not data:
             search_string = query_params.get('type', None)
@@ -686,6 +722,16 @@ class SourceChildMixin(ChecksumModel):
 
     ISOLATED_VERSION_DEFAULTS = {'extras': {}, 'retired': False}
 
+    def delete(self, *args, **kwargs):  # pylint: disable=arguments-differ
+        from core.collections.models import Expansion
+        # the cascade takes the membership rows (a versioned object's, its versions' too), so expansions go first
+        rows = self.__class__.objects.filter(versioned_object_id=self.id) if self.is_versioned_object else [self]
+        after_delete = Expansion.mark_health_not_current_for_members(
+            f'{self.__class__.__name__.lower()}s', [self.id, *[row.id for row in rows]])
+        result = super().delete(*args, **kwargs)
+        after_delete()
+        return result
+
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
     # relations named like the serializer field that reads them; prefetched by load_list_fields when it's serialized
@@ -704,11 +750,12 @@ class SourceChildMixin(ChecksumModel):
         loaders = {
             'version_url': cls.load_latest_version_uris,
             'previous_version_url': cls.load_previous_version_uris,
-            'source_versions': cls.load_source_versions,
         }
         for field, loader in loaders.items():
             if field in fields:
                 loader(instances)
+        if 'source_versions' in fields:
+            cls.load_source_versions(instances, user)
         if 'collection_versions' in fields:
             cls.load_collection_versions(instances, user)
 
@@ -718,9 +765,9 @@ class SourceChildMixin(ChecksumModel):
             if fields & {'references', 'latest_source_version'}:
                 cls.load_collection_references(instances, collection)
             if 'latest_source_version' in fields:
-                cls.load_collection_source_versions(instances, collection)
+                cls.load_collection_source_versions(instances, collection, user)
         if reads_latest_source_version:
-            cls.load_latest_source_versions(instances)
+            cls.load_latest_source_versions(instances, user)
 
     @classmethod
     def load_latest_version_uris(cls, instances):
@@ -734,13 +781,15 @@ class SourceChildMixin(ChecksumModel):
             instance._latest_version_uri = latest_version_uris.get(instance.id)  # pylint: disable=protected-access
 
     @classmethod
-    def load_source_versions(cls, instances):
-        """Sets each row's _source_versions: the uris of the released source versions holding it."""
+    def load_source_versions(cls, instances, user):
+        """Sets each row's _source_versions: the uris of the source versions holding it that the user can view."""
         key = f'{cls._meta.model_name}_id'
+        rows = cls.sources.through.objects.filter(
+            **{f'{key}__in': [instance.id for instance in instances]}).exclude(source__version=HEAD)
+        criteria = cls.get_viewable_source_version_criteria(user)
         uris = {}
-        for row_id, uri in cls.sources.through.objects.filter(
-                **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(source__version=HEAD).order_by('source__created_at').values_list(key, 'source__uri'):
+        for row_id, uri in (rows if criteria is None else rows.filter(criteria)).order_by(
+                'source__created_at').values_list(key, 'source__uri'):
             uris.setdefault(row_id, []).append(uri)
         for instance in instances:
             instance._source_versions = uris.get(instance.id, [])  # pylint: disable=protected-access
@@ -759,18 +808,67 @@ class SourceChildMixin(ChecksumModel):
             instance._collection_versions = sorted(uris.get(instance.id, ()))  # pylint: disable=protected-access
 
     @classmethod
-    def load_latest_source_versions(cls, instances):
-        """Sets each row's _latest_source_version: the latest released source version holding it."""
-        key = f'{cls._meta.model_name}_id'
-        latest_source_version_ids = dict(cls.sources.through.objects.filter(
-            **{f'{key}__in': [instance.id for instance in instances]}
-        ).exclude(source__version=HEAD).order_by(key, '-source__created_at').distinct(key).values_list(
-            key, 'source_id'))
+    def load_latest_source_versions(cls, instances, user=None):
+        """
+        Sets each row's _latest_source_version, the latest source version holding it, HEAD aside, and
+        _latest_source_version_name, the name of the latest of them the user can view (get_latest_source_version_name):
+        two queries for the page, as for the version alone.
+        """
+        latest = cls.get_latest_source_versions({instance.id for instance in instances}, user)
         source_versions = cls._meta.get_field('sources').related_model.objects.in_bulk(
-            set(latest_source_version_ids.values()))
+            {source_id for source_id, _ in latest.values()})
         for instance in instances:
-            # pylint: disable=protected-access
-            instance._latest_source_version = source_versions.get(latest_source_version_ids.get(instance.id))
+            source_id, name = latest.get(instance.id, (None, None))
+            instance._latest_source_version = source_versions.get(source_id)  # pylint: disable=protected-access
+            instance._latest_source_version_name = name  # pylint: disable=protected-access
+
+    @classmethod
+    def get_latest_source_versions(cls, ids, user):
+        """
+        {id: (the latest source version holding that row, HEAD aside, the name of the latest the user can view)} of
+        these rows, in one query (get_latest_source_versions_query).
+        """
+        latest = {}
+        for _, row_id, is_viewed, source_id, version, created_at in cls.get_latest_source_versions_query(ids, user):
+            latest_id, latest_at, name = latest.get(row_id, (None, None, None))
+            if latest_at is None or created_at > latest_at:
+                latest_id, latest_at = source_id, created_at
+            latest[row_id] = (latest_id, latest_at, version if is_viewed else name)
+        return {row_id: (source_id, name) for row_id, (source_id, _, name) in latest.items()}
+
+    @staticmethod
+    def get_latest_source_version_names(ids_by_model, user):
+        """
+        {(kind, id): the name of the latest source version holding that row that the user can view}, of these rows by
+        model (Concept, Mapping), in one query.
+        """
+        queries = [model.get_latest_source_versions_query(ids, user) for model, ids in ids_by_model.items() if ids]
+        return {
+            (kind, row_id): version
+            for kind, row_id, is_viewed, _, version, _ in (queries[0].union(*queries[1:], all=True) if queries else [])
+            if is_viewed}
+
+    @classmethod
+    def get_latest_source_versions_query(cls, ids, user):
+        """
+        For each of these rows, the latest source version holding it, HEAD aside, that the user can view and the latest
+        they can't: (kind, row id, whether they can view it, source version id, its name, when it was created).
+        """
+        key = f'{cls._meta.model_name}_id'
+        criteria = cls.get_viewable_source_version_criteria(user)
+        return cls.sources.through.objects.filter(**{f'{key}__in': ids}).exclude(source__version=HEAD).annotate(
+            _kind=models.Value(cls.OBJECT_TYPE), _row=F(key), _viewable=models.Value(True) if criteria is None else (
+                models.ExpressionWrapper(criteria, output_field=models.BooleanField())),
+            _source=F('source_id'), _version=F('source__version'), _at=F('source__created_at')
+        ).order_by('_row', '_viewable', '-_at').distinct('_row', '_viewable').values_list(
+            '_kind', '_row', '_viewable', '_source', '_version', '_at')
+
+    @classmethod
+    def get_viewable_source_version_criteria(cls, user):
+        """Rows of `sources`' through table naming a source version the user can view (has_view_access); None: all"""
+        source_model = cls._meta.get_field('sources').related_model
+        viewable = source_model.get_viewable_versions_criteria(user)
+        return None if viewable is None else Q(source_id__in=source_model.objects.filter(viewable).values('id'))
 
     @classmethod
     def load_previous_version_uris(cls, instances):
@@ -806,14 +904,17 @@ class SourceChildMixin(ChecksumModel):
         return list(self.collection_references(collection).order_by('id').values_list('id', flat=True))
 
     @classmethod
-    def load_collection_source_versions(cls, instances, collection):
+    def load_collection_source_versions(cls, instances, collection, user=None):
         """
         Sets each row's _collection_source_version: the newest source version holding it that the collection version's
-        expansion recorded (else that its references resolved to), or None when that is HEAD or no source version.
+        expansion recorded (else that its references resolved to), or None when that is HEAD, no source version or
+        one the user can't view.
         """
+        source_model = cls._meta.get_field('sources').related_model
+        viewable = source_model.get_viewable_versions_criteria(user)
         expansion = collection.expansion
         if expansion:
-            cls.load_expansion_source_versions(instances, expansion)
+            cls.load_expansion_source_versions(instances, expansion, viewable)
             return
 
         reference_ids = {instance.id: instance.get_collection_reference_ids(collection) for instance in instances}
@@ -827,10 +928,19 @@ class SourceChildMixin(ChecksumModel):
                 for reference_id in reference_ids[instance.id]
             )
             instance.set_collection_source_version(versions)
+        named = {get(instance, '_collection_source_version.id') for instance in instances} - {None}
+        if viewable is not None and named:
+            named -= set(source_model.objects.filter(viewable, id__in=named).values_list('id', flat=True))
+            for instance in instances:
+                if get(instance, '_collection_source_version.id') in named:
+                    instance._collection_source_version = None  # pylint: disable=protected-access
 
     @classmethod
-    def load_expansion_source_versions(cls, instances, expansion):  # pylint: disable=too-many-locals
-        """The source versions holding each row: those the expansion is locked to, else recorded, else all of them"""
+    def load_expansion_source_versions(cls, instances, expansion, viewable=None):  # pylint: disable=too-many-locals
+        """
+        The source versions holding each row: those the expansion is locked to, else recorded, else all of them; the
+        newest is left out if `viewable` (get_viewable_versions_criteria's) doesn't admit it.
+        """
         recorded_ids = {version.id for version in expansion.recorded_source_versions}
         locked_ids = {version.id for version in expansion.recorded_evaluated_source_versions}
         sources_field = cls._meta.get_field('sources')
@@ -841,14 +951,20 @@ class SourceChildMixin(ChecksumModel):
         source_ids_by_row = {}
         for row_id, source_id in holding:
             source_ids_by_row.setdefault(row_id, []).append(source_id)
-        versions = sources_field.related_model.objects.in_bulk(
+        versions = sources_field.related_model.objects
+        if viewable is not None:
+            versions = versions.annotate(
+                _viewable=models.ExpressionWrapper(viewable, output_field=models.BooleanField()))
+        versions = versions.in_bulk(
             {source_id for source_ids in source_ids_by_row.values() for source_id in source_ids})
         for instance in instances:
-            source_ids = source_ids_by_row.get(instance.id, [])
+            source_ids = [source_id for source_id in source_ids_by_row.get(instance.id, []) if source_id in versions]
             recorded = [source_id for source_id in source_ids if source_id in recorded_ids]
             locked = [source_id for source_id in recorded if source_id in locked_ids]
             instance.set_collection_source_version(
                 [versions[source_id] for source_id in locked or recorded or source_ids])
+            if not get(instance, '_collection_source_version._viewable', True):
+                instance._collection_source_version = None  # pylint: disable=protected-access
 
     def set_collection_source_version(self, versions):
         newest = max(versions, key=lambda version: version.created_at, default=None)
@@ -871,9 +987,103 @@ class SourceChildMixin(ChecksumModel):
             return self._latest_source_version
         return self.sources.exclude(version=HEAD).order_by('-created_at').first()
 
+    def get_latest_source_version_name(self, user):
+        """The name of the latest source version holding this row that the user can view, or None."""
+        if hasattr(self, '_latest_source_version_name'):  # loaded for the whole page by load_list_fields
+            return self._latest_source_version_name
+        return self.sources.model.get_viewable(self.sources.exclude(version=HEAD), user).order_by(
+            '-created_at').values_list('version', flat=True).first()
+
     @cached_property
     def _cached_latest_source_version(self):
         return self.parent.get_latest_released_version()
+
+    @classmethod
+    def get_latest_flags_actions(cls, ids):
+        """
+        Scripted updates of what a new version changes in the documents of the versions it supersedes, as prepare() has
+        it: is_latest_version, HEAD's place in source_version, and the fields get_latest_flags_fields() names. The rest
+        of each document, vectors included, is left as it was indexed, and so are the releases in source_version, which
+        another job may be appending to.
+        """
+        index_name = cls.get_search_document()()._index._name  # pylint: disable=protected-access
+        field = f'{cls._meta.model_name}_id'
+        in_head = set(cls.sources.through.objects.filter(
+            **{f'{field}__in': ids, 'source__version': HEAD}).values_list(field, flat=True))
+        instances = list(cls.objects.filter(id__in=ids))
+        fields = cls.get_latest_flags_fields(instances)
+        for instance in instances:
+            yield {
+                '_op_type': 'update', '_index': index_name, '_id': instance.id, 'retry_on_conflict': 3,
+                'script': {'source': ESScript.LATEST_FLAGS_SCRIPT, 'params': {
+                    'is_latest_version': instance.is_latest_version, 'in_head': instance.id in in_head,
+                    'fields': fields.get(instance.id, {})
+                }},
+            }
+
+    @staticmethod
+    def get_latest_flags_fields(instances):  # pylint: disable=unused-argument
+        """Other document fields that prepare() derives from whether a row is the latest version, by row id."""
+        return {}
+
+    @classmethod
+    def index_latest_flags(cls, queryset):
+        """
+        Updates the latest-version fields in these rows' documents (get_latest_flags_actions), instead of reindexing
+        (and re-embedding) them. Returns the ids of the rows with no document, which it leaves to the caller.
+        """
+        missing = set()
+        cls.batch_index_partial_by_ids(
+            queryset, cls.get_search_document(), cls.get_latest_flags_actions, refresh=False,
+            on_bulk_error=lambda error: missing.update(cls.get_missing_ids_or_raise(error)))
+        return missing
+
+    @staticmethod
+    def get_missing_ids_or_raise(error):
+        """
+        The ids of the documents a BulkIndexError of partial updates found missing. Re-raises it with the other
+        failures, if there are any.
+        """
+        failures = [item for item in error.errors if get(item, 'update.status') != 404]
+        if failures:
+            raise BulkIndexError(f'{len(failures)} document(s) failed to index.', failures) from error
+        return {int(get(item, 'update._id')) for item in error.errors}
+
+    @classmethod
+    def get_ids_with_unsearchable_replacements(cls, ids):
+        """
+        Those of these ids that are superseded versions whose concept (or mapping) has a latest version with no document
+        flagged latest, as when the import that superseded them hasn't been indexed yet. Writing their documents now
+        would leave it out of HEAD search; until then, search finds it by the old version.
+        """
+        versioned_ids = dict(cls.objects.filter(id__in=ids, is_latest_version=False).exclude(
+            id=F('versioned_object_id')).values_list('id', 'versioned_object_id'))
+        latest_ids = {}
+        for versioned_id, latest_id in cls.objects.filter(
+                versioned_object_id__in=set(versioned_ids.values()), is_latest_version=True
+        ).values_list('versioned_object_id', 'id'):
+            latest_ids.setdefault(versioned_id, set()).add(latest_id)
+        searchable = cls.get_ids_flagged_latest_in_search(
+            {latest_id for latest in latest_ids.values() for latest_id in latest})
+        return {
+            _id for _id, versioned_id in versioned_ids.items()
+            if latest_ids.get(versioned_id) and not latest_ids[versioned_id] & searchable
+        }
+
+    @classmethod
+    def get_ids_flagged_latest_in_search(cls, ids):
+        """
+        Those of these ids that a search finds as the latest version: a document written but not refreshed yet doesn't
+        count. All of them in TEST_MODE.
+        """
+        if get(settings, 'TEST_MODE', False) or not ids:
+            return set(ids)
+        found = set()
+        for batch in chunks(sorted(ids), INDEX_BATCH_SIZE):
+            search = cls.get_search_document().search().filter('ids', values=[str(_id) for _id in batch]).filter(
+                'term', is_latest_version=True).source(False)
+            found.update(int(hit.meta.id) for hit in search[:len(batch)].execute())
+        return found
 
     def belongs_to_non_head_source_version(self):
         versioned_object_id = self.versioned_object_id or self.id
@@ -950,11 +1160,12 @@ class SourceChildMixin(ChecksumModel):
 
         return filters
 
-    @property
-    def source_versions(self):
+    def get_source_versions(self, user):
+        """URIs of the source versions holding this row that the user can view."""
         if hasattr(self, '_source_versions'):  # loaded for a whole page by load_list_fields
             return self._source_versions
-        return list(self.sources.exclude(version=HEAD).order_by('created_at').values_list('uri', flat=True))
+        return list(self.sources.model.get_viewable(self.sources.exclude(version=HEAD), user).order_by(
+            'created_at').values_list('uri', flat=True))
 
     def get_collection_versions(self, user):
         """URIs of the released collection versions holding this resource that the user can view."""
@@ -1165,6 +1376,14 @@ class SourceChildMixin(ChecksumModel):
                 self.sources.remove(parent)
             if add_parent:
                 self.sources.add(parent)
+            if remove_parent or add_parent:
+                self.mark_expansion_health_for_head_change()
+
+    def mark_expansion_health_for_head_change(self, *rows):
+        """A row leaving or re-entering HEAD changes its class in the expansions that hold it"""
+        from core.collections.models import Expansion
+        Expansion.mark_health_out_of_date_for_members(
+            f'{self.__class__.__name__.lower()}s', [row.id for row in (rows or [self]) if row])
 
     def set_version_fields(self, data, fields, isolated=False):
         for field in fields:
@@ -1185,6 +1404,7 @@ class SourceChildMixin(ChecksumModel):
         latest_version = versioned_object.get_latest_version()
         if latest_version:
             latest_version.sources.add(parent)
+        self.mark_expansion_health_for_head_change(versioned_object, latest_version)
         return latest_version
 
     def unmark_latest_version(self, index=True, parent=None):

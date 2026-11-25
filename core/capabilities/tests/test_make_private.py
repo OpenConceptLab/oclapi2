@@ -252,12 +252,12 @@ class UpdateToPrivateTest(MakePrivateTestMixin, OCLAPITestCase):
                 with self.subTest(resource_type=resource_type, release_access=release_access):
                     response, resource = self.fhir_update(repo, factory, resource_type, release_access, **extra)
 
-                    # FHIR routes answer every refusal as an OperationOutcome: the body's values are its issues
+                    # FHIR routes answer every refusal as an OperationOutcome, with the body's message as its issue
                     self.assertEqual(response.status_code, 403, response.content)
                     self.assertEqual(response.json()['resourceType'], 'OperationOutcome')
-                    issues = json.dumps(response.json()['issue'])
-                    for value in PrivateGatePolicy.body.values():
-                        self.assertIn(str(value), issues)
+                    self.assertEqual(
+                        [item['details']['text'] for item in response.json()['issue']],
+                        [PrivateGatePolicy.body['detail']])
                     self.assert_asked_to_make_private(self.take_calls(), row_id=repo.id)
                     repo.refresh_from_db()
                     self.assertEqual(repo.public_access, ACCESS_TYPE_VIEW)

@@ -156,21 +156,21 @@ class StaleSearchDocumentAccessTest(OCLAPITestCase):
         Source.objects.filter(id=self.source.id).update(public_access=ACCESS_TYPE_NONE)
 
         for url, _id in self.searches()[4:]:
-            for user, found in ((None, False), (self.outsider, False), (self.member, True), (self.creator, True)):
+            for user, found in ((None, False), (self.outsider, False), (self.member, True), (self.creator, False)):
                 with self.subTest(url=url, user=user):
                     self.assertEqual(_id in self.search_ids(url, user), found)
 
-    def test_members_staff_and_creators_still_find_them(self):
+    def test_members_and_staff_still_find_them_their_creator_doesn_t(self):
         self.make_private_without_reindex()
 
         for url, _id in self.searches():
             for user in (self.member, self.staff):
                 with self.subTest(url=url, user=user):
                     self.assertIn(_id, self.search_ids(url, user))
-        # search's access filter admits the concepts, mappings and repositories a requester created
-        for url, _id in self.searches()[1:3] + self.searches()[4:]:
+        # access follows membership: who created the concepts, mappings and repositories doesn't count
+        for url, _id in self.searches():
             with self.subTest(url=url, user=self.creator):
-                self.assertIn(_id, self.search_ids(url, self.creator))
+                self.assertNotIn(_id, self.search_ids(url, self.creator))
 
     def test_a_public_org_stored_with_the_retired_edit_access_is_still_a_hit(self):
         Organization.objects.filter(id=self.org.id).update(public_access=RETIRED_ACCESS_TYPE_EDIT)
