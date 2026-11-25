@@ -70,6 +70,15 @@ def check_make_private(user, row, stored):
         check_write(user, row, WRITE_ACTION_MAKE_PRIVATE)
 
 
+def check_publish(user, row, stored):
+    """
+    Raises WriteRefused, with the policy's body, when saving `row` with its public_access lets others view `stored`,
+    the row as stored now, and the policy refuses publishing it.
+    """
+    if makes_viewable(stored, row.public_access):
+        check_write(user, row, WRITE_ACTION_PUBLISH)
+
+
 def get_write_refusal(user, content, action, policy=None):
     """
     The body the policy refuses `user` this write to `content` with, or None when it allows it (or there's no content

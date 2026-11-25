@@ -86,7 +86,9 @@ class ChecksWrites(BasePermission):
         if request.method not in SAFE_METHODS and getattr(view, 'writes_content', True):
             content = get_write_target(self.get_written_object(request, view, obj))
             if content is not None:
-                check_write(request.user, content, self.get_write_action(request, view, obj))
+                action = self.get_write_action(request, view, obj)
+                check_write(request.user, content, action)
+                content._checked_write_action = action  # pylint: disable=protected-access
         return True
 
     @staticmethod
