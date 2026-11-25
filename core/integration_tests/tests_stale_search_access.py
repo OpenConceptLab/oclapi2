@@ -5,7 +5,7 @@ from django.test import tag
 
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection
-from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory
+from core.collections.tests.factories import ExpansionFactory, OrganizationCollectionFactory, UserCollectionFactory
 from core.common.constants import ACCESS_TYPE_NONE, RETIRED_ACCESS_TYPE_EDIT
 from core.common.tests import OCLAPITestCase, PREVIEW_GROUP_NAME
 from core.common.views import BaseAPIView
@@ -268,15 +268,48 @@ class RenamedUserSearchAccessTest(OCLAPITestCase):
         for url, _id in self.searches(f'/users/{self.old_name}/'):
             self.assertIn(_id, self.search_ids(url, self.renamed), url)
 
+        taker = self.rename()
+
+        for prefix in (f'/users/{self.old_name}/', '/user/'):
+            for url, _id in self.searches(prefix):
+                with self.subTest(url=url):
+                    self.assertNotIn(_id, self.search_ids(url, taker))
+
+    def rename(self):
+        """Renames the user, and returns whoever then takes the old name."""
         response = self.client.put(
             f'/users/{self.old_name}/', {'username': self.token + 'new'},
             HTTP_AUTHORIZATION='Token ' + self.renamed.get_token(), format='json')
         self.assertEqual(response.status_code, 200, response.data)
         self.renamed.refresh_from_db()
         self.assertEqual(self.renamed.username, self.token + 'new')
-        taker = UserProfileFactory(username=self.old_name)
+        return UserProfileFactory(username=self.old_name)
+
+    @staticmethod
+    def expand(collection, concepts, mappings):
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        expansion.concepts.set(concepts)
+        expansion.mappings.set(mappings)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+    def test_a_renamed_user_s_private_collection_members_are_no_hit_in_the_taker_s_same_named_collection(self):
+        concepts, mappings = Concept.objects.filter(parent=self.source), Mapping.objects.filter(parent=self.source)
+        self.expand(self.collection, concepts, mappings)
+        ConceptDocument().update(concepts, refresh=True)
+        MappingDocument().update(mappings, refresh=True)
+        token, collection = self.token, self.collection.mnemonic
+        searches = [
+            (f'collections/{collection}/concepts/?q={token}concept', self.concept.mnemonic),
+            (f'collections/{collection}/mappings/?q={token}map', self.mapping.mnemonic),
+        ]
+        for url, _id in searches:
+            self.assertIn(_id, self.search_ids(f'/users/{self.old_name}/{url}', self.renamed), url)
+
+        taker = self.rename()
+        self.expand(UserCollectionFactory(user=taker, mnemonic=collection), [], [])
 
         for prefix in (f'/users/{self.old_name}/', '/user/'):
-            for url, _id in self.searches(prefix):
-                with self.subTest(url=url):
-                    self.assertNotIn(_id, self.search_ids(url, taker))
+            for url, _id in searches:
+                with self.subTest(url=prefix + url):
+                    self.assertNotIn(_id, self.search_ids(prefix + url, taker))
