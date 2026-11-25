@@ -1283,8 +1283,8 @@ class CollectionReference(models.Model):
 
     @property
     def names_repo_version(self):
-        """As the resolver reads the system: a version field, a version after '|', or the fifth segment of a relative
-        URL's path without its query string (/orgs|users/<owner>/<repo type>/<repo>/<version>/)"""
+        """As the resolver reads the system: a version field, a version after '|', or a relative URL's fifth segment,
+        query dropped (/orgs|users/<owner>/<repo type>/<repo>/<version>/), but HEAD, which no repository URL has"""
         url, url_version = split_canonical(self.system or '')
         path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
         return bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
