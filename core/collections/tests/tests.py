@@ -1694,6 +1694,8 @@ class CollectionReferenceTest(OCLTestCase):
                 ('http://example.org/fhir/CodeSystem/S', None, False),
                 ('http://example.org/fhir/CodeSystem/S|v1', None, True),
                 ('http://example.org/orgs/O/sources/S/v1/', None, False),
+                ('/orgs/O/sources/S/concepts/c1/123/', None, False),
+                ('/orgs/O/sources/S/v1/concepts/c1/', None, True),
                 (None, None, False),
         ):
             with self.subTest(system=system, version=version):
@@ -4302,7 +4304,7 @@ class ExpansionTest(OCLTestCase):
         self._rebuild(collection, expansion)
 
         self.assertEqual(list(expansion.concepts.all()), [old])
-        # a version named in system is named, as a version field is
+        # a version its system URL names is explicit, as a version field is
         self.assertEqual(list(expansion.explicit_source_versions.all()), [v1])
         self.assertEqual(expansion.evaluated_source_versions.count(), 0)
         self.assertEqual(expansion.unresolved_repo_versions, [])
