@@ -1610,7 +1610,7 @@ class CollectionReference(models.Model):
             self.expression = self.build_expression()
 
     # only what splits or changes a value as the parser reads it; spaces stay, so earlier expressions still match
-    FILTER_VALUE_ESCAPES = (('%', '%25'), ('&', '%26'), ('=', '%3D'), ('#', '%23'), ('+', '%2B'))
+    FILTER_VALUE_ESCAPES = (('%', '%25'), ('&', '%26'), ('=', '%3D'), ('#', '%23'), ('+', '%2B'), ('?', '%3F'))
 
     @classmethod
     def quote_filter_value(cls, value):

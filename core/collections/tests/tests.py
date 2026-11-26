@@ -5830,6 +5830,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
             {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'},
             {'property': 'datatype', 'op': '=', 'value': 'N/A'},
             {'property': 'external_id', 'op': '=', 'value': 'a&b=c d'},
+            {'property': 'name', 'op': '=', 'value': 'SYS?123'},
+            {'property': 'locale', 'op': '=', 'value': 'en'},
         ]
         reference = CollectionReference(
             system='/orgs/MyOrg/sources/MySource/', reference_type='concepts', filter=filters)
@@ -5839,7 +5841,7 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
         self.assertEqual(
             expression,
             '/orgs/MyOrg/sources/MySource/concepts/?q=fever&concept_class=Diagnosis&concept_class=Procedure'
-            '&datatype=N/A&external_id=a%26b%3Dc d')
+            '&datatype=N/A&external_id=a%26b%3Dc d&name=SYS%3F123&locale=en')
         self.assertEqual(self.get_structure(expression=expression)['filter'], filters)
 
     def test_parse_concept_expressions(self):
