@@ -1430,7 +1430,7 @@ class CollectionReference(models.Model):
     def to_unresolved_filter(self):
         return {
             'url': self.expression, 'namespace': self.namespace, 'type': UNRESOLVED_FILTER_TYPE,
-            'reason': REFERENCE_FILTER_NOT_APPLIED, 'filter': self.unapplied_filters
+            'include': self.include, 'reason': REFERENCE_FILTER_NOT_APPLIED, 'filter': self.unapplied_filters
         }
 
     def to_unresolved_resource_version(self):
@@ -2349,6 +2349,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     is_resolved = not ref.unapplied_valuesets and not unapplied_filters and (ref_system_versions or (
                         is_valueset_only and (_explicit_valueset_versions or _evaluated_valueset_versions)))
                     (resolved_ref_ids if is_resolved else unresolved_ref_ids).append(ref.id)
+            elif ref.unapplied_valuesets or unapplied_filters:
+                pass  # its saved results predate the rule: it adds or removes nothing
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
@@ -2580,13 +2582,15 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return (entry_type,)
         if entry_type == 'reference.system':
             return entry_type, entry.get('url'), entry.get('version') or None
+        if entry_type == UNRESOLVED_FILTER_TYPE:  # an include and an exclusion can build one expression
+            return entry_type, entry.get('url'), entry.get('include', True)
         return entry_type, entry.get('url')
 
     @staticmethod
     def get_unresolved_entry_keys_of(reference, is_reevaluating):
         """The unresolved entry keys a reference's evaluation decides, whether it resolves them or not"""
         keys = {('reference.valueset', valueset) for valueset in reference.valueset or []}
-        keys.add((UNRESOLVED_FILTER_TYPE, reference.expression))
+        keys.add((UNRESOLVED_FILTER_TYPE, reference.expression, reference.include))
         if reference.system:
             keys.add(('reference.system', reference.system, reference.version or None))
         if is_reevaluating:

@@ -2331,14 +2331,52 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(expansion.concepts.count(), 0)
         self.assertEqual(reference.unresolved_reason, REFERENCE_FILTER_NOT_APPLIED)
         self.assertIn({
-            'url': reference.expression, 'namespace': None, 'type': 'reference.filter',
+            'url': reference.expression, 'namespace': None, 'type': 'reference.filter', 'include': True,
             'reason': 'filter_not_applied',
             'filter': [{'property': 'concept', 'op': 'is-a'}, {'property': 'concept_class', 'op': 'regex'}]
         }, expansion.unresolved_repo_versions)
+        # an exclusion building the same expression keeps the include's entry, and records its own
+        exclusion = CollectionReference(
+            system=source.uri, collection=collection, created_by=source.created_by, include=False,
+            filter=reference.filter, expression=reference.expression)
+
+        expansion.add_references([exclusion])
+
+        self.assertEqual(
+            sorted(entry['include'] for entry in expansion.unresolved_repo_versions
+                   if entry['type'] == 'reference.filter'), [False, True])
         # a well-specified filter is evaluated: whatever it matches, it isn't one OCL couldn't apply
         evaluated = CollectionReference(
             system=source.uri, filter=[{'property': 'datatype', 'op': 'in', 'value': 'N/A,Text'}])
         self.assertEqual(evaluated.unapplied_filters, [])
+
+    def test_add_references_on_an_auto_generated_expansion_ignores_saved_results_it_cant_apply(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        kept = ConceptFactory(parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        self.assertTrue(expansion.is_auto_generated)
+        expansion.concepts.add(kept)
+        unexpanded = OrganizationCollectionFactory()
+        for include, kwargs in (
+                (True, {'filter': [{'property': 'concept', 'op': 'is-a', 'value': 'x'}], 'code': None}),
+                (True, {'valueset': [unexpanded.uri]}),
+                (False, {'filter': [{'property': 'concept', 'op': 'is-a', 'value': 'x'}], 'code': None}),
+                (False, {'valueset': [unexpanded.uri], 'code': kept.mnemonic})):
+            with self.subTest(include=include, kwargs=kwargs):
+                # saved before references that can't be applied resolved to nothing
+                reference = CollectionReference(
+                    system=source.uri, collection=collection, created_by=source.created_by, include=include,
+                    **{'code': concept.mnemonic, **kwargs})
+                reference.expression = reference.build_expression()
+                reference.save()
+                reference.concepts.add(kept if not include else concept)
+
+                expansion.add_references([reference])
+
+                self.assertEqual(list(expansion.concepts.all()), [kept])
+                reference.delete()
 
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()
