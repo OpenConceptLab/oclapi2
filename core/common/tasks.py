@@ -538,7 +538,8 @@ def seed_children_to_expansion(expansion_id, index=True, force_reevaluate=False)
 def compute_expansion_health(expansion_id):
     from core.collections.models import Expansion
     expansion = Expansion.objects.filter(id=expansion_id).first()
-    if expansion:
+    # current: a run that read the change, a build's own, stored it after this was queued
+    if expansion and expansion.health_is_current is not True:
         expansion.update_health()
 
 

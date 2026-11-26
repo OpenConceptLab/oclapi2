@@ -5140,7 +5140,7 @@ class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
         source_v2 = OrganizationSourceFactory(
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
-        self.expansion.explicit_source_versions.add(source_v1)
+        self.expansion.evaluated_source_versions.add(source_v1)
 
         response = self.client.get(
             self.expansion.url + 'resolved-repo-updates/',
