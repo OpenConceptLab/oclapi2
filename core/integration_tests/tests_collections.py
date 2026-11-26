@@ -22,6 +22,7 @@ from core.common.tasks import export_collection, delete_s3_objects, add_referenc
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, drop_version, get_export_key_pattern
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
 from core.concepts.tests.factories import ConceptFactory
@@ -1231,6 +1232,72 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                            f'{source.uri} holds resource version v9'
             }]
         )
+
+    @patch('core.collections.views.add_references')
+    def test_put_400_filter_with_a_property_or_op_it_cant_apply(self, add_references_mock):
+        source = self.concept.parent
+        expression = f'{source.uri}concepts/?conceptclass=Diagnosis'
+        for data, expected in (
+                ({'expressions': [expression]}, {expression: {'filter': [
+                    "Filter property 'conceptclass' is not supported."]}}),
+                ([{'system': source.uri, 'filter': [{'property': 'concept_class', 'op': 'is-a', 'value': 'D'}]}],
+                 {f'{source.uri}concepts/?concept_class=D': {'filter': [
+                     "Filter op 'is-a' is not supported for property 'concept_class'. Use one of: =, in."]}})):
+            with self.subTest(data=data):
+                response = self.client.put(
+                    self.collection.uri + 'references/',
+                    {'data': data},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), expected)
+        add_references_mock.assert_not_called()
+        self.assertEqual(self.collection.references.count(), 1)
+
+    def test_put_200_filter_with_in_op(self):
+        source = self.concept.parent
+        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')
+        procedure = ConceptFactory(parent=source, concept_class='Procedure')
+        ConceptFactory(parent=source, concept_class='Misc')
+        ConceptDocument().update(source.concepts_set.all())
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': [{'system': source.uri, 'filter': [
+                {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'}]}]},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]['added'], True)
+        self.assertEqual(
+            set(self.collection.expansion.concepts.values_list('versioned_object_id', flat=True)),
+            {self.concept.id, diagnosis.id, procedure.id})
+
+    def test_put_200_reference_with_a_valueset_that_has_no_expansion_says_so(self):
+        source = self.concept.parent
+        unexpanded = OrganizationCollectionFactory()
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': [{'system': source.uri, 'valueset': [unexpanded.uri], 'code': self.concept.mnemonic}]},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['added'], True)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(response.data[0]['repo_versions'], [unexpanded.uri])
+        self.assertEqual(
+            response.data[0]['message'],
+            f'The reference is saved in collection {self.collection.name}, but it adds nothing: '
+            f'value set {unexpanded.uri} has no default expansion')
+        self.assertEqual(self.collection.expansion.concepts.count(), 1)
 
     @patch('core.collections.views.add_references')
     def test_put_200_reference_the_expansion_parameters_exclude_says_so(self, add_references_mock):

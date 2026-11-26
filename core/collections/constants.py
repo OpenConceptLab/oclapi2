@@ -27,6 +27,13 @@ REFERENCE_EXCLUDED_BY_PARAMETERS_FMT = "The reference is saved in collection {},
 REFERENCE_FOUND_NOTHING = 'found_nothing'
 REFERENCE_EXCLUDED_BY_PARAMETERS = 'excluded_by_parameters'
 REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'
+# a value set the reference names can't narrow it: not found (or not viewable by its creator), or never expanded
+REFERENCE_VALUESET_NOT_FOUND = 'valueset_not_found'
+REFERENCE_VALUESET_NOT_EXPANDED = 'valueset_not_expanded'
+REFERENCE_VALUESET_NOT_FOUND_FMT = 'The reference is saved in collection {}, but it adds nothing: value set {} ' \
+                                   'could not be found'
+REFERENCE_VALUESET_NOT_EXPANDED_FMT = 'The reference is saved in collection {}, but it adds nothing: value set {} ' \
+                                      'has no default expansion'
 
 DELETE_FAILURE = 'Could not delete Collection.'
 DELETE_SUCCESS = 'Successfully deleted Collection.'

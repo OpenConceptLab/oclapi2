@@ -24,7 +24,8 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
-    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
+    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS, REFERENCE_VALUESET_NOT_FOUND, \
+    REFERENCE_VALUESET_NOT_EXPANDED
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -1790,6 +1791,78 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
 
+    def test_get_concepts_applies_in_op(self):
+        source = OrganizationSourceFactory()
+        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')
+        procedure = ConceptFactory(parent=source, concept_class='Procedure')
+        other = ConceptFactory(parent=source, concept_class='Misc')
+        ConceptDocument().update([diagnosis, procedure, other])
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'concept_class', 'value': 'Diagnosis, Procedure', 'op': 'in'}]
+        )
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(sorted(concepts.values_list('id', flat=True)), sorted([diagnosis.id, procedure.id]))
+
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by,
+            filter=[{'property': 'q', 'value': f'{diagnosis.mnemonic},{other.mnemonic}', 'op': 'in'}]
+        )
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(sorted(concepts.values_list('id', flat=True)), sorted([diagnosis.id, other.id]))
+
+    def test_get_concepts_with_no_filter_clause_it_can_apply_finds_nothing(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source, concept_class='Diagnosis')
+        ConceptDocument().update([concept])
+
+        for filters in (
+                [{'property': 'nonsense_prop', 'value': 'x', 'op': '='}],
+                [{'property': 'concept_class', 'value': 'Diagnosis', 'op': 'is-a'}],
+                [{'property': 'concept', 'value': 'Diagnosis', 'op': 'is-a'},
+                 {'property': 'verbose', 'value': 'true', 'op': '='}],
+                [{'property': 'concept_class', 'value': ' , ', 'op': 'in'}]):
+            with self.subTest(filters=filters):
+                reference = CollectionReference(system=source.uri, created_by=source.created_by, filter=filters)
+
+                concepts, _ = reference.get_concepts()
+
+                self.assertEqual(concepts.count(), 0)
+
+    def test_get_filter_clause_property(self):
+        reference = CollectionReference(reference_type='concepts')
+        for filter_def, expected in (
+                ({'property': 'concept_class', 'op': '='}, 'concept_class'),
+                ({'property': 'conceptClass', 'op': 'in'}, 'concept_class'),
+                ({'property': 'extras.nested', 'op': '='}, 'extras.nested'),
+                ({'property': 'q', 'op': 'in'}, 'q'),
+                ({'property': 'exact_match', 'op': '='}, None),
+                ({'property': 'verbose', 'op': '='}, None),
+                ({'property': 'nonsense_prop', 'op': '='}, False),
+                ({'property': '', 'op': '='}, False),
+                ({'property': 'concept_class', 'op': 'is-a'}, False),
+                ({'property': 'extras.nested', 'op': 'regex'}, False)):
+            with self.subTest(filter_def=filter_def):
+                self.assertEqual(reference.get_filter_clause_property(filter_def), expected)
+
+    def test_get_filter_errors(self):
+        reference = CollectionReference(reference_type='concepts', filter=[
+            {'property': 'concept_class', 'value': 'Diagnosis', 'op': '='},
+            {'property': 'conceptclass', 'value': 'Diagnosis', 'op': '='},
+            {'property': 'datatype', 'value': 'N/A', 'op': 'is-a'},
+            {'property': 'excludeFuzzy', 'value': 'false', 'op': '='},
+        ])
+
+        self.assertEqual(reference.get_filter_errors(), [
+            "Filter property 'conceptclass' is not supported.",
+            "Filter op 'is-a' is not supported for property 'datatype'. Use one of: =, in."
+        ])
+        self.assertEqual(CollectionReference(filter=None).get_filter_errors(), [])
+        self.assertEqual(CollectionReference(filter=[{'property': 'bar'}]).get_filter_errors(), [])
+
     def test_get_concepts_applies_es_filter_with_q_property(self):
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, mnemonic='renal-failure')
@@ -2047,11 +2120,94 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.get_latest_version().id])
         self.assertEqual(mappings.count(), 0)
 
+    @staticmethod
+    def source_and_valueset_reference(valueset_uri, created_by=None):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        ConceptFactory(parent=source)
+        reference = CollectionReference(
+            system=source.uri, valueset=[valueset_uri], created_by=created_by or source.created_by)
+        return concept, reference
+
+    def test_get_concepts_system_and_expanded_valueset_narrows_to_the_valueset(self):
+        valueset = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=valueset)
+        valueset.expansion_uri = expansion.uri
+        valueset.save()
+        concept, reference = self.source_and_valueset_reference(valueset.uri)
+        expansion.concepts.add(concept)
+
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+        self.assertEqual(reference.unapplied_valuesets, [])
+
+    def test_get_concepts_system_and_valueset_that_cant_be_applied_finds_nothing(self):
+        unexpanded = OrganizationCollectionFactory()
+        private = OrganizationCollectionFactory(public_access=ACCESS_TYPE_NONE)
+        expansion = ExpansionFactory(collection_version=private)
+        private.expansion_uri = expansion.uri
+        private.save()
+        dangling = OrganizationCollectionFactory(expansion_uri='/orgs/nobody/collections/none/HEAD/expansions/e1/')
+        outsider = UserProfileFactory()
+        for valueset_uri, reason in (
+                ('/orgs/nobody/collections/none/', REFERENCE_VALUESET_NOT_FOUND),
+                (unexpanded.uri, REFERENCE_VALUESET_NOT_EXPANDED),
+                (dangling.uri, REFERENCE_VALUESET_NOT_EXPANDED),
+                (private.uri, REFERENCE_VALUESET_NOT_FOUND)):
+            with self.subTest(valueset=valueset_uri):
+                concept, reference = self.source_and_valueset_reference(valueset_uri, outsider)
+                expansion.concepts.add(concept)
+
+                concepts, mappings = reference.get_concepts()
+
+                self.assertEqual(concepts.count(), 0)
+                self.assertEqual(mappings.count(), 0)
+                self.assertEqual(reference.unapplied_valuesets, [(valueset_uri, reason)])
+                self.assertEqual(
+                    reference.resolve_valueset_versions_with_unresolved[2],
+                    [{'url': valueset_uri, 'namespace': None, 'type': 'reference.valueset'}])
+
+    def test_get_concepts_one_valueset_that_cant_be_applied_among_others_finds_nothing(self):
+        valueset = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=valueset)
+        valueset.expansion_uri = expansion.uri
+        valueset.save()
+        concept = ConceptFactory().get_latest_version()
+        expansion.concepts.add(concept)
+        unexpanded = OrganizationCollectionFactory()
+
+        reference = CollectionReference(valueset=[valueset.uri, unexpanded.uri], created_by=valueset.created_by)
+        concepts, _ = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 0)
+        self.assertEqual(reference.unapplied_valuesets, [(unexpanded.uri, REFERENCE_VALUESET_NOT_EXPANDED)])
+
+    def test_add_references_records_a_valueset_that_cant_be_applied(self):
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        unexpanded = OrganizationCollectionFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        reference = CollectionReference(
+            system=source.uri, valueset=[unexpanded.uri], collection=collection, created_by=source.created_by)
+
+        expansion.add_references([reference])
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(reference.unresolved_reason, REFERENCE_VALUESET_NOT_EXPANDED)
+        self.assertIn(
+            {'url': unexpanded.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset'},
+            expansion.unresolved_repo_versions)
+
     def test_resolve_valueset_versions_with_unresolved_resolves_explicit_and_evaluated(self):
         collection = OrganizationCollectionFactory()
         valueset_collection = OrganizationCollectionFactory()
         valueset_collection_v1 = OrganizationCollectionFactory(
             organization=valueset_collection.organization, mnemonic=valueset_collection.mnemonic, version='v1')
+        for version in (valueset_collection, valueset_collection_v1):
+            version.expansion_uri = ExpansionFactory(collection_version=version).uri
+            version.save()
 
         reference = CollectionReference(
             collection=collection,
