@@ -1295,6 +1295,31 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_put_200_reference_with_a_valueset_that_has_no_expansion_says_so_on_autoexpand_head(self):
+        collection = UserCollectionFactory(user=self.user)
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        self.assertTrue(expansion.is_auto_generated)
+        unexpanded = OrganizationCollectionFactory()
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {'data': [
+                {'system': self.concept.parent.uri, 'valueset': [unexpanded.uri], 'code': self.concept.mnemonic}]},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(
+            response.data[0]['message'],
+            f'The reference is saved in collection {collection.name}, but it adds nothing: '
+            f'value set {unexpanded.uri} has no default expansion')
+        self.assertEqual(collection.expansion.concepts.count(), 0)
+
     def test_put_200_reference_with_a_valueset_that_has_no_expansion_says_so(self):
         source = self.concept.parent
         concept = ConceptFactory(parent=source)

@@ -2256,9 +2256,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             _concepts = Concept.objects.none()
             _mappings = Mapping.objects.none()
 
+            if ref.unapplied_valuesets:  # on an auto-generated expansion too, which reuses saved results
+                ref.unresolved_reason = ref.unapplied_valuesets[0][1]
             if should_reevaluate:
-                if ref.unapplied_valuesets:
-                    ref.unresolved_reason = ref.unapplied_valuesets[0][1]
                 # with no system, a reference evaluates against the value sets it names
                 is_valueset_only = use_any_lock and not ref.system and bool(ref.valueset)
                 for _system_version in ([None] if is_valueset_only else ref_system_versions):
