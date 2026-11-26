@@ -24,7 +24,8 @@ from core.collections.constants import (
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
     VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
-    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED,
+    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT,
+    REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT,
     EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
 from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE
 from core.collections.parsers import CollectionReferenceParser
@@ -290,6 +291,13 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         references = parser.to_objects()
         return references
 
+    def get_unapplied_valueset_message(self, reference):
+        reason = reference.unapplied_valuesets[0][1]
+        message_format = REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT \
+            if reason == REFERENCE_VALUESET_NOT_EXPANDED else REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT
+        return message_format.format(
+            self.name, ', '.join(valueset for valueset, _reason in reference.unapplied_valuesets if _reason == reason))
+
     @staticmethod
     def get_reference_filter_errors(data, user=None, cascade=False, transform=False):
         """{expression: {'filter': [why]}} for each reference to add whose filter names a property or op it can't
@@ -317,7 +325,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             if is_locked:
                 reference._async = _async  # pylint: disable=protected-access
             reference.clear_resolution_cache()
-            total_references += reference.generate_references()
+            generated = reference.generate_references()
+            if not generated and reference.unapplied_valuesets:
+                # a cascade-and-transform reference whose value set can't be applied generates nothing: say why
+                errors[reference.expression] = [self.get_unapplied_valueset_message(reference)]
+            total_references += generated
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
             reference.collection = self

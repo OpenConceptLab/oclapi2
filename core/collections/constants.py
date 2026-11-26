@@ -32,6 +32,10 @@ REFERENCE_VALUESET_NOT_FOUND = 'valueset_not_found'
 REFERENCE_VALUESET_NOT_EXPANDED = 'valueset_not_expanded'
 REFERENCE_VALUESET_NOT_FOUND_FMT = 'The reference is saved in collection {}, but it adds nothing: value set {} ' \
                                    'could not be found'
+REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT = 'The reference is not saved in collection {}: it would add nothing, ' \
+                                            'as value set {} could not be found'
+REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT = 'The reference is not saved in collection {}: it would add ' \
+                                               'nothing, as value set {} has no default expansion'
 REFERENCE_VALUESET_NOT_EXPANDED_FMT = 'The reference is saved in collection {}, but it adds nothing: value set {} ' \
                                       'has no default expansion'
 

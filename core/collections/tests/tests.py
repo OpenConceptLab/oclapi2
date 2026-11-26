@@ -2209,6 +2209,24 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(concepts.count(), 0)
         self.assertEqual(reference.unapplied_valuesets, [(unexpanded.uri, REFERENCE_VALUESET_NOT_EXPANDED)])
 
+    def test_add_references_cascade_and_transform_with_a_valueset_that_cant_be_applied_says_why(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        unexpanded = OrganizationCollectionFactory()
+        collection = OrganizationCollectionFactory()
+        reference = CollectionReference(
+            system=source.uri, code=concept.mnemonic, valueset=[unexpanded.uri], cascade='sourcemappings',
+            transform='resourceversions', created_by=source.created_by)
+        self.assertTrue(reference.should_generate_multiple_references())
+
+        added, errors = collection.add_references([reference], source.created_by)
+
+        self.assertEqual(added, [])
+        self.assertEqual(errors, {reference.expression: [
+            f'The reference is not saved in collection {collection.name}: it would add nothing, as value set '
+            f'{unexpanded.uri} has no default expansion']})
+        self.assertEqual(collection.references.count(), 0)
+
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
