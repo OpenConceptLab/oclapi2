@@ -4885,6 +4885,20 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertIn('Not a supported expansion parameter.', response.data['parameters']['foo'][0])
         self.assertEqual(self.collection.expansions.count(), 0)
 
+    def test_post_parameters_that_arent_an_object_400(self):
+        for parameters in (['activeOnly'], 'activeOnly', 1):
+            with self.subTest(parameters=parameters):
+                response = self.client.post(
+                    self.collection.url + 'HEAD/expansions/',
+                    {'mnemonic': 'e1', 'parameters': parameters},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, {'parameters': ['Must be an object of expansion parameters.']})
+        self.assertEqual(self.collection.expansions.count(), 0)
+
     def test_post_with_every_default_parameter_201(self):
         response = self.client.post(
             self.collection.url + 'HEAD/expansions/',

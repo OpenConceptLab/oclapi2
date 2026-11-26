@@ -681,6 +681,8 @@ class ExpansionParametersValidationMixin:
     @staticmethod
     def validate_parameters(value):
         """Keys lose their spaces, as they are read; a key no expansion applies or stores is rejected"""
+        if value and not isinstance(value, dict):
+            raise ValidationError('Must be an object of expansion parameters.')
         value = ExpansionParameters.normalize_keys(value)
         unsupported = ExpansionParameters.get_unsupported_keys(value)
         if unsupported:
