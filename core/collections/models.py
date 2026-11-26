@@ -2188,7 +2188,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
-                # as a re-evaluation would mark it, so an auto-generated expansion reports it alike
+                # as a re-evaluation would mark it, so an auto-generated expansion reports it alike. If this expansion
+                # never evaluated the version the reference names, holding nothing can mean only that
                 if resolve_by_resource_version and ref.is_resource_versioned and \
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD

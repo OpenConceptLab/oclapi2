@@ -1322,8 +1322,8 @@ class CollectionReferencesViewTest(OCLAPITestCase):
             'repo_versions': [release.uri],
             'message': f'The reference is saved in collection {self.collection.name}, but its {resource_type} is not '
                        f'in {release.uri}, the release the collection resolves through, because it was added after '
-                       f'that release. To include it, create a new release of {drop_version(release.uri)} or pin '
-                       f'the reference to a version that holds it'
+                       f'that release. To include it, create a new release of {drop_version(release.uri)} and '
+                       f'rebuild the expansion, or pin the reference to a version that holds it'
         }
 
     def _use_auto_generated_expansion(self):
