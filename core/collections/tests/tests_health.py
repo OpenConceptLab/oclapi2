@@ -280,11 +280,14 @@ class ExpansionHealthTest(OCLTestCase):
         self.expansion.evaluated_source_versions.add(self.release('v1', version))
         self.reference(concept, version)
         unexpanded = OrganizationCollectionFactory(organization=self.source.organization)
-        CollectionReference(
+        reference = CollectionReference(
             expression=f'{self.source.uri}concepts/', collection=self.collection, system=self.source.uri,
-            valueset=[unexpanded.uri]).save()
-        self.expansion.unresolved_repo_versions = [
-            {'url': unexpanded.uri, 'namespace': None, 'type': 'reference.valueset', 'reason': 'valueset_not_expanded'}]
+            valueset=[unexpanded.uri])
+        reference.save()
+        # recorded in the namespace the reference resolves in, as a build records it
+        self.expansion.unresolved_repo_versions = [{
+            'url': unexpanded.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset',
+            'reason': 'valueset_not_expanded'}]
         self.expansion.save()
 
         self.assertEqual(self.reason_codes(self.health()), {'value_set_without_expansion': 1})
