@@ -7,7 +7,7 @@ from moto import mock_aws
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock, ANY
 from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
@@ -640,6 +640,35 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
         self.assertEqual(response.data, {'name': [ErrorDetail(string='This field may not be blank.', code='blank')]})
 
 
+@tag('es')
+class CollectionReferencesFilterViewTest(OCLAPITestCase):
+    def test_put_200_filter_with_in_op(self):
+        user = UserProfileFactory()
+        collection = UserCollectionFactory(user=user)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        source = OrganizationSourceFactory()
+        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')
+        procedure = ConceptFactory(parent=source, concept_class='Procedure')
+        ConceptFactory(parent=source, concept_class='Misc')
+        ConceptDocument().update(source.concepts_set.all())
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {'data': [{'system': source.uri, 'filter': [
+                {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'}]}]},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]['added'], True)
+        self.assertEqual(
+            set(collection.expansion.concepts.values_list('versioned_object_id', flat=True)),
+            {diagnosis.id, procedure.id})
+
+
 class CollectionReferencesViewTest(OCLAPITestCase):
     def setUp(self):
         super().setUp()
@@ -1266,34 +1295,14 @@ class CollectionReferencesViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_put_200_filter_with_in_op(self):
-        source = self.concept.parent
-        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')
-        procedure = ConceptFactory(parent=source, concept_class='Procedure')
-        ConceptFactory(parent=source, concept_class='Misc')
-        ConceptDocument().update(source.concepts_set.all())
-
-        response = self.client.put(
-            self.collection.uri + 'references/',
-            {'data': [{'system': source.uri, 'filter': [
-                {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'}]}]},
-            HTTP_AUTHORIZATION='Token ' + self.token,
-            format='json'
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data[0]['added'], True)
-        self.assertEqual(
-            set(self.collection.expansion.concepts.values_list('versioned_object_id', flat=True)),
-            {self.concept.id, diagnosis.id, procedure.id})
-
     def test_put_200_reference_with_a_valueset_that_has_no_expansion_says_so(self):
         source = self.concept.parent
+        concept = ConceptFactory(parent=source)
         unexpanded = OrganizationCollectionFactory()
 
         response = self.client.put(
             self.collection.uri + 'references/',
-            {'data': [{'system': source.uri, 'valueset': [unexpanded.uri], 'code': self.concept.mnemonic}]},
+            {'data': [{'system': source.uri, 'valueset': [unexpanded.uri], 'code': concept.mnemonic}]},
             HTTP_AUTHORIZATION='Token ' + self.token,
             format='json'
         )
