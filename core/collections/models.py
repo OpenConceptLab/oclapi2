@@ -2065,7 +2065,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         _holding_versions_cache = {}
 
         include_system_versions = []
-        system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
+        system_versions = ExpansionParameters.get_system_version(self.parameters)
         if should_reevaluate and system_versions:
             namespace = self.get_system_version_namespace(self.collection_version.parent_url)
             for _system, version in self.resolve_system_version_entries(system_versions, namespace):
@@ -2298,7 +2298,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         """This expansion's system-version, plus each source it locked that the parameter doesn't name yet.
         Entries resolve in the owner's namespace, as the expansion built from them will."""
         namespace = self.get_system_version_namespace(self.collection_version.parent_url)
-        value = str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '')
+        value = str(ExpansionParameters.get_system_version(self.parameters) or '')
         repos = self.get_system_version_entry_repos(value, namespace)
         entries = [entry for entry, _, _ in repos]
         named = {repo_url for _, repo_url, _ in repos}
@@ -2432,6 +2432,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return self.collection_version.uri + f'expansions/{self.mnemonic}/'
 
     def clean(self):
+        self.parameters = ExpansionParameters.normalize_keys(self.parameters)
         if not self.parameters or self.parameters == default_expansion_parameters():
             self.parameters = {}
         if not self.unresolved_repo_versions:
@@ -2860,6 +2861,8 @@ class ExpansionParameters:
     EXCLUDE_SYSTEM = 'exclude-system'
     INCLUDE_SYSTEM = 'system-version'
     DATE = 'date'
+    # the keys an expansion stores by default; any other key is rejected on create
+    SUPPORTED = tuple(default_expansion_parameters())
 
     def __init__(self, parameters, is_concept_queryset=True):
         self.parameters = parameters or {}
@@ -2868,9 +2871,32 @@ class ExpansionParameters:
         self.is_concept_queryset = is_concept_queryset
         self.to_parameter_classes()
 
+    @staticmethod
+    def normalize_keys(parameters):
+        """The parameters with spaces dropped from their keys, as they are read. A key written without spaces wins
+        over the same key written with them."""
+        if not isinstance(parameters, dict):
+            return parameters
+        normalized = {}
+        for key, value in parameters.items():
+            _key = key.replace(' ', '') if isinstance(key, str) else key
+            if _key not in normalized or _key == key:
+                normalized[_key] = value
+        return normalized
+
+    @classmethod
+    def get_unsupported_keys(cls, parameters):
+        if not isinstance(parameters, dict):
+            return []
+        return [key for key in parameters if key not in cls.SUPPORTED]
+
+    @classmethod
+    def get_system_version(cls, parameters):
+        """system-version, read as the other keys are: a stored key with spaces (system - version) counts"""
+        return get(cls.normalize_keys(parameters or {}), cls.INCLUDE_SYSTEM)
+
     def to_parameter_classes(self):
-        for parameter, value in self.parameters.items():
-            parameter = parameter.replace(' ', '')
+        for parameter, value in self.normalize_keys(self.parameters).items():
             if parameter == self.ACTIVE:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
             elif parameter == self.TEXT_FILTER:

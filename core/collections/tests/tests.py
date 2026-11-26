@@ -29,7 +29,7 @@ from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
 from core.collections.models import CollectionReference, Collection, Expansion
-from core.collections.models import ExpansionParameters, ExpansionSystemParameter
+from core.collections.models import ExpansionParameters, ExpansionSystemParameter, default_expansion_parameters
 from core.collections.parsers import CollectionReferenceExpressionStringParser, \
     CollectionReferenceSourceAllExpressionParser, CollectionReferenceOldStyleToExpandedStructureParser, \
     CollectionReferenceParser
@@ -2546,6 +2546,16 @@ class TasksTest(OCLTestCase):
 
         self.assertEqual(expansion.get_locked_system_version_parameter(), f'{source.uri}|v2,{other.uri}|HEAD')
 
+    def test_locked_system_version_parameter_reads_a_stored_key_with_spaces(self):
+        source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        other = OrganizationSourceFactory()
+        expansion = ExpansionFactory(
+            collection_version=OrganizationCollectionFactory(),
+            parameters={'system - version': f'{source.uri}|v2'})
+        expansion.evaluated_source_versions.add(v1, other)
+
+        self.assertEqual(expansion.get_locked_system_version_parameter(), f'{source.uri}|v2,{other.uri}|HEAD')
+
     def test_locked_system_version_parameter_keeps_a_source_named_with_a_version_that_doesnt_resolve(self):
         source, _, v1, _ = CollectionReferenceTest.source_with_replaced_concept_version()
         for entry in (f'{source.uri}|v9', f'{source.uri}v9/'):
@@ -3708,6 +3718,20 @@ class ExpansionTest(OCLTestCase):
         expansion.clean()
 
         self.assertIsNotNone(expansion.parameters)
+
+    def test_clean_drops_spaces_from_parameter_keys(self):
+        expansion = Expansion(parameters={'system - version': 'https://a.org|v1', 'exclude - system': 'https://b.org'})
+
+        expansion.clean()
+
+        self.assertEqual(
+            expansion.parameters, {'system-version': 'https://a.org|v1', 'exclude-system': 'https://b.org'})
+
+        expansion = Expansion(parameters={'system - version': 'https://a.org|v2', 'system-version': 'https://a.org|v1'})
+
+        expansion.clean()
+
+        self.assertEqual(expansion.parameters, {'system-version': 'https://a.org|v1'})
 
     def test_delete_expressions_all(self):
         collection = OrganizationCollectionFactory()
@@ -4921,6 +4945,32 @@ class ExpansionTest(OCLTestCase):
 
 @tag('es')
 class ExpansionParametersTest(OCLTestCase):
+    def test_normalize_keys(self):
+        self.assertEqual(
+            ExpansionParameters.normalize_keys({'system - version': 'a', 'exclude - system': 'b', 'activeOnly': True}),
+            {'system-version': 'a', 'exclude-system': 'b', 'activeOnly': True})
+        # a key already written without spaces wins, whichever comes first
+        for parameters in (
+                {'system-version': 'a', 'system - version': 'b'}, {'system - version': 'b', 'system-version': 'a'}):
+            self.assertEqual(ExpansionParameters.normalize_keys(parameters), {'system-version': 'a'})
+        self.assertEqual(ExpansionParameters.normalize_keys({}), {})
+        self.assertIsNone(ExpansionParameters.normalize_keys(None))
+
+    def test_get_system_version(self):
+        self.assertEqual(ExpansionParameters.get_system_version({'system-version': 'a'}), 'a')
+        self.assertEqual(ExpansionParameters.get_system_version({'system - version': 'a'}), 'a')
+        self.assertEqual(ExpansionParameters.get_system_version({' system-version ': 'a'}), 'a')
+        self.assertIsNone(ExpansionParameters.get_system_version({'systemversion': 'a'}))
+        self.assertIsNone(ExpansionParameters.get_system_version({}))
+        self.assertIsNone(ExpansionParameters.get_system_version(None))
+
+    def test_get_unsupported_keys(self):
+        self.assertEqual(ExpansionParameters.get_unsupported_keys(default_expansion_parameters()), [])
+        self.assertEqual(
+            ExpansionParameters.get_unsupported_keys({'activeOnly': True, 'systemVersion': 'a', 'foo': 1}),
+            ['systemVersion', 'foo'])
+        self.assertEqual(ExpansionParameters.get_unsupported_keys(None), [])
+
     def test_apply_active_only(self):
         ConceptFactory(id=1, retired=False, mnemonic='active')
         ConceptFactory(id=2, retired=True, mnemonic='retired')
@@ -7313,6 +7363,15 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
 
                 self.assertEqual(self.unresolved_system_versions(), [])
                 self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.source_v1])
+
+    def test_a_stored_key_with_spaces_locks_the_version(self):
+        self.set_registry_toggle(False)
+        self.expansion.parameters = {'system - version': f'{self.URL}|v1'}
+
+        self.expansion.add_references(CollectionReference(system=self.URL, code='c1'))
+
+        self.assertEqual(self.unresolved_system_versions(), [])
+        self.assertEqual(list(self.expansion.evaluated_source_versions.all()), [self.other_source_v1])
 
     def test_reference_resolution_namespace(self):
         reference = CollectionReference(system=self.URL, code='c1', collection=self.collection)
