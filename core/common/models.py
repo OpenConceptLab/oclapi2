@@ -769,6 +769,12 @@ class VersionedModel(BaseResourceModel):
         latest_released = self.get_latest_released_version()
         return bool(self.released and latest_released and self.id == latest_released.id)
 
+    @property
+    def is_verified(self):
+        """A repository is verified while its latest released version carries a verification record."""
+        head = self.head
+        return bool(head and get(head.get_latest_released_version(), 'verification'))
+
     @classmethod
     def find_latest_released_version_by(cls, filters):
         return cls.objects.filter(**filters, released=True).order_by('-created_at').first()

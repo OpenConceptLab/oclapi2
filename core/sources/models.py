@@ -73,6 +73,7 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         'external_id': {'sortable': False, 'filterable': True, 'facet': False, 'exact': True},
         'match_algorithm': {'sortable': False, 'filterable': True, 'facet': True, 'exact': False},
         'retired': {'sortable': False, 'filterable': True, 'facet': True},
+        'verified': {'sortable': False, 'filterable': True, 'facet': True},
     }
 
     class Meta:

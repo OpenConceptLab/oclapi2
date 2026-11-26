@@ -162,6 +162,11 @@ CANONICAL_URL_REQUEST_PARAM = 'canonicalUrl'
 SAME_STANDARD_CHECKSUM_ERROR = 'No changes detected. Standard checksum is same as last version.'
 # Docs per bulk request when (re)indexing or syncing a repo's resources (batch_index_full, sync_concept_vectors)
 INDEX_BATCH_SIZE = 500
+# Rescore boosts of a repository search, each above any text score so they order the matches in tiers: an exact id
+# match, then verified repositories, then the rest
+VERIFIED_REPO_RESCORE_BOOST = 10_000
+EXACT_ID_REPO_RESCORE_BOOST = 100_000
+REPO_RESCORE_WINDOW_SIZE = 1000
 
 VERIFICATION_FIELDS = {'verified_at', 'process', 'hash'}
 VERIFICATION_VERIFIED_AT_REGEX = r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?' \
