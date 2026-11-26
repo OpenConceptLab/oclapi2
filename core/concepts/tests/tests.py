@@ -23,6 +23,7 @@ from core.common.constants import OPENMRS_VALIDATION_SCHEMA, HEAD, ACCESS_TYPE_N
 from core.common.search import Reranker
 from core.common.tests import OCLTestCase, OCLAPITestCase, OCLAPITransactionTestCase, PREVIEW_GROUP_NAME
 from core.concepts.constants import (
+    MAX_LOCALES_LIMIT,
     OPENMRS_MUST_HAVE_EXACTLY_ONE_PREFERRED_NAME,
     OPENMRS_FULLY_SPECIFIED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_AT_LEAST_ONE_FULLY_SPECIFIED_NAME,
     OPENMRS_PREFERRED_NAME_UNIQUE_PER_SOURCE_LOCALE, OPENMRS_SHORT_NAME_CANNOT_BE_PREFERRED,
@@ -2996,13 +2997,20 @@ class ConceptTest(OCLTestCase):
 
         fake_instance.delete.assert_called_once()
 
+    def test_validate_locales_limit_allows_up_to_the_limit(self):
+        self.assertEqual(MAX_LOCALES_LIMIT, 600)
+        locales = [{'name': 'x'}] * MAX_LOCALES_LIMIT
+        Concept.validate_locales_limit(locales, locales)
+
     def test_validate_locales_limit_raises_for_too_many_names(self):
-        with self.assertRaises(ValidationError):
-            Concept.validate_locales_limit([{'name': 'x'}] * 501, [])
+        with self.assertRaises(ValidationError) as ctx:
+            Concept.validate_locales_limit([{'name': 'x'}] * (MAX_LOCALES_LIMIT + 1), [])
+        self.assertEqual(ctx.exception.message_dict, {'names': ['max limit 600 of names exceeded']})
 
     def test_validate_locales_limit_raises_for_too_many_descriptions(self):
-        with self.assertRaises(ValidationError):
-            Concept.validate_locales_limit([], [{'name': 'x'}] * 501)
+        with self.assertRaises(ValidationError) as ctx:
+            Concept.validate_locales_limit([], [{'name': 'x'}] * (MAX_LOCALES_LIMIT + 1))
+        self.assertEqual(ctx.exception.message_dict, {'descriptions': ['max limit 600 of descriptions exceeded']})
 
     def test_get_unidirectional_mappings_for_collection(self):
         source = OrganizationSourceFactory()
