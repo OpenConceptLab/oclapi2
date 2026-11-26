@@ -266,10 +266,16 @@ class ExpansionHealth:
     @cached_property
     def unexpanded_value_set_entry_reference_ids(self):
         """References naming a value set the build recorded as having no default expansion"""
-        urls = {
-            entry.get('url') for entry in self.expansion.unresolved_repo_versions or []
+        named = {
+            (entry.get('url'), entry.get('namespace') or None)
+            for entry in self.expansion.unresolved_repo_versions or []
             if entry.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED}
-        return {reference.id for reference in self.references if set(reference.valueset or []) & urls}
+        urls = {url for url, _ in named}
+        return {
+            reference.id for reference in self.references
+            # a canonical URL can resolve differently in another namespace
+            if set(reference.valueset or []) & urls and {
+                (valueset, reference.resolution_namespace or None) for valueset in reference.valueset} & named}
 
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member (None: nothing to judge it against), and the keys of its

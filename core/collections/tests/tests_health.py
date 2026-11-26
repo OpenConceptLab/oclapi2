@@ -289,6 +289,14 @@ class ExpansionHealthTest(OCLTestCase):
 
         self.assertEqual(self.reason_codes(self.health()), {'value_set_without_expansion': 1})
 
+        # recorded for the URL in another namespace, it isn't this reference's
+        self.expansion.unresolved_repo_versions = [{
+            'url': unexpanded.uri, 'namespace': '/orgs/other/', 'type': 'reference.valueset',
+            'reason': 'valueset_not_expanded'}]
+        self.expansion.save()
+
+        self.assertNotIn('value_set_without_expansion', self.reason_codes(self.health()))
+
     def test_repository_recorded_at_two_versions_by_unversioned_references_is_a_duplicate(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()
