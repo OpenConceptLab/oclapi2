@@ -7599,3 +7599,25 @@ class CollectionHeadExportKeyTest(OCLTestCase):
 
                 head = self.get_head()
                 self.assertEqual((head.name, head.last_child_removal_at), ('Renamed', marked_at))
+
+    def test_adding_a_member_older_than_a_removal_moves_the_key(self):
+        middle = ConceptFactory(parent=self.source)  # newer than the member left, older than the removal
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            self.get_head().delete_references([self.newer.uri])
+        added_at = self.later + datetime.timedelta(minutes=1)
+
+        with patch('core.collections.models.timezone', **{'now.return_value': added_at}):
+            self.get_head().add_expressions({'expressions': [middle.uri]}, self.collection.created_by)
+
+        head = self.get_head()
+        self.assertIn(middle.id, head.expansion.concepts.values_list('versioned_object_id', flat=True))
+        self.assertEqual(head.last_child_update, added_at)
+
+    def test_an_edit_of_an_empty_collection_after_a_removal_moves_the_key(self):
+        collection = OrganizationCollectionFactory()
+        removed_at = timezone.now() - datetime.timedelta(minutes=5)
+        Collection.objects.filter(id=collection.id).update(
+            last_child_removal_at=removed_at, updated_at=removed_at + datetime.timedelta(minutes=1))
+
+        self.assertEqual(
+            Collection.objects.get(id=collection.id).last_child_update, removed_at + datetime.timedelta(minutes=1))

@@ -845,7 +845,8 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
     active_mappings = models.IntegerField(null=True, blank=True, default=None)
-    # when a member last left (or a collection's expansion was switched), which no member's updated_at shows
+    # when a member last left, or a collection gained references or switched expansions: what no member's
+    # updated_at shows
     last_child_removal_at = models.DateTimeField(null=True, blank=True)
     custom_validation_schema = models.CharField(
         choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
@@ -943,11 +944,12 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     @property
     def last_child_update(self):
         """When this version's members last changed: an edit or add (a member's updated_at) or a removal"""
-        updates = [
-            update for update in (self.last_concept_update, self.last_mapping_update, self.last_child_removal_at)
-            if update
-        ]
-        return max(updates) if updates else self.updated_at or timezone.now()
+        member_updates = [update for update in (self.last_concept_update, self.last_mapping_update) if update]
+        updates = [*member_updates, self.last_child_removal_at]
+        if not member_updates:  # an empty repository: its own edits count too
+            updates.append(self.updated_at)
+        updates = [update for update in updates if update]
+        return max(updates) if updates else timezone.now()
 
     @classmethod
     def mark_child_removal(cls, ids):

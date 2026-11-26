@@ -323,8 +323,13 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
+        fields = ['updated_by', 'updated_at']
+        if added_references:  # an added member can be older than the others, or than a removal, so it marks the key
+            self.last_child_removal_at = timezone.now()
+            self.__dict__.pop('version_export_path', None)
+            fields.append('last_child_removal_at')
         # only who changed it: its other values were saved by the caller, and a concurrent write's stay (its access)
-        self.save(update_fields=['updated_by', 'updated_at'])
+        self.save(update_fields=fields)
         self.update_children_counts()
         return added_references, errors
 
