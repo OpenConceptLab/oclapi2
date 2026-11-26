@@ -2275,6 +2275,14 @@ class CollectionReferenceTest(OCLTestCase):
         expansion.evaluated_collection_versions.add(release)
         self.assertEqual(
             [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)], [None, None, None])
+        # a public recorded version of it too doesn't make the private one's reason readable: every one must be
+        expansion.explicit_collection_versions.add(public)
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)], [None, None, None])
+        expansion.evaluated_collection_versions.remove(release)
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)],
+            [None, 'valueset_not_expanded', None])
 
     def test_add_references_a_direct_add_answers_for_a_cascade_that_cant_be_applied_with_the_same_expression(self):
         source = OrganizationSourceFactory()
