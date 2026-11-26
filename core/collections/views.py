@@ -31,6 +31,7 @@ from core.collections.constants import (
     REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_VALUESET_NOT_FOUND_FMT,
     REFERENCE_VALUESET_NOT_EXPANDED_FMT, REFERENCE_FILTER_NOT_APPLIED, REFERENCE_FILTER_NOT_APPLIED_FMT)
 from core.collections.documents import CollectionDocument
+from core.collections.health import ValueSetViewAccess
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
@@ -1087,8 +1088,9 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
             sync=self.sync
         )
         headers = self.get_success_headers(serializer.validated_data)
-        return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
-                        headers=headers)
+        return Response(
+            self.get_response_serializer_class()(expansion, context={'request': request}).data,
+            status=status.HTTP_201_CREATED, headers=headers)
 
     @staticmethod
     def get_system_version_errors(parameters, version):
@@ -1178,7 +1180,9 @@ class CollectionVersionExpansionResolvedRepoUpdatesView(
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
-        return Response(obj.get_resolved_repo_version_diff_with_latest_updates(), status=status.HTTP_200_OK)
+        return Response(
+            obj.get_resolved_repo_version_diff_with_latest_updates(ValueSetViewAccess(request.user)),
+            status=status.HTTP_200_OK)
 
 
 class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseView, TaskMixin):

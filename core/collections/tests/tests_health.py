@@ -6,9 +6,10 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from mock import patch, Mock
+from pydash import get
 
 from core.collections.health import (
-    ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
+    ExpansionHealth, get_health_for, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.constants import EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
 from core.collections.models import Collection, CollectionReference, Expansion
@@ -19,9 +20,11 @@ from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
 from core.mappings.tests.factories import MappingFactory
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.models import Source
 from core.sources.tests.factories import OrganizationSourceFactory
 from core.users.models import UserProfile
+from core.users.tests.factories import UserProfileFactory
 
 
 class ExpansionHealthTest(OCLTestCase):
@@ -85,7 +88,7 @@ class ExpansionHealthTest(OCLTestCase):
         self.assertEqual(health['state'], HEALTHY)
         self.assertEqual(health['reasons'], [])
         self.assertEqual(health['members']['concepts'][RELEASE], 1)
-        self.assertEqual(health['rules_version'], 1)
+        self.assertEqual(health['rules_version'], 2)
 
     def test_member_of_head_makes_the_expansion_head_resolved(self):
         concept = ConceptFactory(parent=self.source)
@@ -290,7 +293,12 @@ class ExpansionHealthTest(OCLTestCase):
             'reason': 'valueset_not_expanded'}]
         self.expansion.save()
 
-        self.assertEqual(self.reason_codes(self.health()), {'value_set_without_expansion': 1})
+        health = self.health()
+        self.assertEqual(self.reason_codes(health), {'value_set_without_expansion': 1})
+        # an entry is stored as the version its URL resolves to
+        self.assertEqual(health['reasons'][0]['value_sets'], [{
+            'url': unexpanded.uri, 'namespace': None, 'version_urls': [unexpanded.uri],
+            'reference_ids': [reference.id], 'entries': 1}])
 
         # recorded for the URL in another namespace, it matches no reference: still an unresolved one
         self.expansion.unresolved_repo_versions = [{
@@ -462,7 +470,44 @@ class ExpansionHealthTest(OCLTestCase):
         self.expansion.concepts.add(version)
 
         self.assertEqual(self.classify(), {version.id: UNATTRIBUTED})
-        self.assertEqual(self.reason_codes(self.health())['value_set_without_expansion'], 1)
+        reason = next(
+            reason for reason in self.health()['reasons'] if reason['code'] == 'value_set_without_expansion')
+        self.assertEqual(reason['count'], 1)
+        # which value set it counts, so each reader is shown only those they can view
+        self.assertEqual(reason['value_sets'], [{
+            'url': other.uri, 'namespace': None, 'version_urls': [other_release.uri], 'reference_ids': [reference.id],
+            'entries': 0}])
+
+    def test_a_hidden_value_set_s_entries_read_as_unresolved_references_in_their_usual_place(self):
+        access = Mock(is_staff=False, can_view_url=Mock(return_value=False))
+        health = {'state': UNHEALTHY, 'head_resolved_repositories': [], 'reasons': [
+            {'code': 'resource_versioned_references', 'count': 1},
+            {'code': 'filter_not_applied', 'count': 1},
+            {'code': 'value_set_without_expansion', 'count': 1, 'value_sets': [
+                {'url': '/orgs/a/collections/b/', 'namespace': None, 'version_urls': ['/orgs/a/collections/b/v1/'],
+                 'reference_ids': [1], 'entries': 1}]}]}
+
+        self.assertEqual(
+            [reason['code'] for reason in get_health_for(health, access)['reasons']],
+            ['resource_versioned_references', 'unresolved_references', 'filter_not_applied'])
+
+    def test_a_value_set_named_by_two_references_is_stored_once_with_both(self):
+        other = OrganizationCollectionFactory(organization=self.source.organization)
+        other_release = OrganizationCollectionFactory(
+            mnemonic=other.mnemonic, organization=other.organization, version='v1', released=True)
+        references = []
+        for include in (True, False):
+            reference = CollectionReference(
+                expression=other_release.uri, collection=self.collection, valueset=[other_release.uri],
+                include=include)
+            reference.save()
+            references.append(reference)
+
+        reason = next(
+            reason for reason in self.health()['reasons'] if reason['code'] == 'value_set_without_expansion')
+        self.assertEqual(reason['count'], 2)
+        self.assertEqual(len(reason['value_sets']), 1)
+        self.assertEqual(reason['value_sets'][0]['reference_ids'], sorted(reference.id for reference in references))
 
     def test_a_resource_versioned_exclude_reference_counts_as_one(self):
         concept = ConceptFactory(parent=self.source)
@@ -654,7 +699,7 @@ class ExpansionHealthStorageTest(OCLTestCase):
         health, is_current = self.stored()
         self.assertTrue(is_current)
         self.assertEqual(health['state'], EMPTY)
-        self.assertEqual(health['rules_version'], 1)
+        self.assertEqual(health['rules_version'], 2)
 
     def test_adding_references_recomputes_health(self):
         self.add(ConceptFactory())
@@ -1377,3 +1422,248 @@ class ExpansionHealthAPITest(OCLAPITestCase):
             response = self.client.get(self.expansion.uri + 'concepts/?includeHealth=true')
 
         self.assertNotIn('health', response.data[0])
+
+
+class ExpansionHealthVisibilityTest(OCLAPITestCase):
+    """A public expansion naming a value set a reader can't view tells them nothing about that value set"""
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
+        self.collection.expansion_uri = self.expansion.uri
+        self.collection.save()
+        # one member HEAD holds, so health is head_resolved but for the value set
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        version = concept.get_latest_version()
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/{concept.mnemonic}/', collection=self.collection, system=source.uri,
+            code=concept.mnemonic)
+        reference.save()
+        reference.concepts.add(version)
+        self.expansion.concepts.add(version)
+        self.private_org = OrganizationFactory()
+        self.member, self.outsider = UserProfileFactory(), UserProfileFactory()
+        self.private_org.members.add(self.member)
+        value_set = OrganizationCollectionFactory(organization=self.private_org, public_access=ACCESS_TYPE_NONE)
+        self.private_release = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=self.private_org, version='v1', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.public_release = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v1', released=True)
+        self.expansion.evaluated_collection_versions.add(self.private_release, self.public_release)
+        CollectionReference(
+            expression=self.private_release.uri, collection=self.collection,
+            valueset=[self.private_release.uri]).save()
+        self.store_health()
+
+    def store_health(self):
+        self.expansion.refresh_from_db()
+        health = ExpansionHealth(self.expansion).compute()
+        Expansion.objects.filter(id=self.expansion.id).update(health=health, health_is_current=True)
+        self.expansion.refresh_from_db()
+        return health
+
+    def get(self, url, user=None):
+        kwargs = {'HTTP_AUTHORIZATION': f'Token {user.get_token()}'} if user else {}
+        response = self.client.get(url, **kwargs)
+        self.assertEqual(response.status_code, 200)
+        return response.data
+
+    def readers(self):
+        """(reader, can view the private value set)"""
+        return ((self.member, True), (self.outsider, False), (None, False))
+
+    def test_the_stored_health_counts_the_private_value_set(self):
+        self.assertEqual(self.expansion.health['state'], UNHEALTHY)
+        reason = next(
+            reason for reason in self.expansion.health['reasons']
+            if reason['code'] == 'value_set_without_expansion')
+        self.assertEqual(reason['value_sets'][0]['version_urls'], [self.private_release.uri])
+
+    def test_expansion_detail_and_list_count_only_value_sets_the_reader_can_view(self):
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                detail = self.get(self.expansion.uri, reader)['health']
+                listed = self.get(self.collection.uri + 'HEAD/expansions/', reader)[0]['health']
+                verbose = self.get(self.collection.uri + 'HEAD/expansions/?verbose=true', reader)[0]['health']
+                for health in (detail, listed, verbose):
+                    codes = [reason['code'] for reason in health['reasons']]
+                    if can_view:
+                        self.assertEqual(health, self.expansion.health)
+                    else:
+                        # no reason left, so it reads as it would without that value set
+                        self.assertNotIn('value_set_without_expansion', codes)
+                        self.assertEqual(health['state'], HEAD_RESOLVED)
+                        self.assertNotIn(self.private_release.uri, str(health))
+
+    def test_versions_list_and_version_detail_state_follow_the_reader(self):
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                expected = UNHEALTHY if can_view else HEAD_RESOLVED
+                versions = self.get(self.collection.uri + 'versions/', reader)
+                verbose = self.get(self.collection.uri + 'versions/?verbose=true', reader)
+                detail = self.get(self.collection.uri + 'HEAD/', reader)
+                for listing in (versions, verbose):
+                    head = next(item for item in listing if item['id'] == 'HEAD')
+                    self.assertEqual(head['expansion_health'], {'state': expected, 'is_current': True})
+                self.assertEqual(detail['expansion_health'], {'state': expected, 'is_current': True})
+
+    def test_recorded_version_lists_name_only_value_set_versions_the_reader_can_view(self):
+        self.expansion.explicit_collection_versions.add(self.private_release)
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                for data in (
+                        self.get(self.expansion.uri, reader),
+                        self.get(self.collection.uri + 'HEAD/expansions/?verbose=true', reader)[0]):
+                    evaluated = [version['version_url'] for version in data['evaluated_collection_versions']]
+                    explicit = [version['version_url'] for version in data['explicit_collection_versions']]
+                    self.assertIn(self.public_release.uri, evaluated)
+                    self.assertEqual(self.private_release.uri in evaluated, can_view)
+                    self.assertEqual(explicit, [self.private_release.uri] if can_view else [])
+
+    def test_a_public_release_under_a_private_head_is_shown_only_to_members(self):
+        Collection.objects.filter(id=self.private_release.id).update(public_access=ACCESS_TYPE_VIEW)
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                evaluated = [
+                    version['version_url'] for version in self.get(
+                        self.expansion.uri, reader)['evaluated_collection_versions']]
+                self.assertEqual(self.private_release.uri in evaluated, can_view)
+                self.assertEqual(self.get(self.expansion.uri, reader)['health']['state'],
+                                 UNHEALTHY if can_view else HEAD_RESOLVED)
+
+    def test_staff_see_every_value_set(self):
+        admin = UserProfile.objects.get(username='ocladmin')
+        data = self.get(self.expansion.uri, admin)
+        self.assertEqual(data['health'], self.expansion.health)
+        self.assertIn(
+            self.private_release.uri, [version['version_url'] for version in data['evaluated_collection_versions']])
+
+    def test_a_value_set_the_reader_can_view_still_counts_once_another_is_hidden(self):
+        public_value_set = OrganizationCollectionFactory(
+            organization=self.collection.organization, version='v2', released=True,
+            mnemonic=self.public_release.mnemonic)
+        CollectionReference(
+            expression=public_value_set.uri, collection=self.collection, valueset=[public_value_set.uri]).save()
+        self.store_health()
+        self.assertEqual(self.reason_count(self.expansion.health), 2)
+
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                health = self.get(self.expansion.uri, reader)['health']
+                self.assertEqual(health['state'], UNHEALTHY)
+                self.assertEqual(self.reason_count(health), 2 if can_view else 1)
+
+    def test_health_stored_before_it_named_its_value_sets_counts_none(self):
+        health = {**self.expansion.health, 'reasons': [
+            {key: value for key, value in reason.items() if key != 'value_sets'}
+            for reason in self.expansion.health['reasons']]}
+        Expansion.objects.filter(id=self.expansion.id).update(health=health)
+
+        for reader, _ in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                self.assertEqual(self.reason_count(self.get(self.expansion.uri, reader)['health']), 0)
+
+    def test_listing_more_expansions_and_versions_reads_access_without_a_query_each(self):
+        def count_queries(url):
+            """Those reading the value sets health names, their HEADs, and the reader's organizations"""
+            with CaptureQueriesContext(connection) as context:
+                self.get(url, self.outsider)
+            return len([
+                query for query in context.captured_queries
+                if f"'/orgs/{self.private_org.mnemonic}/" in query['sql'] or
+                ('"mnemonic" IN' in query['sql'] and "'HEAD'" in query['sql']) or
+                '"user_profiles_organizations"' in query['sql']])
+
+        # public releases under a private HEAD: the HEAD and the reader's organizations are read too
+        Collection.objects.filter(id=self.private_release.id).update(public_access=ACCESS_TYPE_VIEW)
+        expansions_url = self.collection.uri + 'HEAD/expansions/'
+        one_expansion, one_version = count_queries(expansions_url), count_queries(self.collection.uri + 'versions/')
+        for index in range(3):
+            other = OrganizationCollectionFactory(
+                organization=self.private_org, version=f'v{index + 2}', released=True,
+                mnemonic=self.private_release.mnemonic)
+            expansion = ExpansionFactory(collection_version=self.collection, mnemonic=f'e{index}')
+            version = OrganizationCollectionFactory(
+                organization=self.collection.organization, mnemonic=self.collection.mnemonic, version=f'v{index + 1}')
+            default = ExpansionFactory(collection_version=version, mnemonic=f'd{index}')
+            Collection.objects.filter(id=version.id).update(expansion_uri=default.uri)
+            for row in (expansion, default):
+                Expansion.objects.filter(id=row.id).update(health={**self.expansion.health, 'reasons': [{
+                    'code': 'value_set_without_expansion', 'count': 1, 'value_sets': [{
+                        'url': other.versioned_object_url, 'namespace': None, 'version_urls': [other.uri],
+                        'reference_ids': [1], 'entries': 0}]}]})
+
+        self.assertGreaterEqual(one_expansion, 3)
+        self.assertEqual(count_queries(expansions_url), one_expansion)
+        self.assertEqual(count_queries(self.collection.uri + 'versions/'), one_version)
+
+    def test_a_hidden_value_set_s_unresolved_entry_counts_as_unresolved(self):
+        """A build records an entry for an unexpanded value set; to a reader who can't view it, it's not found"""
+        reference = self.collection.references.get(valueset=[self.private_release.uri])
+        Expansion.objects.filter(id=self.expansion.id).update(unresolved_repo_versions=[{
+            'url': self.private_release.uri, 'namespace': reference.resolution_namespace,
+            'type': 'reference.valueset', 'reason': 'valueset_not_expanded'}])
+        self.store_health()
+
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                data = self.get(self.expansion.uri, reader)
+                codes = {reason['code']: reason['count'] for reason in data['health']['reasons']}
+                self.assertEqual(data['health']['state'], UNHEALTHY)
+                if can_view:
+                    self.assertEqual(codes, {'value_set_without_expansion': 1})
+                else:
+                    self.assertEqual(codes, {'unresolved_references': 1})
+                    self.assertNotIn('reason', data['unresolved_repo_versions'][0])
+
+    def test_an_entry_is_shown_only_to_a_reader_who_can_view_every_version_the_build_recorded_for_it(self):
+        value_set = OrganizationCollectionFactory(organization=self.private_org)
+        viewable = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=self.private_org, version='v1', released=True)
+        hidden = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=self.private_org, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.expansion.evaluated_collection_versions.add(viewable, hidden)
+        reference = CollectionReference(expression=value_set.uri, collection=self.collection, valueset=[value_set.uri])
+        reference.save()
+        Expansion.objects.filter(id=self.expansion.id).update(unresolved_repo_versions=[{
+            'url': value_set.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset',
+            'reason': 'valueset_not_expanded'}])
+        health = self.store_health()
+        # the entry's own, apart from those its reference resolved to
+        stored = next(
+            item for reason in health['reasons'] if reason['code'] == 'value_set_without_expansion'
+            for item in reason['value_sets'] if item['url'] == value_set.uri and item['entries'])
+        self.assertEqual(stored['version_urls'], sorted([viewable.uri, hidden.uri]))
+
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                data = self.get(self.expansion.uri, reader)
+                self.assertEqual(
+                    self.reason_count(data['health'], 'unresolved_references'), 0 if can_view else 1)
+                # counted once: not also under the one resolved version an outsider can view
+                self.assertEqual(self.reason_count(data['health']), 2 if can_view else 0)
+                self.assertEqual('reason' in data['unresolved_repo_versions'][0], can_view)
+
+    def test_resolved_repo_updates_list_a_value_set_s_versions_only_to_a_reader_who_can_view_them(self):
+        def released(organization, public_access=ACCESS_TYPE_VIEW):
+            head = OrganizationCollectionFactory(organization=organization, public_access=public_access)
+            return [
+                OrganizationCollectionFactory(
+                    mnemonic=head.mnemonic, organization=organization, version=version, released=True,
+                    public_access=public_access) for version in ('v1', 'v2')]
+        private_v1, private_v2 = released(self.private_org, ACCESS_TYPE_NONE)
+        public_v1, public_v2 = released(self.collection.organization)
+        self.expansion.evaluated_collection_versions.add(private_v1, public_v1)
+
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                diff = self.get(self.expansion.uri + 'resolved-repo-updates/', reader)
+                self.assertEqual(diff.get(public_v1.url), public_v2.url)
+                self.assertEqual(diff.get(private_v1.url), private_v2.url if can_view else None)
+
+    @staticmethod
+    def reason_count(health, code='value_set_without_expansion'):
+        return next((reason['count'] for reason in health['reasons'] if reason['code'] == code), 0)
