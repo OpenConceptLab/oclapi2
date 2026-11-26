@@ -1419,8 +1419,16 @@ class ExpansionHealthVisibilityTest(OCLAPITestCase):
         self.expansion = Expansion.persist(index=False, collection_version=self.collection, mnemonic='autoexpand-HEAD')
         self.collection.expansion_uri = self.expansion.uri
         self.collection.save()
-        concept = ConceptFactory()
-        self.collection.add_expressions({'expressions': [concept.uri]}, self.collection.created_by)
+        # one member HEAD holds, so health is head_resolved but for the value set
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        version = concept.get_latest_version()
+        reference = CollectionReference(
+            expression=f'{source.uri}concepts/{concept.mnemonic}/', collection=self.collection, system=source.uri,
+            code=concept.mnemonic)
+        reference.save()
+        reference.concepts.add(version)
+        self.expansion.concepts.add(version)
         self.private_org = OrganizationFactory()
         self.member, self.outsider = UserProfileFactory(), UserProfileFactory()
         self.private_org.members.add(self.member)
@@ -1611,9 +1619,10 @@ class ExpansionHealthVisibilityTest(OCLAPITestCase):
             'url': value_set.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset',
             'reason': 'valueset_not_expanded'}])
         health = self.store_health()
+        # the entry's own, apart from those its reference resolved to
         stored = next(
             item for reason in health['reasons'] if reason['code'] == 'value_set_without_expansion'
-            for item in reason['value_sets'] if item['url'] == value_set.uri)
+            for item in reason['value_sets'] if item['url'] == value_set.uri and item['entries'])
         self.assertEqual(stored['version_urls'], sorted([viewable.uri, hidden.uri]))
 
         for reader, can_view in self.readers():
