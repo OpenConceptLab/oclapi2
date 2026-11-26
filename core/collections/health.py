@@ -7,6 +7,7 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from django.utils.functional import cached_property
 
+from core.collections.constants import REFERENCE_VALUESET_NOT_EXPANDED
 from core.common.constants import HEAD
 from core.common.utils import drop_version
 
@@ -262,6 +263,14 @@ class ExpansionHealth:
                     self.expansion, valueset_version_cache=self._valueset_version_cache))
         }
 
+    @cached_property
+    def unexpanded_value_set_entry_reference_ids(self):
+        """References naming a value set the build recorded as having no default expansion"""
+        urls = {
+            entry.get('url') for entry in self.expansion.unresolved_repo_versions or []
+            if entry.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED}
+        return {reference.id for reference in self.references if set(reference.valueset or []) & urls}
+
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member (None: nothing to judge it against), and the keys of its
         resolved repo versions that hold it"""
@@ -384,10 +393,13 @@ class ExpansionHealth:
         add('resource_versioned_references', len(
             [reference for reference in self.references if reference.is_resource_versioned]))
         unresolved = self.expansion.unresolved_repo_versions or []
-        add('unresolved_references', len(
-            [entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE]))
+        # a value set with no expansion is counted once, as one without expansion
+        add('unresolved_references', len([
+            entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE and
+            entry.get('reason') != REFERENCE_VALUESET_NOT_EXPANDED]))
         add('value_set_without_expansion', len(
-            self.unexpanded_value_set_reference_ids | self.unexpanded_value_set_exclude_ids))
+            self.unexpanded_value_set_reference_ids | self.unexpanded_value_set_exclude_ids |
+            self.unexpanded_value_set_entry_reference_ids))
         add('system_version_unresolved', len(
             [entry for entry in unresolved if entry.get('type') == SYSTEM_VERSION_PARAMETER_TYPE]))
         for member_class, code in MEMBER_REASONS:
