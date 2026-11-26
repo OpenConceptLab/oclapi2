@@ -3880,4 +3880,5 @@ class SourceAccessCascadeOverlappingEditTest(SourceAccessCascadeMixin, OCLAPITra
 
         self.assertIn(response.status_code, (200, 202), response.data)
         self.assertIn(overlapping.status_code, (200, 202), overlapping.data)
-        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_VIEW}] * 3)
+        # the overlapping edit resends the View it loaded, so it keeps the None the first one committed
+        self.assertEqual(self.committed_access(), [{ACCESS_TYPE_NONE}] * 3)

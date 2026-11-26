@@ -332,7 +332,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         head = self.head
         if head:
             for reference in head.references.order_by('id'):
-                new_reference = reference.clone(last_resolved_at=timezone.now(), collection=self)
+                # copied, not resolved here: a reference HEAD never resolved stays unresolved
+                new_reference = reference.clone(last_resolved_at=reference.last_resolved_at, collection=self)
                 new_reference.save()
                 new_reference.concepts.set(reference.concepts.all())
                 new_reference.mappings.set(reference.mappings.all())
@@ -801,11 +802,11 @@ class CollectionReference(models.Model):
 
     @property
     def can_compute_against_other_system_version(self):
-        return (not self.system or not self.version) and not self.resource_version
+        return (not self.system or not self.names_repo_version) and not self.resource_version
 
     @property
     def is_versionless_expression(self):
-        return not self.version and not self.resource_version
+        return not self.names_repo_version and not self.resource_version
 
     def can_compute_against_system_version(self, system_version):
         result = False
@@ -1294,9 +1295,11 @@ class CollectionReference(models.Model):
 
     @property
     def names_repo_version(self):
-        return bool(
-            self.version or (self.system and (
-                is_versioned_uri(self.system) or canonical_url_to_url_and_version(self.system)[1])))
+        """As the resolver reads the system: a version field, a version after '|', or a relative URL's fifth segment,
+        query dropped (/orgs|users/<owner>/<repo type>/<repo>/<version>/), but HEAD, which no repository URL has"""
+        url, url_version = split_canonical(self.system or '')
+        path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
+        return bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
 
     @property
     def can_resolve_to_repo_version_with_resource_version(self):
@@ -1603,12 +1606,7 @@ class CollectionReference(models.Model):
         """URLs of the repository versions its expansion evaluated it in that `user` can view,
         else of the repositories it names. A version its system names that `user` can't view counts as missing."""
         expansion_cache = {self.collection_id: expansion}
-        # read as the resolver reads the system: a version after '|', or the fifth segment of a relative URL's path
-        # without its query string (/orgs|users/<owner>/<repo type>/<repo>/<version>/)
-        url, url_version = split_canonical(self.system or '')
-        path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
-        names_version = bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
-        named_version = self._get_expression_system_version(system_version_cache) if names_version else None
+        named_version = self._get_expression_system_version(system_version_cache) if self.names_repo_version else None
         system_versions = [] if named_version and not named_version.has_view_access(user) else \
             self._get_resolved_system_versions(system_version_cache, expansion_cache)
         versions = [*system_versions, *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
