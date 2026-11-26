@@ -2292,6 +2292,19 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual([reference.id for reference in added], [direct.id])
         self.assertEqual(errors, {})
 
+        # an exclusion of the same expression doesn't answer for the include
+        cascading = CollectionReference(
+            system=source.uri, code=concept.mnemonic, valueset=[unexpanded.uri], cascade='sourcemappings',
+            transform='resourceversions', created_by=source.created_by)
+        exclusion = CollectionReference(
+            system=source.uri, code=concept.mnemonic, valueset=[unexpanded.uri], include=False,
+            created_by=source.created_by)
+
+        added, errors = OrganizationCollectionFactory().add_references([cascading, exclusion], source.created_by)
+
+        self.assertEqual([reference.id for reference in added], [exclusion.id])
+        self.assertEqual(list(errors), [cascading.expression])
+
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)

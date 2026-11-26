@@ -347,8 +347,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 continue
             if reference.id:
                 added_references.append(reference)
-        # a direct add of the same expression in this request answers for it instead
-        added_expressions = {reference.expression for reference in added_references}
+        # a direct include of the same expression in this request answers for it instead
+        added_expressions = {reference.expression for reference in added_references if reference.include}
         errors = {
             **{expression: error for expression, error in unapplied_errors.items()
                if expression not in added_expressions}, **errors}
