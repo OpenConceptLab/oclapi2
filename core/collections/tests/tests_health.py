@@ -739,6 +739,32 @@ class ExpansionHealthStorageTest(OCLTestCase):
 
         self.assertIsNone(Expansion.objects.values_list('health_is_current', flat=True).get(id=new_default.id))
 
+    def test_a_new_default_whose_build_ends_while_it_is_marked_is_recomputed(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+
+        def build_ends():
+            Expansion.objects.filter(id=new_default.id).update(is_processing=False)
+            return True
+
+        with patch.object(Expansion, 'is_health_on', side_effect=build_ends), \
+                patch.object(Expansion, 'mark_health_out_of_date') as mark_health_out_of_date:
+            self.set_default(new_default)
+
+        mark_health_out_of_date.assert_called_once()
+
+    def test_the_store_is_a_one_table_update(self):
+        with CaptureQueriesContext(connection) as context:
+            self.expansion.update_health()
+
+        stores = [query['sql'] for query in context.captured_queries
+                  if query['sql'].startswith('UPDATE "collection_expansions"') and '"health_is_current" = true' in
+                  query['sql']]
+        self.assertEqual(len(stores), 1, stores)
+        self.assertNotIn('IN (SELECT', stores[0])
+        self.assertIn('EXISTS', stores[0])
+        self.assertTrue(self.stored()[1])
+
     def test_a_build_of_the_old_default_ending_after_the_switch_stores_no_health(self):
         new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
         rebuilding = Expansion.objects.get(id=self.expansion.id)
