@@ -25,7 +25,7 @@ from core.collections.constants import (
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
     VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
     REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT,
-    REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT,
+    REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT, REFERENCE_FILTER_NOT_APPLIED, UNRESOLVED_FILTER_TYPE,
     EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
 from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE
 from core.collections.parsers import CollectionReferenceParser
@@ -1414,6 +1414,23 @@ class CollectionReference(models.Model):
     def should_resolve_to_repo_version_with_resource_version(self):
         return self.can_resolve_to_repo_version_with_resource_version and self.is_resource_version_repo_resolution_on()
 
+    @property
+    def unapplied_filters(self):
+        """[{property, op}] of the filter entries OCL can't apply, for a reference whose filter applies"""
+        if not self.should_apply_filter() or not self.is_valid_filter():
+            return []
+        return [
+            {'property': filter_def.get('property'), 'op': filter_def.get('op')}
+            for filter_def in self.filter  # pylint: disable=not-an-iterable
+            if self.get_filter_clause_property(filter_def) is False
+        ]
+
+    def to_unresolved_filter(self):
+        return {
+            'url': self.expression, 'namespace': self.namespace, 'type': UNRESOLVED_FILTER_TYPE,
+            'reason': REFERENCE_FILTER_NOT_APPLIED, 'filter': self.unapplied_filters
+        }
+
     def to_unresolved_resource_version(self):
         return {
             'url': self.expression,
@@ -2299,8 +2316,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             _concepts = Concept.objects.none()
             _mappings = Mapping.objects.none()
 
+            unapplied_filters = ref.unapplied_filters
+            if unapplied_filters:
+                unresolved_repo_versions.append(ref.to_unresolved_filter())
             if ref.unapplied_valuesets:  # on an auto-generated expansion too, which reuses saved results
                 ref.unresolved_reason = ref.unapplied_valuesets[0][1]
+            elif unapplied_filters:
+                ref.unresolved_reason = REFERENCE_FILTER_NOT_APPLIED
             if should_reevaluate:
                 # with no system, a reference evaluates against the value sets it names
                 is_valueset_only = use_any_lock and not ref.system and bool(ref.valueset)
@@ -2322,7 +2344,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if should_write_back and ref.id and (ref_system_versions or ref.system or is_valueset_only):
                     ref.concepts.set(_concepts)
                     ref.mappings.set(_mappings)
-                    is_resolved = not ref.unapplied_valuesets and (ref_system_versions or (
+                    is_resolved = not ref.unapplied_valuesets and not unapplied_filters and (ref_system_versions or (
                         is_valueset_only and (_explicit_valueset_versions or _evaluated_valueset_versions)))
                     (resolved_ref_ids if is_resolved else unresolved_ref_ids).append(ref.id)
             else:
@@ -2562,6 +2584,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
     def get_unresolved_entry_keys_of(reference, is_reevaluating):
         """The unresolved entry keys a reference's evaluation decides, whether it resolves them or not"""
         keys = {('reference.valueset', valueset) for valueset in reference.valueset or []}
+        keys.add((UNRESOLVED_FILTER_TYPE, reference.expression))
         if reference.system:
             keys.add(('reference.system', reference.system, reference.version or None))
         if is_reevaluating:

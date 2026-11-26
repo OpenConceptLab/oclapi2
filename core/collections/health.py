@@ -7,7 +7,7 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from django.utils.functional import cached_property
 
-from core.collections.constants import REFERENCE_VALUESET_NOT_EXPANDED
+from core.collections.constants import REFERENCE_VALUESET_NOT_EXPANDED, UNRESOLVED_FILTER_TYPE
 from core.common.constants import HEAD
 from core.common.utils import drop_version
 
@@ -412,8 +412,11 @@ class ExpansionHealth:
         # a value set with no expansion is counted once, as one without expansion
         # one no reference matches any more (its namespace changed) is still unresolved
         add('unresolved_references', len([
-            entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE and
+            entry for entry in unresolved if entry.get('type') not in (
+                SYSTEM_VERSION_PARAMETER_TYPE, UNRESOLVED_FILTER_TYPE) and
             not self.is_counted_as_without_expansion(entry)]))
+        # OCL couldn't evaluate these, so they are counted apart from references that resolved to nothing
+        add('filter_not_applied', len([entry for entry in unresolved if entry.get('type') == UNRESOLVED_FILTER_TYPE]))
         add('value_set_without_expansion', len(
             self.unexpanded_value_set_reference_ids | self.unexpanded_value_set_exclude_ids |
             self.unexpanded_value_set_entries[0]))

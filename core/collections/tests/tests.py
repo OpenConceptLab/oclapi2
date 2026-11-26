@@ -25,7 +25,8 @@ from rest_framework.response import Response
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
     REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS, VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST, \
-    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_ALREADY_EXISTS
+    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_ALREADY_EXISTS, \
+    REFERENCE_FILTER_NOT_APPLIED
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -2304,6 +2305,32 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual([reference.id for reference in added], [exclusion.id])
         self.assertEqual(list(errors), [cascading.expression])
+
+    def test_add_references_records_a_filter_ocl_cant_apply_apart_from_one_that_matched_nothing(self):
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        reference = CollectionReference(
+            system=source.uri, collection=collection, created_by=source.created_by, filter=[
+                {'property': 'concept', 'op': 'is-a', 'value': 'x'},
+                {'property': 'concept_class', 'op': 'regex', 'value': 'D.*'},
+                {'property': 'datatype', 'op': '=', 'value': 'N/A'}])
+        reference.expression = reference.build_expression()
+
+        expansion.add_references([reference])
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(reference.unresolved_reason, REFERENCE_FILTER_NOT_APPLIED)
+        self.assertIn({
+            'url': reference.expression, 'namespace': None, 'type': 'reference.filter',
+            'reason': 'filter_not_applied',
+            'filter': [{'property': 'concept', 'op': 'is-a'}, {'property': 'concept_class', 'op': 'regex'}]
+        }, expansion.unresolved_repo_versions)
+        # a well-specified filter is evaluated: whatever it matches, it isn't one OCL couldn't apply
+        evaluated = CollectionReference(
+            system=source.uri, filter=[{'property': 'datatype', 'op': 'in', 'value': 'N/A,Text'}])
+        self.assertEqual(evaluated.unapplied_filters, [])
 
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()

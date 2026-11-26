@@ -29,7 +29,7 @@ from core.collections.constants import (
     REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
     REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS,
     REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_VALUESET_NOT_FOUND_FMT,
-    REFERENCE_VALUESET_NOT_EXPANDED_FMT)
+    REFERENCE_VALUESET_NOT_EXPANDED_FMT, REFERENCE_FILTER_NOT_APPLIED, REFERENCE_FILTER_NOT_APPLIED_FMT)
 from core.collections.documents import CollectionDocument
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
@@ -606,6 +606,10 @@ class CollectionReferencesView(
                     REFERENCE_VERSION_NOT_HELD_FMT
                 item['message'] = message_format.format(
                     collection.name, item['repo_versions'][0], reference.resource_version)
+            elif reason == REFERENCE_FILTER_NOT_APPLIED:
+                item['repo_versions'] = []
+                item['message'] = REFERENCE_FILTER_NOT_APPLIED_FMT.format(collection.name, ', '.join(
+                    f"property '{entry['property']}' op '{entry['op']}'" for entry in reference.unapplied_filters))
             elif reason in (REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED):
                 item['repo_versions'] = [
                     valueset for valueset, _reason in reference.unapplied_valuesets if _reason == reason
