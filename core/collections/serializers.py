@@ -10,7 +10,7 @@ from rest_framework.serializers import ModelSerializer, Serializer, ValidationEr
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANSION_NONE
-from core.collections.models import Collection, CollectionReference, Expansion
+from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
@@ -237,13 +237,14 @@ class CollectionCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelS
             return instance
 
         original_schema = instance.custom_validation_schema
+        keep_access = 'public_access' not in validated_data or instance.is_same_access(validated_data['public_access'])
         collection = self.prepare_object(validated_data, instance)
         if self._errors:
             return collection
         user = self.context['request'].user
-        # an edit that sends no access keeps the row's current access, not the one read before a concurrent change
-        errors = Collection.persist_changes(
-            collection, user, original_schema, keep_access='public_access' not in validated_data)
+        # an edit that sends no access, or the one it loaded (a form's), keeps the row's current access, not the one
+        # read before a concurrent change
+        errors = Collection.persist_changes(collection, user, original_schema, keep_access=keep_access)
         self._errors.update(errors)
         return collection
 
@@ -676,7 +677,21 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
         )
 
 
-class ExpansionSerializer(ModelSerializer):
+class ExpansionParametersValidationMixin:
+    @staticmethod
+    def validate_parameters(value):
+        """Keys lose their spaces, as they are read; a key no expansion applies or stores is rejected"""
+        if value and not isinstance(value, dict):
+            raise ValidationError('Must be an object of expansion parameters.')
+        value = ExpansionParameters.normalize_keys(value)
+        unsupported = ExpansionParameters.get_unsupported_keys(value)
+        if unsupported:
+            message = f"Not a supported expansion parameter. Use one of: {', '.join(ExpansionParameters.SUPPORTED)}."
+            raise ValidationError({key: [message] for key in unsupported})
+        return value
+
+
+class ExpansionSerializer(ExpansionParametersValidationMixin, ModelSerializer):
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
     parameters = JSONField()
@@ -714,7 +729,7 @@ class ExpansionSerializer(ModelSerializer):
         return summary
 
 
-class ExpansionDetailSerializer(ModelSerializer):
+class ExpansionDetailSerializer(ExpansionParametersValidationMixin, ModelSerializer):
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
     parameters = JSONField()

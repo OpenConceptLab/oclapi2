@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from contextlib import nullcontext
@@ -8,7 +9,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, OperationalError
-from django.db.models import UniqueConstraint, F, QuerySet, Max
+from django.db.models import UniqueConstraint, F, QuerySet, Max, Exists, OuterRef
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -23,6 +24,7 @@ from core.collections.constants import (
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
     VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
     EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
+from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -173,6 +175,15 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     ):
         is_new = not self.id
         dirty_fields = self.get_dirty_fields()
+        # as stored: an instance of another version saved over this row (a FHIR ValueSet update) isn't a switch
+        switches_expansion = self.id and dirty_fields.get('expansion_uri') and (
+            update_fields is None or 'expansion_uri' in update_fields) and Collection.objects.filter(
+            id=self.id).exclude(expansion_uri=self.expansion_uri).exists()
+        if switches_expansion:
+            self.last_child_removal_at = timezone.now()  # another expansion may not list all of this one's members
+            self.__dict__.pop('version_export_path', None)
+            if update_fields is not None:
+                update_fields = [*update_fields, 'last_child_removal_at']
 
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
@@ -181,6 +192,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.resolve_url_registry_entries_later()
         if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
             Expansion.mark_health_not_current_for_repository(self)
+        if self.id and not is_new and 'expansion_uri' in dirty_fields:
+            Expansion.on_default_expansion_change(self, dirty_fields['expansion_uri'])
 
     def post_create_actions(self):
         if self.should_auto_expand:
@@ -314,8 +327,13 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
+        fields = ['updated_by', 'updated_at']
+        if added_references:  # an added member can be older than the others, or than a removal, so it marks the key
+            self.last_child_removal_at = timezone.now()
+            self.__dict__.pop('version_export_path', None)
+            fields.append('last_child_removal_at')
         # only who changed it: its other values were saved by the caller, and a concurrent write's stay (its access)
-        self.save(update_fields=['updated_by', 'updated_at'])
+        self.save(update_fields=fields)
         self.update_children_counts()
         return added_references, errors
 
@@ -323,7 +341,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         head = self.head
         if head:
             for reference in head.references.order_by('id'):
-                new_reference = reference.clone(last_resolved_at=timezone.now(), collection=self)
+                # copied, not resolved here: a reference HEAD never resolved stays unresolved
+                new_reference = reference.clone(last_resolved_at=reference.last_resolved_at, collection=self)
                 new_reference.save()
                 new_reference.concepts.set(reference.concepts.all())
                 new_reference.mappings.set(reference.mappings.all())
@@ -360,7 +379,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 expansion = self.expansion if self.expansion_uri else None
                 if expansion:
                     expansion.delete_expressions(expressions)
-                self.references.all().delete()
+                if self.references.all().delete()[0]:
+                    self.mark_own_child_removal()
                 if expansion:
                     expansion.drop_unresolved_entries_of_deleted_references()
                     expansion.mark_health_out_of_date()
@@ -375,7 +395,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             expansion = self.expansion if self.expansion_uri else None
             if expansion:
                 expansion.delete_references(references)
-            references.delete()
+            if references.delete()[0]:  # an export lists references too, even one that has no members
+                self.mark_own_child_removal()
             if expansion:
                 expansion.drop_unresolved_entries_of_deleted_references()
                 expansion.mark_health_out_of_date()
@@ -790,11 +811,11 @@ class CollectionReference(models.Model):
 
     @property
     def can_compute_against_other_system_version(self):
-        return (not self.system or not self.version) and not self.resource_version
+        return (not self.system or not self.names_repo_version) and not self.resource_version
 
     @property
     def is_versionless_expression(self):
-        return not self.version and not self.resource_version
+        return not self.names_repo_version and not self.resource_version
 
     def can_compute_against_system_version(self, system_version):
         result = False
@@ -1283,9 +1304,11 @@ class CollectionReference(models.Model):
 
     @property
     def names_repo_version(self):
-        return bool(
-            self.version or (self.system and (
-                is_versioned_uri(self.system) or canonical_url_to_url_and_version(self.system)[1])))
+        """As the resolver reads the system: a version field, a version after '|', or a relative URL's fifth segment,
+        query dropped (/orgs|users/<owner>/<repo type>/<repo>/<version>/), but HEAD, which no repository URL has"""
+        url, url_version = split_canonical(self.system or '')
+        path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
+        return bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
 
     @property
     def can_resolve_to_repo_version_with_resource_version(self):
@@ -1592,12 +1615,7 @@ class CollectionReference(models.Model):
         """URLs of the repository versions its expansion evaluated it in that `user` can view,
         else of the repositories it names. A version its system names that `user` can't view counts as missing."""
         expansion_cache = {self.collection_id: expansion}
-        # read as the resolver reads the system: a version after '|', or the fifth segment of a relative URL's path
-        # without its query string (/orgs|users/<owner>/<repo type>/<repo>/<version>/)
-        url, url_version = split_canonical(self.system or '')
-        path = [] if is_canonical_uri(url) else to_parent_uri(url.split('?')[0]).strip('/').split('/')
-        names_version = bool(self.version or url_version) or (len(path) > 4 and path[4] not in ('', HEAD))
-        named_version = self._get_expression_system_version(system_version_cache) if names_version else None
+        named_version = self._get_expression_system_version(system_version_cache) if self.names_repo_version else None
         system_versions = [] if named_version and not named_version.has_view_access(user) else \
             self._get_resolved_system_versions(system_version_cache, expansion_cache)
         versions = [*system_versions, *self._get_resolved_valueset_versions(expansion_cache=expansion_cache)]
@@ -1654,6 +1672,7 @@ def default_expansion_parameters():
 class Expansion(VersionCompareMixin, BaseResourceModel):
     # expansions are rebuilt in place and are too dynamic to be worth persisting a changelog for
     PERSIST_CHANGELOG = False
+    SYSTEM_VERSION_UNRESOLVED_TYPE = SYSTEM_VERSION_PARAMETER_TYPE
     REPO_VERSION_RELATIONS = (
         'explicit_source_versions', 'evaluated_source_versions',
         'explicit_collection_versions', 'evaluated_collection_versions'
@@ -1994,6 +2013,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         evaluated_valueset_versions = []
         evaluated_system_versions = []
         unresolved_repo_versions = []
+        # what this add evaluated: earlier entries for these are replaced by what it finds now
+        evaluated_entry_keys = set()
         _system_version_cache = {}
 
         if not is_adding_all:
@@ -2051,16 +2072,17 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         _holding_versions_cache = {}
 
         include_system_versions = []
-        system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
+        system_versions = ExpansionParameters.get_system_version(self.parameters)
         if should_reevaluate and system_versions:
             namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+            evaluated_entry_keys.add((self.SYSTEM_VERSION_UNRESOLVED_TYPE,))
             for _system, version in self.resolve_system_version_entries(system_versions, namespace):
                 # unresolved is None here too, as a reference resolving the same URL itself would get
                 _system_version_cache[f"{namespace or 'NONE'}-{_system}-NONE"] = version if version.id else None
                 if version.id:
                     include_system_versions.append(version)
                 else:
-                    unresolved_repo_versions.append({'url': _system, 'type': 'expansion.parameters.system-version'})
+                    unresolved_repo_versions.append({'url': _system, 'type': self.SYSTEM_VERSION_UNRESOLVED_TYPE})
 
         def get_ref_system_version(ref):
             if ref.system:
@@ -2084,6 +2106,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             nonlocal evaluated_system_versions
             nonlocal evaluated_valueset_versions
             nonlocal unresolved_repo_versions
+            evaluated_entry_keys.update(self.get_unresolved_entry_keys_of(ref, should_reevaluate))
             if valueset_locks is not None:
                 ref.set_valueset_locks(valueset_locks)
                 valueset_locked_refs.append(ref)
@@ -2212,10 +2235,17 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         self.explicit_source_versions.add(*compact(explicit_system_versions))
         self.evaluated_collection_versions.add(*compact(evaluated_valueset_versions))
         self.evaluated_source_versions.add(*compact(evaluated_system_versions))
-        if unresolved_repo_versions:
-            self.unresolved_repo_versions = unresolved_repo_versions
-            # only what this add found: a whole-row save from a copy loaded during a build would restore is_processing
+        # merged into the stored row, not this copy, so what a delete dropped meanwhile stays dropped
+        stored_unresolved_repo_versions = list(Expansion.objects.filter(id=self.id).values_list(
+            'unresolved_repo_versions', flat=True).first() or [])
+        self.unresolved_repo_versions = self.merge_unresolved_entries(
+            [] if force_reevaluate and is_adding_all else stored_unresolved_repo_versions,
+            unresolved_repo_versions, evaluated_entry_keys)
+        if self.unresolved_repo_versions != stored_unresolved_repo_versions:
+            # only this field: a whole-row save from a copy loaded during a build would restore is_processing
             self.save(update_fields=['unresolved_repo_versions', 'updated_at'])
+            # health counts these entries, and an add that accepted no reference doesn't mark it otherwise
+            Expansion.mark_health_not_current([self.id])
         self.dedupe_resources()
         if force_reevaluate and is_adding_all:
             # rebuilt without the deleted locks, so it no longer stands on them; cleared only once that's done
@@ -2284,7 +2314,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         """This expansion's system-version, plus each source it locked that the parameter doesn't name yet.
         Entries resolve in the owner's namespace, as the expansion built from them will."""
         namespace = self.get_system_version_namespace(self.collection_version.parent_url)
-        value = str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '')
+        value = str(ExpansionParameters.get_system_version(self.parameters) or '')
         repos = self.get_system_version_entry_repos(value, namespace)
         entries = [entry for entry, _, _ in repos]
         named = {repo_url for _, repo_url, _ in repos}
@@ -2373,6 +2403,54 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 self.full_index_resources(
                     list(previous_concept_ids - concept_ids), list(previous_mapping_ids - mapping_ids))
 
+    @classmethod
+    def get_unresolved_entry_key(cls, entry):
+        entry_type = entry.get('type')
+        if entry_type == cls.SYSTEM_VERSION_UNRESOLVED_TYPE:
+            return (entry_type,)
+        if entry_type == 'reference.system':
+            return entry_type, entry.get('url'), entry.get('version') or None
+        return entry_type, entry.get('url')
+
+    @staticmethod
+    def get_unresolved_entry_keys_of(reference, is_reevaluating):
+        """The unresolved entry keys a reference's evaluation decides, whether it resolves them or not"""
+        keys = {('reference.valueset', valueset) for valueset in reference.valueset or []}
+        if reference.system:
+            keys.add(('reference.system', reference.system, reference.version or None))
+        if is_reevaluating:
+            keys.add((UNRESOLVED_RESOURCE_VERSION_TYPE, reference.expression))
+        return keys
+
+    @classmethod
+    def merge_unresolved_entries(cls, existing, found, evaluated_keys):
+        """Earlier entries in place, each this add evaluated replaced by what it found for it now, then the new
+        ones, without duplicates"""
+        found_by_key = {}
+        for entry in found:
+            found_by_key.setdefault(cls.get_unresolved_entry_key(entry), []).append(entry)
+        merged, placed = [], set()
+        for entry in existing:
+            key = cls.get_unresolved_entry_key(entry)
+            if key not in evaluated_keys:
+                merged.append(entry)
+            elif key not in placed:
+                placed.add(key)
+                merged += found_by_key.get(key, [])
+        for key, entries in found_by_key.items():
+            if key not in placed:
+                merged += entries
+        unique, seen = [], set()
+        for entry in merged:
+            # a version of None and of '' name the same lookup, as the entry key treats them
+            identity = json.dumps(
+                {**entry, 'version': entry.get('version') or None} if 'version' in entry else entry,
+                sort_keys=True, default=str)
+            if identity not in seen:
+                seen.add(identity)
+                unique.append(entry)
+        return unique
+
     def drop_unresolved_entries_of_deleted_references(self):
         """A deleted reference's unresolved entries go with it, so deleting it clears what it left unresolved. The
         expansion parameters' own entries stay"""
@@ -2418,6 +2496,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return self.collection_version.uri + f'expansions/{self.mnemonic}/'
 
     def clean(self):
+        self.parameters = ExpansionParameters.normalize_keys(self.parameters)
         if not self.parameters or self.parameters == default_expansion_parameters():
             self.parameters = {}
         if not self.unresolved_repo_versions:
@@ -2543,11 +2622,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             self.unresolved_repo_versions or [])
 
     def get_resolved_repo_version_diff_with_latest_updates(self):
+        """Each recorded repo version a rebuild would move, with what its repository resolves to now"""
         diff = {}
+        kept_ids = self.get_repo_version_ids_a_rebuild_keeps()
 
         def update_diffs(rel):
             for version in get(self, rel).filter():
-                if version.url in diff:
+                if version.url in diff or version.id in kept_ids[rel]:
                     continue
                 repo_url = drop_version(version.url)
                 resolved, _ = ConceptContainerModel.resolve_reference_expression(repo_url)
@@ -2558,6 +2639,79 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             update_diffs(relation)
 
         return diff
+
+    def get_repo_version_ids_a_rebuild_keeps(self):  # pylint: disable=too-many-locals,too-many-branches
+        """By relation, the recorded versions a rebuild records again: those references or system-version name, the
+        release a concept or mapping version picks, and a lock-built expansion's value set locks"""
+        from core.sources.models import Source
+        default_namespace = self.get_system_version_namespace(self.collection_version.parent_url)
+        system_versions = [
+            version for _, version in self.resolve_system_version_entries(
+                get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM), default_namespace) if version.id
+        ]
+        kept = {
+            'explicit_source_versions': set(),
+            'explicit_collection_versions': set(),
+            'evaluated_source_versions': {version.id for version in system_versions},
+            'evaluated_collection_versions': set(
+                self.evaluated_collection_versions.filter(is_active=True).values_list('id', flat=True)
+            ) if self.built_with == VERSION_EXPANSION_LOCK else set(),
+        }
+        resolved = {}
+
+        def resolve(klass, url, namespace, version=None):
+            key = (klass, url, namespace, version)
+            if key not in resolved:
+                repo_version = klass.resolve_reference_expression(url, namespace, version)[0]
+                resolved[key] = repo_version if repo_version.id else None
+            return resolved[key]
+
+        evaluated_versions, resource_versioned = [*system_versions], {}
+        references = self.collection_version.references.filter(
+            models.Q(system__isnull=False) | models.Q(valueset__isnull=False))
+        no_resource_version = models.Q(resource_version__isnull=True) | models.Q(resource_version='')
+        resolution_on = CollectionReference.is_resource_version_repo_resolution_on()
+        # each distinct way of naming repositories once. Concept or mapping version references are loaded only for
+        # the release pick; without it they keep just what their system or value sets name, as any reference does
+        named = (references.filter(no_resource_version) if resolution_on else references).values_list(
+            'system', 'version', 'namespace', 'valueset').order_by().distinct()
+        resource_version_references = references.exclude(no_resource_version).only(
+            'system', 'version', 'namespace', 'valueset', 'code', 'resource_version', 'reference_type', 'expression'
+        ) if resolution_on else []
+        for reference in [
+                *(CollectionReference(system=system, version=version, namespace=namespace, valueset=valueset)
+                  for system, version, namespace, valueset in named),
+                *resource_version_references]:
+            namespace = reference.namespace or default_namespace
+            for valueset in reference.valueset or []:
+                version = resolve(Collection, valueset, namespace) \
+                    if valueset and CollectionReference.is_explicit_valueset(valueset) else None
+                if version:  # explicit or evaluated, as the toggle classified it, a named version stays
+                    kept['explicit_collection_versions'].add(version.id)
+                    kept['evaluated_collection_versions'].add(version.id)
+            if not reference.system:
+                continue
+            if reference.can_resolve_to_repo_version_with_resource_version:
+                latest = resolve(Source, reference.system, namespace)
+                if latest:
+                    resource_versioned.setdefault(latest.id, (latest, []))[1].append(reference)
+                continue
+            version = resolve(Source, reference.system, namespace, reference.version or None)
+            if not version:
+                continue
+            if not reference.is_versionless_expression:
+                kept['explicit_source_versions'].add(version.id)
+                continue
+            evaluated_versions.append(version)
+        if resolution_on:
+            for latest, references in resource_versioned.values():
+                holders = CollectionReference.get_repo_versions_holding_resource_versions(references, latest)
+                for reference in references:
+                    picked = CollectionReference.pick_repo_version_with_resource_version(
+                        holders.get(reference.resource_version_key, []), evaluated_versions)
+                    if picked:
+                        kept['explicit_source_versions'].add(picked.id)
+        return kept
 
     def dry_run_rebuild(self):
         """What a rebuild would change. Rolled back, so nothing is saved or indexed"""
@@ -2657,7 +2811,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return None
         from core.collections.health import ExpansionHealth
         expansions = Expansion.objects.filter(id=self.id)
-        if not self.is_default:
+        # read now, not from the version a build loaded at its start: the default may have changed since
+        if not Collection.objects.filter(id=self.collection_version_id, expansion_uri=self.uri).exists():
             expansions.update(health=None, health_is_current=None)
             self.health = None
             return None
@@ -2673,7 +2828,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return None
         # the store bumps it too, so an older run that ends after a newer one (a rebuild's) can't overwrite it. Never
         # during a build, which may have cleared the members: the build computes its own once it ends
-        if not expansions.filter(health_revision=revision, is_processing=False).update(
+        is_default = Collection.objects.filter(id=OuterRef('collection_version_id'), expansion_uri=OuterRef('uri'))
+        # an Exists, not a join, keeps it a one-table update that re-checks the revision of the latest committed row
+        if not expansions.filter(Exists(is_default), health_revision=revision, is_processing=False).update(
                 health=health, health_is_current=True, health_revision=F('health_revision') + 1):
             # marked, or stored by a newer run, while it computed: a fresh run reads the change
             if not expansions.filter(is_processing=True).exists():
@@ -2771,6 +2928,23 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return expansion_ids
 
     @classmethod
+    def on_default_expansion_change(cls, collection_version, previous_uri):
+        """Only the default keeps health: the one that stops being it drops its stored health, and the new default
+        is recomputed now rather than by the nightly recheck"""
+        expansions = cls.objects.filter(collection_version_id=collection_version.id)
+        if previous_uri and previous_uri != collection_version.expansion_uri:
+            # bumped, so a run that started while it was the default can't store its result
+            expansions.filter(uri=previous_uri).update(
+                health=None, health_is_current=None, health_revision=F('health_revision') + 1)
+        default = expansions.filter(uri=collection_version.expansion_uri).only('id', 'is_processing').first() \
+            if collection_version.expansion_uri else None
+        # out of date, not None: its build computes health once it ends. A build that ended meanwhile is recomputed
+        marked = default and default.is_processing and cls.is_health_on() and expansions.filter(
+            id=default.id, is_processing=True).update(health_is_current=False, health_revision=F('health_revision') + 1)
+        if default and not marked:
+            default.mark_health_out_of_date()
+
+    @classmethod
     def mark_health_not_current_for_value_set(cls, collection_version):
         """Expansions whose value-set references were judged against this collection version's expansion. Read from
         the two through tables by collection id, which their index answers, rather than a join of the expansions"""
@@ -2846,6 +3020,8 @@ class ExpansionParameters:
     EXCLUDE_SYSTEM = 'exclude-system'
     INCLUDE_SYSTEM = 'system-version'
     DATE = 'date'
+    # the keys an expansion stores by default; any other key is rejected on create
+    SUPPORTED = tuple(default_expansion_parameters())
 
     def __init__(self, parameters, is_concept_queryset=True):
         self.parameters = parameters or {}
@@ -2854,9 +3030,32 @@ class ExpansionParameters:
         self.is_concept_queryset = is_concept_queryset
         self.to_parameter_classes()
 
+    @staticmethod
+    def normalize_keys(parameters):
+        """The parameters with spaces dropped from their keys, as they are read. A key written without spaces wins
+        over the same key written with them."""
+        if not isinstance(parameters, dict):
+            return parameters
+        normalized = {}
+        for key, value in parameters.items():
+            _key = key.replace(' ', '') if isinstance(key, str) else key
+            if _key not in normalized or _key == key:
+                normalized[_key] = value
+        return normalized
+
+    @classmethod
+    def get_unsupported_keys(cls, parameters):
+        if not isinstance(parameters, dict):
+            return []
+        return [key for key in parameters if key not in cls.SUPPORTED]
+
+    @classmethod
+    def get_system_version(cls, parameters):
+        """system-version, read as the other keys are: a stored key with spaces (system - version) counts"""
+        return get(cls.normalize_keys(parameters or {}), cls.INCLUDE_SYSTEM)
+
     def to_parameter_classes(self):
-        for parameter, value in self.parameters.items():
-            parameter = parameter.replace(' ', '')
+        for parameter, value in self.normalize_keys(self.parameters).items():
             if parameter == self.ACTIVE:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
             elif parameter == self.TEXT_FILTER:

@@ -13,7 +13,7 @@ from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.constants import REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
-from core.collections.models import CollectionReference, Collection
+from core.collections.models import CollectionReference, Collection, default_expansion_parameters
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
@@ -4532,7 +4532,7 @@ class CollectionReferenceViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
         response = self.client.get(
-            self.collection.url + 'references/123/')
+            self.collection.url + 'references/' + str(self.reference.id + 1) + '/')  # not one of its references
 
         self.assertEqual(response.status_code, 404)
 
@@ -4872,6 +4872,59 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         self.assertEqual(list(manual.concepts.all()), [latest_concept])
         self.assertEqual(list(default.evaluated_collection_versions.all()), [default_lock])
 
+    def test_post_unsupported_parameter_400(self):
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {'activeOnly': True, 'systemVersion': 'https://a.org|v1', 'foo': 1}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(sorted(response.data['parameters']), ['foo', 'systemVersion'])
+        self.assertIn('Not a supported expansion parameter.', response.data['parameters']['foo'][0])
+        self.assertEqual(self.collection.expansions.count(), 0)
+
+    def test_post_parameters_that_arent_an_object_400(self):
+        for parameters in (['activeOnly'], 'activeOnly', 1):
+            with self.subTest(parameters=parameters):
+                response = self.client.post(
+                    self.collection.url + 'HEAD/expansions/',
+                    {'mnemonic': 'e1', 'parameters': parameters},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, {'parameters': ['Must be an object of expansion parameters.']})
+        self.assertEqual(self.collection.expansions.count(), 0)
+
+    def test_post_with_every_default_parameter_201(self):
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {**default_expansion_parameters(), 'activeOnly': True}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.collection.expansions.get(mnemonic='e1').parameters['activeOnly'], True)
+
+    def test_post_drops_spaces_from_parameter_keys(self):
+        source = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
+
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {'system - version': v1.uri, 'active Only': True}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            self.collection.expansions.get(mnemonic='e1').parameters, {'system-version': v1.uri, 'activeOnly': True})
+
     def test_post_system_version_with_two_versions_of_one_source_400(self):
         source = OrganizationSourceFactory()
         v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
@@ -5073,7 +5126,7 @@ class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
         source_v2 = OrganizationSourceFactory(
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
-        self.expansion.explicit_source_versions.add(source_v1)
+        self.expansion.evaluated_source_versions.add(source_v1)
 
         response = self.client.get(
             self.expansion.url + 'resolved-repo-updates/',

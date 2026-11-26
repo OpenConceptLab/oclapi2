@@ -161,7 +161,7 @@ class ExpansionVersionLists:
 
     @cached_property
     def parameter_system_versions(self):
-        value = (self.expansion.parameters or {}).get(ExpansionParameters.INCLUDE_SYSTEM)
+        value = ExpansionParameters.get_system_version(self.expansion.parameters)
         if not value:
             return []
         namespace = Expansion.get_system_version_namespace(self.expansion.collection_version.parent_url)
@@ -281,7 +281,7 @@ class ExpansionVersionLists:
 
     @staticmethod
     def is_explicit(reference):
-        return not reference.is_versionless_expression or reference.names_repo_version
+        return not reference.is_versionless_expression
 
     def add_resource_versioned_system_version(self, reference, version):
         repo_uri = drop_version(version.uri)
