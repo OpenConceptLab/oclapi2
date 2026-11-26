@@ -1201,6 +1201,8 @@ class CollectionReference(models.Model):
         """The property a filter entry matches on; None for a search modifier (exact_match, verbose and the like) or
         a parameter set aside; False for one that can't be applied: a property not allowed, or an op not allowed"""
         prop = filter_def.get('property')
+        if filter_def.get('op') not in self.ALLOWED_FILTER_OPS:
+            return False
         if prop in self.NON_FILTER_SEARCH_PARAMS:
             return None
         is_modifier = bool(prop) and (
@@ -1211,8 +1213,6 @@ class CollectionReference(models.Model):
                 prop = to_snake_case(prop)
             else:
                 return None if is_modifier else False
-        if filter_def.get('op') not in self.ALLOWED_FILTER_OPS:
-            return False
         return prop
 
     def get_filter_errors(self):

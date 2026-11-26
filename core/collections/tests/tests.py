@@ -1854,6 +1854,8 @@ class CollectionReferenceTest(OCLTestCase):
                 ({'property': 'q', 'op': 'in'}, 'q'),
                 ({'property': 'exact_match', 'op': '='}, None),
                 ({'property': 'verbose', 'op': '='}, None),
+                ({'property': 'verbose', 'op': 'regex'}, False),
+                ({'property': 'exact_match', 'op': 'is-a'}, False),
                 ({'property': 'page', 'op': '='}, None),
                 ({'property': 'limit', 'op': 'in'}, None),
                 ({'property': 'nonsense_prop', 'op': '='}, False),
