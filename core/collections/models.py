@@ -2742,6 +2742,18 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return [repo_version]
         return self.get_versions_of_repo(self.recorded_evaluated_collection_versions, repo_version)
 
+    def get_unresolved_repo_versions_for(self, user):
+        """The unresolved entries as `user` may read them: why a value set couldn't be applied only when they can
+        view it, else it answers as one not found"""
+        entries = []
+        for entry in self.unresolved_repo_versions or []:
+            if entry.get('reason') and entry.get('type') == 'reference.valueset':
+                version, _ = Collection.resolve_reference_expression(entry.get('url'), entry.get('namespace'))
+                if not version.id or not version.has_view_access(user):
+                    entry = {key: value for key, value in entry.items() if key != 'reason'}
+            entries.append(entry)
+        return entries
+
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
             self.unresolved_repo_versions or [])

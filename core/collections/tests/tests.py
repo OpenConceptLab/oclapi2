@@ -2227,6 +2227,27 @@ class CollectionReferenceTest(OCLTestCase):
             f'{unexpanded.uri} has no default expansion']})
         self.assertEqual(collection.references.count(), 0)
 
+    def test_get_unresolved_repo_versions_for_shows_the_reason_only_to_those_who_can_view_the_valueset(self):
+        private = OrganizationCollectionFactory(public_access=ACCESS_TYPE_NONE)
+        public = OrganizationCollectionFactory()
+        member = UserProfileFactory()
+        private.organization.members.add(member)
+        expansion = ExpansionFactory(collection_version=OrganizationCollectionFactory(), unresolved_repo_versions=[
+            {'url': private.uri, 'namespace': None, 'type': 'reference.valueset', 'reason': 'valueset_not_expanded'},
+            {'url': public.uri, 'namespace': None, 'type': 'reference.valueset', 'reason': 'valueset_not_expanded'},
+            {'url': '/orgs/nobody/collections/none/', 'namespace': None, 'type': 'reference.valueset'},
+        ])
+
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(member)],
+            ['valueset_not_expanded', 'valueset_not_expanded', None])
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(UserProfileFactory())],
+            [None, 'valueset_not_expanded', None])
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)],
+            [None, 'valueset_not_expanded', None])
+
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)

@@ -223,7 +223,7 @@ def expand(parameters, resolver, instance_id=None):
         lambda: Expander(parameters, inputs, resolver, instance_id).answer(), EXPANSION_TOO_COSTLY)
 
 
-def stored_expansion(value_set):
+def stored_expansion(value_set, user=None):
     """The value set version's default stored expansion, when it is one that can be served; else the 422 why not."""
     name = f'{value_set.canonical_url or value_set.uri}|{value_set.version}'
     expansion = Expansion.objects.filter(uri=value_set.expansion_uri).only(
@@ -236,7 +236,7 @@ def stored_expansion(value_set):
     if expansion.is_processing:
         raise outcomes.ProcessingError(f'The expansion of the value set {name} is being computed: try again shortly.')
     if expansion.unresolved_repo_versions:
-        raise unresolved(expansion.unresolved_repo_versions[0], value_set)
+        raise unresolved(expansion.get_unresolved_repo_versions_for(user)[0], value_set)
     return expansion
 
 
@@ -279,7 +279,7 @@ class Expander:
     def __init__(self, parameters, inputs, resolver, instance_id):
         self.inputs = inputs
         self.value_set = value_set_version(parameters, resolver, instance_id)
-        self.expansion = stored_expansion(self.value_set)
+        self.expansion = stored_expansion(self.value_set, resolver.user)
         self.resolver = resolver
 
     def members(self):

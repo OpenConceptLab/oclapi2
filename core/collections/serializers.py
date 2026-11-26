@@ -726,6 +726,7 @@ class ExpansionDetailSerializer(ModelSerializer):
     evaluated_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
     evaluated_source_versions = SourceVersionListSerializer(many=True, read_only=True)
     collection_version = CharField(read_only=True, source='collection_version_name')
+    unresolved_repo_versions = SerializerMethodField()
 
     class Meta:
         model = Expansion
@@ -752,6 +753,9 @@ class ExpansionDetailSerializer(ModelSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+    def get_unresolved_repo_versions(self, obj):
+        return obj.get_unresolved_repo_versions_for(get(self.context, 'request.user'))
 
     def get_summary(self, obj):
         summary = None
