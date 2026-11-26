@@ -297,7 +297,7 @@ class ExpansionHealthTest(OCLTestCase):
         self.assertEqual(self.reason_codes(health), {'value_set_without_expansion': 1})
         # an entry is stored as the version its URL resolves to
         self.assertEqual(health['reasons'][0]['value_sets'], [{
-            'url': unexpanded.uri, 'namespace': None, 'version_url': unexpanded.uri,
+            'url': unexpanded.uri, 'namespace': None, 'version_urls': [unexpanded.uri],
             'reference_ids': [reference.id], 'entries': 1}])
 
         # recorded for the URL in another namespace, it matches no reference: still an unresolved one
@@ -475,7 +475,7 @@ class ExpansionHealthTest(OCLTestCase):
         self.assertEqual(reason['count'], 1)
         # which value set it counts, so each reader is shown only those they can view
         self.assertEqual(reason['value_sets'], [{
-            'url': other.uri, 'namespace': None, 'version_url': other_release.uri, 'reference_ids': [reference.id],
+            'url': other.uri, 'namespace': None, 'version_urls': [other_release.uri], 'reference_ids': [reference.id],
             'entries': 0}])
 
     def test_a_value_set_named_by_two_references_is_stored_once_with_both(self):
@@ -1458,7 +1458,7 @@ class ExpansionHealthVisibilityTest(OCLAPITestCase):
         reason = next(
             reason for reason in self.expansion.health['reasons']
             if reason['code'] == 'value_set_without_expansion')
-        self.assertEqual(reason['value_sets'][0]['version_url'], self.private_release.uri)
+        self.assertEqual(reason['value_sets'][0]['version_urls'], [self.private_release.uri])
 
     def test_expansion_detail_and_list_count_only_value_sets_the_reader_can_view(self):
         for reader, can_view in self.readers():
@@ -1571,7 +1571,7 @@ class ExpansionHealthVisibilityTest(OCLAPITestCase):
             for row in (expansion, default):
                 Expansion.objects.filter(id=row.id).update(health={**self.expansion.health, 'reasons': [{
                     'code': 'value_set_without_expansion', 'count': 1, 'value_sets': [{
-                        'url': other.versioned_object_url, 'namespace': None, 'version_url': other.uri,
+                        'url': other.versioned_object_url, 'namespace': None, 'version_urls': [other.uri],
                         'reference_ids': [1], 'entries': 0}]}]})
 
         self.assertGreaterEqual(one_expansion, 3)
@@ -1597,7 +1597,32 @@ class ExpansionHealthVisibilityTest(OCLAPITestCase):
                     self.assertEqual(codes, {'unresolved_references': 1})
                     self.assertNotIn('reason', data['unresolved_repo_versions'][0])
 
+    def test_an_entry_is_shown_only_to_a_reader_who_can_view_every_version_the_build_recorded_for_it(self):
+        value_set = OrganizationCollectionFactory(organization=self.private_org)
+        viewable = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=self.private_org, version='v1', released=True)
+        hidden = OrganizationCollectionFactory(
+            mnemonic=value_set.mnemonic, organization=self.private_org, version='v2', released=True,
+            public_access=ACCESS_TYPE_NONE)
+        self.expansion.evaluated_collection_versions.add(viewable, hidden)
+        reference = CollectionReference(expression=value_set.uri, collection=self.collection, valueset=[value_set.uri])
+        reference.save()
+        Expansion.objects.filter(id=self.expansion.id).update(unresolved_repo_versions=[{
+            'url': value_set.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset',
+            'reason': 'valueset_not_expanded'}])
+        health = self.store_health()
+        stored = next(
+            item for reason in health['reasons'] if reason['code'] == 'value_set_without_expansion'
+            for item in reason['value_sets'] if item['url'] == value_set.uri)
+        self.assertEqual(stored['version_urls'], sorted([viewable.uri, hidden.uri]))
+
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                data = self.get(self.expansion.uri, reader)
+                self.assertEqual(
+                    self.reason_count(data['health'], 'unresolved_references'), 0 if can_view else 1)
+                self.assertEqual('reason' in data['unresolved_repo_versions'][0], can_view)
+
     @staticmethod
-    def reason_count(health):
-        return next((
-            reason['count'] for reason in health['reasons'] if reason['code'] == 'value_set_without_expansion'), 0)
+    def reason_count(health, code='value_set_without_expansion'):
+        return next((reason['count'] for reason in health['reasons'] if reason['code'] == code), 0)

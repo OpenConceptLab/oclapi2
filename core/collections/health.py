@@ -308,40 +308,45 @@ class ExpansionHealth:
         once for every reader, so each is shown only the value sets they can view"""
         value_sets = {}
 
-        def add(url, namespace, version, reference_id):
-            key = version.uri if version else (url, namespace)
+        def add(url, namespace, versions, reference_id):
+            key = self.value_set_key(url, namespace, versions)
             value_set = value_sets.setdefault(key, {
-                'url': version.versioned_object_url if version else url, 'namespace': None if version else namespace,
-                'version_url': version.uri if version else None, 'reference_ids': set(), 'entries': 0})
+                'url': versions[0].versioned_object_url if versions else url,
+                'namespace': None if versions else namespace,
+                'version_urls': sorted(version.uri for version in versions), 'reference_ids': set(), 'entries': 0})
             value_set['reference_ids'].add(reference_id)
 
         for reference_id in self.unexpanded_value_set_reference_ids:
             for version in self.resolved_versions[reference_id]:
-                add(None, None, version, reference_id)
+                add(None, None, [version], reference_id)
         for reference_id, versions in self.unexpanded_value_set_excludes.items():
             for version in versions:
-                add(None, None, version, reference_id)
+                add(None, None, [version], reference_id)
         recorded, entry_versions = None, {}
         for reference_id, keys in self.unexpanded_value_set_entries.items():
             for url, namespace in keys:
                 if (url, namespace) not in entry_versions:
                     if recorded is None:
                         recorded = self.expansion.get_recorded_collection_versions()
-                    entry_versions[(url, namespace)] = self.expansion.get_valueset_entry_version(
+                    entry_versions[(url, namespace)] = self.expansion.get_valueset_entry_versions(
                         url, namespace, recorded)
                 add(url, namespace, entry_versions[(url, namespace)], reference_id)
         self.add_unresolved_entries(value_sets, entry_versions)
         return sorted((
             {**value_set, 'reference_ids': sorted(value_set['reference_ids'])} for value_set in value_sets.values()
-        ), key=lambda value_set: (value_set['url'] or '', value_set['version_url'] or ''))
+        ), key=lambda value_set: (value_set['url'] or '', value_set['version_urls']))
+
+    @staticmethod
+    def value_set_key(url, namespace, versions):
+        # an entry names every version the build recorded for it: a reader is shown it only if they can view all
+        return tuple(sorted(version.uri for version in versions)) or (url, namespace)
 
     def add_unresolved_entries(self, value_sets, entry_versions):
         """How many unresolved entries each value set stands for: one a reader can't view counts them as unresolved"""
         for entry in self.expansion.unresolved_repo_versions or []:
             if self.is_counted_as_without_expansion(entry):
-                key = (entry.get('url'), entry.get('namespace') or None)
-                version = entry_versions[key]
-                value_sets[version.uri if version else key]['entries'] += 1
+                url, namespace = entry.get('url'), entry.get('namespace') or None
+                value_sets[self.value_set_key(url, namespace, entry_versions[(url, namespace)])]['entries'] += 1
 
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member (None: nothing to judge it against), and the keys of its
@@ -530,9 +535,15 @@ def count_value_set_references(value_sets):
 def get_health_value_set_urls(health):
     """URLs of the value set versions a stored health names, for ValueSetViewAccess to read at once"""
     return [
-        value_set.get('version_url') for reason in (health or {}).get('reasons') or []
+        url for reason in (health or {}).get('reasons') or []
         if reason.get('code') == VALUE_SET_WITHOUT_EXPANSION for value_set in reason.get('value_sets') or []
-        if value_set.get('version_url')]
+        for url in value_set.get('version_urls') or []]
+
+
+def can_view_value_set(value_set, access):
+    """Only if the reader can view every version it names, as the unresolved entry's reason is shown"""
+    urls = value_set.get('version_urls') or []
+    return bool(urls) and all(access.can_view_url(url) for url in urls)
 
 
 def get_health_for(health, access):
@@ -551,7 +562,7 @@ def get_health_for(health, access):
         position = len(kept)
         value_sets = []
         for value_set in reason.get('value_sets') or []:
-            if access.can_view_url(value_set.get('version_url')):
+            if can_view_value_set(value_set, access):
                 value_sets.append(value_set)
             else:
                 hidden_entries += value_set.get('entries') or 0

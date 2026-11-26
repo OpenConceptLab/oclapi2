@@ -2794,14 +2794,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         recorded = None
         for entry in self.unresolved_repo_versions or []:
             if entry.get('reason') and entry.get('type') == 'reference.valueset':
-                version, _ = Collection.resolve_reference_expression(entry.get('url'), entry.get('namespace'))
-                versions = [version] if version.id else []
-                if version.id:  # the versions the build recorded, if any, not the one the URL resolves to now
-                    if recorded is None:
-                        recorded = [*self.explicit_collection_versions.all(), *self.evaluated_collection_versions.all()]
-                    versions = [
-                        _version for _version in recorded if drop_version(_version.uri) == drop_version(version.uri)
-                    ] or versions
+                if recorded is None:
+                    recorded = self.get_recorded_collection_versions()
+                versions = self.get_valueset_entry_versions(entry.get('url'), entry.get('namespace'), recorded)
                 if not versions or not all(_version.has_view_access(user) for _version in versions):
                     entry = {key: value for key, value in entry.items() if key != 'reason'}
             entries.append(entry)
@@ -2811,14 +2806,14 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return [*self.explicit_collection_versions.all(), *self.evaluated_collection_versions.all()]
 
     @staticmethod
-    def get_valueset_entry_version(url, namespace, recorded):
-        """The value set version an unresolved entry names: the one the build recorded, if any, not the one the URL
-        resolves to now. None when it isn't found"""
+    def get_valueset_entry_versions(url, namespace, recorded):
+        """The value set versions an unresolved entry names: those the build recorded, if any, not the one the URL
+        resolves to now. None found: []"""
         version, _ = Collection.resolve_reference_expression(url, namespace)
         if not version.id:
-            return None
-        return next((_version for _version in recorded if drop_version(_version.uri) == drop_version(version.uri)),
-                    version)
+            return []
+        return [
+            _version for _version in recorded if drop_version(_version.uri) == drop_version(version.uri)] or [version]
 
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
