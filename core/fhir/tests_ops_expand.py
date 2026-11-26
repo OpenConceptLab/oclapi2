@@ -517,6 +517,18 @@ class ExpandCases(OpsCorpusMixin):
             response.data['issue'][0]['details']['text'],
             f"The included value set '{unexpanded.uri}' has no default expansion, so it could not be applied "
             "and the value set cannot be expanded")
+        # a filter OCL couldn't apply says so, naming what it couldn't apply
+        expansion.unresolved_repo_versions = [{
+            'url': '/orgs/Acme/sources/CS/concepts/?concept=fever', 'type': 'reference.filter',
+            'reason': 'filter_not_applied', 'filter': [{'property': 'concept', 'op': 'is-a'}]}]
+        expansion.save()
+        response = self.expand(url=FEVERS)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(issues_of(response), ['error|processing|vs-invalid||OCL_VS_EXP_FILTER_NOT_APPLIED'])
+        self.assertEqual(
+            response.data['issue'][0]['details']['text'],
+            "The filter of the reference '/orgs/Acme/sources/CS/concepts/?concept=fever' could not be applied "
+            "(property 'concept' op 'is-a'), so the value set cannot be expanded")
         # to a caller who can't view it, it answers as one not found
         expansion.unresolved_repo_versions = [{
             'url': collection(OrganizationFactory(), 'unexpanded-private', public_access=ACCESS_TYPE_NONE).uri,

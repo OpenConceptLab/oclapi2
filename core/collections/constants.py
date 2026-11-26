@@ -30,6 +30,11 @@ REFERENCE_VERSION_NOT_HELD = 'resource_version_not_held'
 # a value set the reference names can't narrow it: not found (or not viewable by its creator), or never expanded
 REFERENCE_VALUESET_NOT_FOUND = 'valueset_not_found'
 REFERENCE_VALUESET_NOT_EXPANDED = 'valueset_not_expanded'
+# its filter names a property or op OCL can't apply, so OCL couldn't evaluate it: not one that matched nothing
+REFERENCE_FILTER_NOT_APPLIED = 'filter_not_applied'
+UNRESOLVED_FILTER_TYPE = 'reference.filter'
+REFERENCE_FILTER_NOT_APPLIED_FMT = 'The reference is saved in collection {}, but it adds nothing: its filter could ' \
+                                   'not be applied ({})'
 REFERENCE_VALUESET_NOT_FOUND_FMT = 'The reference is saved in collection {}, but it adds nothing: value set {} ' \
                                    'could not be found'
 REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT = 'The reference is not saved in collection {}: it would add nothing, ' \

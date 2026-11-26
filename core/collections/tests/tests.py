@@ -25,7 +25,8 @@ from rest_framework.response import Response
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
     REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS, VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST, \
-    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_ALREADY_EXISTS
+    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_ALREADY_EXISTS, \
+    REFERENCE_FILTER_NOT_APPLIED
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -2274,6 +2275,14 @@ class CollectionReferenceTest(OCLTestCase):
         expansion.evaluated_collection_versions.add(release)
         self.assertEqual(
             [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)], [None, None, None])
+        # a public recorded version of it too doesn't make the private one's reason readable: every one must be
+        expansion.explicit_collection_versions.add(public)
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)], [None, None, None])
+        expansion.evaluated_collection_versions.remove(release)
+        self.assertEqual(
+            [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)],
+            [None, 'valueset_not_expanded', None])
 
     def test_add_references_a_direct_add_answers_for_a_cascade_that_cant_be_applied_with_the_same_expression(self):
         source = OrganizationSourceFactory()
@@ -2304,6 +2313,32 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual([reference.id for reference in added], [exclusion.id])
         self.assertEqual(list(errors), [cascading.expression])
+
+    def test_add_references_records_a_filter_ocl_cant_apply_apart_from_one_that_matched_nothing(self):
+        source = OrganizationSourceFactory()
+        ConceptFactory(parent=source)
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        reference = CollectionReference(
+            system=source.uri, collection=collection, created_by=source.created_by, filter=[
+                {'property': 'concept', 'op': 'is-a', 'value': 'x'},
+                {'property': 'concept_class', 'op': 'regex', 'value': 'D.*'},
+                {'property': 'datatype', 'op': '=', 'value': 'N/A'}])
+        reference.expression = reference.build_expression()
+
+        expansion.add_references([reference])
+
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertEqual(reference.unresolved_reason, REFERENCE_FILTER_NOT_APPLIED)
+        self.assertIn({
+            'url': reference.expression, 'namespace': None, 'type': 'reference.filter',
+            'reason': 'filter_not_applied',
+            'filter': [{'property': 'concept', 'op': 'is-a'}, {'property': 'concept_class', 'op': 'regex'}]
+        }, expansion.unresolved_repo_versions)
+        # a well-specified filter is evaluated: whatever it matches, it isn't one OCL couldn't apply
+        evaluated = CollectionReference(
+            system=source.uri, filter=[{'property': 'datatype', 'op': 'in', 'value': 'N/A,Text'}])
+        self.assertEqual(evaluated.unapplied_filters, [])
 
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()
@@ -5795,6 +5830,8 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
             {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'},
             {'property': 'datatype', 'op': '=', 'value': 'N/A'},
             {'property': 'external_id', 'op': '=', 'value': 'a&b=c d'},
+            {'property': 'name', 'op': '=', 'value': 'SYS?123'},
+            {'property': 'locale', 'op': '=', 'value': 'en'},
         ]
         reference = CollectionReference(
             system='/orgs/MyOrg/sources/MySource/', reference_type='concepts', filter=filters)
@@ -5804,7 +5841,7 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
         self.assertEqual(
             expression,
             '/orgs/MyOrg/sources/MySource/concepts/?q=fever&concept_class=Diagnosis&concept_class=Procedure'
-            '&datatype=N/A&external_id=a%26b%3Dc d')
+            '&datatype=N/A&external_id=a%26b%3Dc d&name=SYS%3F123&locale=en')
         self.assertEqual(self.get_structure(expression=expression)['filter'], filters)
 
     def test_parse_concept_expressions(self):

@@ -46,7 +46,8 @@ from django.db.models import BooleanField, Case, Exists, ExpressionWrapper, F, F
 from django.db.models.functions import Coalesce, JSONObject
 from django.db.models.lookups import Regex
 
-from core.collections.constants import UNRESOLVED_RESOURCE_VERSION_TYPE, REFERENCE_VALUESET_NOT_EXPANDED
+from core.collections.constants import UNRESOLVED_RESOURCE_VERSION_TYPE, REFERENCE_VALUESET_NOT_EXPANDED, \
+    UNRESOLVED_FILTER_TYPE
 from core.collections.models import Expansion
 from core.collections.utils import is_mapping
 from core.common.constants import HEAD
@@ -252,6 +253,12 @@ def unresolved(reference, value_set):
         kinds = {pinned.is_mapping for pinned in value_set.references.filter(
             expression=url, resource_version=version).only('reference_type', 'expression')}
         kind = 'mapping' if (kinds.pop() if len(kinds) == 1 else is_mapping(url)) else 'concept'
+    if kind == UNRESOLVED_FILTER_TYPE:
+        unapplied = ', '.join(
+            f"property '{entry.get('property')}' op '{entry.get('op')}'" for entry in reference.get('filter') or [])
+        return outcomes.FhirError(
+            f"The filter of the reference '{url}' could not be applied ({unapplied}), so the value set cannot be "
+            "expanded", tx_issue_type='vs-invalid', message_id='OCL_VS_EXP_FILTER_NOT_APPLIED', status_code=422)
     if kind == 'reference.valueset' and reference.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED:
         return outcomes.FhirError(
             f"The included value set '{url}' has no default expansion, so it could not be applied and the value set "

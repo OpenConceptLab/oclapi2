@@ -325,6 +325,12 @@ class ValueSetTest(OCLAPITestCase):
         for version in head.versions:
             if version.expansion_uri:
                 self.assertEqual(version.expansion.concepts.count(), 0, version.version)
+        # recorded as a filter OCL couldn't apply, not as one that matched nothing
+        self.assertIn(
+            {'url': reference.expression, 'namespace': reference.namespace, 'type': 'reference.filter',
+             'reason': 'filter_not_applied',
+             'filter': [{'property': 'concept', 'op': 'is-a'}]},
+            head.expansion.unresolved_repo_versions)
 
     def test_create_with_filter_and_system_and_no_filter(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
