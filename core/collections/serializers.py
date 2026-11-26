@@ -13,7 +13,7 @@ from rest_framework.serializers import ModelSerializer, Serializer, ValidationEr
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANSION_NONE
 from core.collections.health import ValueSetViewAccess, get_health_for, get_health_value_set_urls
-from core.collections.models import Collection, CollectionReference, Expansion
+from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
@@ -713,7 +713,21 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
         )
 
 
-class ExpansionSerializer(ValueSetAccessMixin, ModelSerializer):
+class ExpansionParametersValidationMixin:
+    @staticmethod
+    def validate_parameters(value):
+        """Keys lose their spaces, as they are read; a key no expansion applies or stores is rejected"""
+        if value and not isinstance(value, dict):
+            raise ValidationError('Must be an object of expansion parameters.')
+        value = ExpansionParameters.normalize_keys(value)
+        unsupported = ExpansionParameters.get_unsupported_keys(value)
+        if unsupported:
+            message = f"Not a supported expansion parameter. Use one of: {', '.join(ExpansionParameters.SUPPORTED)}."
+            raise ValidationError({key: [message] for key in unsupported})
+        return value
+
+
+class ExpansionSerializer(ExpansionParametersValidationMixin, ValueSetAccessMixin, ModelSerializer):
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
     parameters = JSONField()
@@ -753,7 +767,7 @@ class ExpansionSerializer(ValueSetAccessMixin, ModelSerializer):
         return summary
 
 
-class ExpansionDetailSerializer(ValueSetAccessMixin, ModelSerializer):
+class ExpansionDetailSerializer(ExpansionParametersValidationMixin, ValueSetAccessMixin, ModelSerializer):
     COLLECTION_VERSION_RELATIONS = ('explicit_collection_versions', 'evaluated_collection_versions')
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
