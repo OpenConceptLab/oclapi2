@@ -24,6 +24,7 @@ from core.collections.constants import (
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
     VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
     EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
+from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -1652,7 +1653,7 @@ def default_expansion_parameters():
 class Expansion(VersionCompareMixin, BaseResourceModel):
     # expansions are rebuilt in place and are too dynamic to be worth persisting a changelog for
     PERSIST_CHANGELOG = False
-    SYSTEM_VERSION_UNRESOLVED_TYPE = 'expansion.parameters.system-version'
+    SYSTEM_VERSION_UNRESOLVED_TYPE = SYSTEM_VERSION_PARAMETER_TYPE
     REPO_VERSION_RELATIONS = (
         'explicit_source_versions', 'evaluated_source_versions',
         'explicit_collection_versions', 'evaluated_collection_versions'
@@ -2224,6 +2225,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         if self.unresolved_repo_versions != stored_unresolved_repo_versions:
             # only this field: a whole-row save from a copy loaded during a build would restore is_processing
             self.save(update_fields=['unresolved_repo_versions', 'updated_at'])
+            # health counts these entries, and an add that accepted no reference doesn't mark it otherwise
+            Expansion.mark_health_not_current([self.id])
         self.dedupe_resources()
         if force_reevaluate and is_adding_all:
             # rebuilt without the deleted locks, so it no longer stands on them; cleared only once that's done
@@ -2420,7 +2423,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 merged += entries
         unique, seen = [], set()
         for entry in merged:
-            identity = json.dumps(entry, sort_keys=True, default=str)
+            # a version of None and of '' name the same lookup, as the entry key treats them
+            identity = json.dumps(
+                {**entry, 'version': entry.get('version') or None} if 'version' in entry else entry,
+                sort_keys=True, default=str)
             if identity not in seen:
                 seen.add(identity)
                 unique.append(entry)

@@ -4482,6 +4482,39 @@ class ExpansionTest(OCLTestCase):
         entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
         self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
 
+    def test_add_references_marks_health_not_current_when_the_unresolved_entries_change(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        resolving = self._system_reference(collection, source.uri, 'v1')
+        expansion.add_references([resolving], index=False)
+
+        def store_current_health():
+            Expansion.objects.filter(id=expansion.id).update(health_is_current=True)
+            return Expansion.objects.get(id=expansion.id).health_revision
+
+        revision = store_current_health()
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+        unchanged = Expansion.objects.get(id=expansion.id)
+        self.assertEqual((unchanged.health_revision, unchanged.health_is_current), (revision, True))
+
+        OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        revision = store_current_health()
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+
+        changed = Expansion.objects.get(id=expansion.id)
+        self.assertEqual(changed.unresolved_repo_versions, [])
+        self.assertGreater(changed.health_revision, revision)
+        self.assertIsNone(changed.health_is_current)
+
+    def test_merge_unresolved_entries_treats_a_null_and_a_blank_version_as_one(self):
+        def entry(version):
+            return {'url': '/a/', 'namespace': None, 'version': version, 'type': 'reference.system'}
+
+        merged = Expansion.merge_unresolved_entries([entry(None)], [entry('')], set())
+
+        self.assertEqual(len(merged), 1)
+
     def test_rebuild_starts_unresolved_entries_from_empty(self):
         collection = OrganizationCollectionFactory()
         expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
