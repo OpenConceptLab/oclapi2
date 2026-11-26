@@ -4552,6 +4552,112 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(reference.unresolved_reason, REFERENCE_VERSION_NOT_HELD)
         self.assertEqual(list(expansion.concepts.all()), [old])
 
+    @staticmethod
+    def _system_reference(collection, system, version):
+        reference = CollectionReference(
+            expression=f'{system}{version}/concepts/c1/', collection=collection, system=system, version=version,
+            code='c1')
+        reference.save()
+        return reference
+
+    def test_add_references_keeps_earlier_unresolved_entries(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        first = self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')
+        second = self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')
+
+        expansion.add_references([first], index=False)
+        expansion.add_references([second], index=False)
+        expansion.add_references([CollectionReference.objects.get(id=first.id)], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual(
+            [(entry['url'], entry['version']) for entry in entries],
+            [('/orgs/missing/sources/one/', 'v1'), ('/orgs/missing/sources/two/', 'v1')])
+
+    def test_add_references_merges_into_the_stored_entries_not_a_stale_copy(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.add_references(
+            [self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')], index=False)
+        stale = Expansion.objects.get(id=expansion.id)
+        # what a delete of that reference writes while the add runs
+        Expansion.objects.filter(id=expansion.id).update(unresolved_repo_versions=[])
+
+        stale.add_references([self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
+
+    def test_merge_unresolved_entries_keeps_their_order(self):
+        def entry(url):
+            return {'url': url, 'namespace': None, 'version': 'v1', 'type': 'reference.system'}
+        evaluated = {('reference.system', '/b/', 'v1'), ('reference.system', '/d/', 'v1')}
+
+        merged = Expansion.merge_unresolved_entries(
+            [entry('/a/'), entry('/b/'), entry('/c/')], [entry('/d/'), entry('/b/'), entry('/b/')], evaluated)
+
+        self.assertEqual([item['url'] for item in merged], ['/a/', '/b/', '/c/', '/d/'])
+
+    def test_add_references_drops_an_unresolved_entry_once_it_resolves(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        resolving = self._system_reference(collection, source.uri, 'v1')
+        missing = self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')
+        expansion.add_references([resolving, missing], index=False)
+        self.assertEqual(len(Expansion.objects.get(id=expansion.id).unresolved_repo_versions), 2)
+        OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
+
+    def test_add_references_marks_health_not_current_when_the_unresolved_entries_change(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        resolving = self._system_reference(collection, source.uri, 'v1')
+        expansion.add_references([resolving], index=False)
+
+        def store_current_health():
+            Expansion.objects.filter(id=expansion.id).update(health_is_current=True)
+            return Expansion.objects.get(id=expansion.id).health_revision
+
+        revision = store_current_health()
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+        unchanged = Expansion.objects.get(id=expansion.id)
+        self.assertEqual((unchanged.health_revision, unchanged.health_is_current), (revision, True))
+
+        OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        revision = store_current_health()
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+
+        changed = Expansion.objects.get(id=expansion.id)
+        self.assertEqual(changed.unresolved_repo_versions, [])
+        self.assertGreater(changed.health_revision, revision)
+        self.assertIsNone(changed.health_is_current)
+
+    def test_merge_unresolved_entries_treats_a_null_and_a_blank_version_as_one(self):
+        def entry(version):
+            return {'url': '/a/', 'namespace': None, 'version': version, 'type': 'reference.system'}
+
+        merged = Expansion.merge_unresolved_entries([entry(None)], [entry('')], set())
+
+        self.assertEqual(len(merged), 1)
+
+    def test_rebuild_starts_unresolved_entries_from_empty(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.add_references(
+            [self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')], index=False)
+        CollectionReference.objects.filter(collection=collection).delete()
+
+        expansion.add_references(collection.references.all(), index=False, is_adding_all=True, force_reevaluate=True)
+
+        self.assertEqual(Expansion.objects.get(id=expansion.id).unresolved_repo_versions, [])
+
     def test_add_references_marks_include_references_that_add_nothing(self):
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source)
