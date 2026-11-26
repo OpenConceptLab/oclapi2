@@ -845,6 +845,9 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
     meta = models.JSONField(null=True, blank=True)
     active_concepts = models.IntegerField(null=True, blank=True, default=None)
     active_mappings = models.IntegerField(null=True, blank=True, default=None)
+    # when a member last left, or a collection gained references or switched expansions: what no member's
+    # updated_at shows
+    last_child_removal_at = models.DateTimeField(null=True, blank=True)
     custom_validation_schema = models.CharField(
         choices=VALIDATION_SCHEMAS, default=DEFAULT_VALIDATION_SCHEMA, max_length=100
     )
@@ -864,6 +867,19 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
         indexes = [
                       models.Index(fields=['version'])
                   ] + VersionedModel.Meta.indexes
+
+    def save(self, *args, force_insert=False, force_update=False, using=None, update_fields=None):
+        tracks_changes = hasattr(self, 'get_dirty_fields')  # sources and collections
+        if not force_insert and not self._state.adding and self.pk is not None and tracks_changes and (
+                'last_child_removal_at' not in self.get_dirty_fields()):  # pylint: disable=no-member
+            # written by its own update unless this instance set it, so a save from an older copy can't undo a mark
+            deferred = self.get_deferred_fields()
+            fields = update_fields if update_fields is not None else [
+                field.name for field in self._meta.concrete_fields
+                if not field.primary_key and field.attname not in deferred]
+            update_fields = [field for field in fields if field != 'last_child_removal_at']
+        super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
+                     update_fields=update_fields)
 
     @property
     def is_collection(self):
@@ -927,11 +943,30 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
 
     @property
     def last_child_update(self):
-        last_concept_update = self.last_concept_update
-        last_mapping_update = self.last_mapping_update
-        if last_concept_update and last_mapping_update:
-            return max(last_concept_update, last_mapping_update)
-        return last_concept_update or last_mapping_update or self.updated_at or timezone.now()
+        """When this version's members last changed: an edit or add (a member's updated_at) or a removal"""
+        member_updates = [update for update in (self.last_concept_update, self.last_mapping_update) if update]
+        updates = [*member_updates, self.last_child_removal_at]
+        if not member_updates:  # an empty repository: its own edits count too
+            updates.append(self.updated_at)
+        updates = [update for update in updates if update]
+        return max(updates) if updates else timezone.now()
+
+    @classmethod
+    def mark_child_removal(cls, ids):
+        """
+        Records that members left these versions now, so a HEAD export (keyed on last_child_update) that still lists
+        them stops being served. An update, so the version's updated_at and save side effects are left alone.
+        """
+        ids = {_id for _id in ids if _id}
+        removed_at = timezone.now()
+        if ids:
+            cls.objects.filter(id__in=ids).update(last_child_removal_at=removed_at)
+        return removed_at
+
+    def mark_own_child_removal(self):
+        """mark_child_removal for this version, kept on this instance too, so its export key here is the new one"""
+        self.last_child_removal_at = self.mark_child_removal([self.id])
+        self.__dict__.pop('version_export_path', None)
 
     def get_last_child_update_from_export_url(self, export_url):
         generic_path = self.get_version_export_path(suffix=None)

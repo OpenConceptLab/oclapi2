@@ -1,9 +1,11 @@
+import datetime
 import importlib
 import json
 import os
 import random
 import tempfile
 import threading
+from datetime import timedelta
 from io import StringIO
 
 from celery_once import AlreadyQueued
@@ -14,6 +16,7 @@ from django.http import QueryDict
 from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from django.db import OperationalError, connection, transaction
+from django.utils import timezone
 from mock import patch, Mock, call
 from mock.mock import ANY
 from rest_framework import status
@@ -21,7 +24,7 @@ from rest_framework.response import Response
 
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
-    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
+    REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS, VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -37,7 +40,7 @@ from core.collections.tests.factories import OrganizationCollectionFactory, Expa
 from core.collections.utils import is_mapping, is_concept, is_version_specified, \
     get_concept_by_expression
 from core.common.constants import OPENMRS_VALIDATION_SCHEMA, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
-    RETIRED_ACCESS_TYPE_EDIT
+    RETIRED_ACCESS_TYPE_EDIT, HEAD
 from core.common.tasks import add_references, seed_children_to_new_version, seed_children_to_expansion, \
     delete_collection
 from core.common.tasks import update_collection_active_concepts_count
@@ -406,6 +409,23 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection2.references.count(), 1)
         self.assertEqual(collection1.references.first().expression, collection2.references.first().expression)
         self.assertNotEqual(collection1.references.first().id, collection2.references.first().id)
+
+    def test_seed_references_copies_head_last_resolved_at(self):
+        head = OrganizationCollectionFactory()
+        version = OrganizationCollectionFactory(version='v1', mnemonic=head.mnemonic, organization=head.organization)
+        resolved_at = timezone.now() - timedelta(days=3)
+        resolved = CollectionReference(
+            expression='/orgs/a/sources/a/concepts/c1/', collection=head, last_resolved_at=resolved_at)
+        resolved.save()
+        unresolved = CollectionReference(
+            expression='/orgs/missing/sources/missing/concepts/c1/', collection=head, last_resolved_at=None)
+        unresolved.save()
+
+        version.seed_references()
+
+        self.assertEqual(
+            dict(version.references.values_list('expression', 'last_resolved_at')),
+            {resolved.expression: resolved_at, unresolved.expression: None})
 
     def test_validate_reference_already_exists(self):
         collection = OrganizationCollectionFactory()
@@ -3844,7 +3864,7 @@ class ExpansionTest(OCLTestCase):
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
         source_v2 = OrganizationSourceFactory(
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
-        expansion.explicit_source_versions.add(source_v1)
+        expansion.evaluated_source_versions.add(source_v1)
 
         diff = expansion.get_resolved_repo_version_diff_with_latest_updates()
 
@@ -3857,7 +3877,7 @@ class ExpansionTest(OCLTestCase):
         source2_head = OrganizationSourceFactory()
         source2_v1 = OrganizationSourceFactory(
             mnemonic=source2_head.mnemonic, organization=source2_head.organization, version='v1', released=True)
-        expansion.explicit_source_versions.add(source2_v1)
+        expansion.evaluated_source_versions.add(source2_v1)
 
         diff = expansion.get_resolved_repo_version_diff_with_latest_updates()
 
@@ -4069,6 +4089,118 @@ class ExpansionTest(OCLTestCase):
         diff = expansion.get_resolved_repo_version_diff_with_latest_updates()
 
         self.assertEqual(diff, {source_v1.url: source_v2.url})
+
+    @staticmethod
+    def _released_versions(factory, *versions):
+        head = factory()
+        return head, [
+            factory(mnemonic=head.mnemonic, organization=head.organization, version=version, released=True)
+            for version in versions
+        ]
+
+    def test_resolved_repo_updates_leave_out_a_version_a_reference_names(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        source, (source_v1, source_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        expansion.explicit_source_versions.add(source_v1)
+        # no reference names it any more, so a rebuild drops it
+        self.assertEqual(
+            expansion.get_resolved_repo_version_diff_with_latest_updates(), {source_v1.url: source_v2.url})
+
+        CollectionReference(
+            expression=f'{source.uri}v1/concepts/c1/', collection=collection, system=source.uri, version='v1',
+            code='c1').save()
+
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+    def test_resolved_repo_updates_leave_out_a_version_a_reference_s_system_names(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        _, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        CollectionReference(
+            expression=f'{source_v1.uri}concepts/c1/', collection=collection, system=source_v1.uri, code='c1').save()
+        # a rebuild evaluates it in that version and records it as explicit
+        expansion.explicit_source_versions.add(source_v1)
+
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+    def test_resolved_repo_updates_leave_out_the_release_holding_a_concept_version(self):
+        source, old, v1, v2 = CollectionReferenceTest.source_with_replaced_concept_version()
+        _, expansion, _ = self._expansion_with_resource_version_reference(source, old)
+        expansion.explicit_source_versions.add(v1)
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True):
+            self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+        # with the toggle off a rebuild records the latest release instead
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=False):
+            self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {v1.url: v2.url})
+
+    def test_resolved_repo_updates_leave_out_a_version_a_concept_version_reference_s_system_names(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        source, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        CollectionReference(
+            expression=f'{source.uri}v1/concepts/c1/1/', collection=collection, system=source.uri, version='v1',
+            code='c1', resource_version='1').save()
+        expansion.explicit_source_versions.add(source_v1)
+
+        for resolution_on in (False, True):
+            with patch.object(
+                    CollectionReference, 'is_resource_version_repo_resolution_on', return_value=resolution_on):
+                self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+    def test_resolved_repo_updates_with_no_parameters(self):
+        collection = OrganizationCollectionFactory()
+        _, (source_v1, source_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.evaluated_source_versions.add(source_v1)
+        Expansion.objects.filter(id=expansion.id).update(parameters=None)
+        expansion.refresh_from_db()
+
+        self.assertEqual(
+            expansion.get_resolved_repo_version_diff_with_latest_updates(), {source_v1.url: source_v2.url})
+
+    def test_resolved_repo_updates_leave_out_a_version_system_version_names(self):
+        collection = OrganizationCollectionFactory()
+        source, (source_v1, _) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        other, (other_v1, other_v2) = self._released_versions(OrganizationSourceFactory, 'v1', 'v2')
+        expansion = ExpansionFactory(
+            collection_version=collection, parameters={'system-version': f'{source.uri}|v1,{other.uri}'})
+        expansion.evaluated_source_versions.add(source_v1, other_v1)
+
+        # a repository's bare URL resolves again on a rebuild
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {other_v1.url: other_v2.url})
+
+    def test_resolved_repo_updates_leave_out_a_lock_built_expansion_s_value_set_locks(self):
+        collection = OrganizationCollectionFactory()
+        _, (value_set_v1, value_set_v2) = self._released_versions(OrganizationCollectionFactory, 'v1', 'v2')
+        expansion = ExpansionFactory(collection_version=collection, built_with=VERSION_EXPANSION_LOCK)
+        expansion.evaluated_collection_versions.add(value_set_v1)
+
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+        Expansion.objects.filter(id=expansion.id).update(built_with=VERSION_EXPANSION_LATEST)
+        expansion.refresh_from_db()
+        self.assertEqual(
+            expansion.get_resolved_repo_version_diff_with_latest_updates(), {value_set_v1.url: value_set_v2.url})
+
+    def test_resolved_repo_updates_leave_out_head_where_it_is_named(self):
+        collection = OrganizationCollectionFactory()
+        source, _ = self._released_versions(OrganizationSourceFactory, 'v1')
+        other, (other_v1,) = self._released_versions(OrganizationSourceFactory, 'v1')
+        expansion = ExpansionFactory(collection_version=collection, parameters={'system-version': f'{other.uri}|HEAD'})
+        # HEAD named by a reference's version, and by system-version
+        CollectionReference(
+            expression=f'{source.uri}HEAD/concepts/c1/', collection=collection, system=source.uri, version='HEAD',
+            code='c1').save()
+        expansion.explicit_source_versions.add(source)
+        expansion.evaluated_source_versions.add(other)
+
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
+        expansion.parameters = {}
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {other.url: other_v1.url})
 
     def test_filter_queryset_not_implemented(self):
         with self.assertRaises(NotImplementedError):
@@ -4483,6 +4615,112 @@ class ExpansionTest(OCLTestCase):
 
         has_view_access.assert_called_once()
         self.assertEqual(release_head_cache[release.id].id, source.id)
+
+    @staticmethod
+    def _system_reference(collection, system, version):
+        reference = CollectionReference(
+            expression=f'{system}{version}/concepts/c1/', collection=collection, system=system, version=version,
+            code='c1')
+        reference.save()
+        return reference
+
+    def test_add_references_keeps_earlier_unresolved_entries(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        first = self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')
+        second = self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')
+
+        expansion.add_references([first], index=False)
+        expansion.add_references([second], index=False)
+        expansion.add_references([CollectionReference.objects.get(id=first.id)], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual(
+            [(entry['url'], entry['version']) for entry in entries],
+            [('/orgs/missing/sources/one/', 'v1'), ('/orgs/missing/sources/two/', 'v1')])
+
+    def test_add_references_merges_into_the_stored_entries_not_a_stale_copy(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.add_references(
+            [self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')], index=False)
+        stale = Expansion.objects.get(id=expansion.id)
+        # what a delete of that reference writes while the add runs
+        Expansion.objects.filter(id=expansion.id).update(unresolved_repo_versions=[])
+
+        stale.add_references([self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
+
+    def test_merge_unresolved_entries_keeps_their_order(self):
+        def entry(url):
+            return {'url': url, 'namespace': None, 'version': 'v1', 'type': 'reference.system'}
+        evaluated = {('reference.system', '/b/', 'v1'), ('reference.system', '/d/', 'v1')}
+
+        merged = Expansion.merge_unresolved_entries(
+            [entry('/a/'), entry('/b/'), entry('/c/')], [entry('/d/'), entry('/b/'), entry('/b/')], evaluated)
+
+        self.assertEqual([item['url'] for item in merged], ['/a/', '/b/', '/c/', '/d/'])
+
+    def test_add_references_drops_an_unresolved_entry_once_it_resolves(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        resolving = self._system_reference(collection, source.uri, 'v1')
+        missing = self._system_reference(collection, '/orgs/missing/sources/two/', 'v1')
+        expansion.add_references([resolving, missing], index=False)
+        self.assertEqual(len(Expansion.objects.get(id=expansion.id).unresolved_repo_versions), 2)
+        OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+
+        entries = Expansion.objects.get(id=expansion.id).unresolved_repo_versions
+        self.assertEqual([entry['url'] for entry in entries], ['/orgs/missing/sources/two/'])
+
+    def test_add_references_marks_health_not_current_when_the_unresolved_entries_change(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        resolving = self._system_reference(collection, source.uri, 'v1')
+        expansion.add_references([resolving], index=False)
+
+        def store_current_health():
+            Expansion.objects.filter(id=expansion.id).update(health_is_current=True)
+            return Expansion.objects.get(id=expansion.id).health_revision
+
+        revision = store_current_health()
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+        unchanged = Expansion.objects.get(id=expansion.id)
+        self.assertEqual((unchanged.health_revision, unchanged.health_is_current), (revision, True))
+
+        OrganizationSourceFactory(mnemonic=source.mnemonic, organization=source.organization, version='v1')
+        revision = store_current_health()
+        expansion.add_references([CollectionReference.objects.get(id=resolving.id)], index=False)
+
+        changed = Expansion.objects.get(id=expansion.id)
+        self.assertEqual(changed.unresolved_repo_versions, [])
+        self.assertGreater(changed.health_revision, revision)
+        self.assertIsNone(changed.health_is_current)
+
+    def test_merge_unresolved_entries_treats_a_null_and_a_blank_version_as_one(self):
+        def entry(version):
+            return {'url': '/a/', 'namespace': None, 'version': version, 'type': 'reference.system'}
+
+        merged = Expansion.merge_unresolved_entries([entry(None)], [entry('')], set())
+
+        self.assertEqual(len(merged), 1)
+
+    def test_rebuild_starts_unresolved_entries_from_empty(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='e1')
+        expansion.add_references(
+            [self._system_reference(collection, '/orgs/missing/sources/one/', 'v1')], index=False)
+        CollectionReference.objects.filter(collection=collection).delete()
+
+        expansion.add_references(collection.references.all(), index=False, is_adding_all=True, force_reevaluate=True)
+
+        self.assertEqual(Expansion.objects.get(id=expansion.id).unresolved_repo_versions, [])
 
     def test_add_references_marks_include_references_that_add_nothing(self):
         source = OrganizationSourceFactory()
@@ -7508,3 +7746,160 @@ class ExpansionSystemVersionNamespaceTest(OCLTestCase):
 
         self.set_registry_toggle(False)
         self.assertIsNone(Expansion.get_system_version_namespace(self.owner.uri))
+
+
+class CollectionHeadExportKeyTest(OCLTestCase):
+    """A HEAD export is served while a file with its key (last_child_update) exists, so a removal must move the key"""
+    def setUp(self):
+        super().setUp()
+        self.collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=self.collection)
+        self.collection.expansion_uri = expansion.uri
+        self.collection.save()
+        self.source = OrganizationSourceFactory()
+        self.older = ConceptFactory(parent=self.source)
+        self.newer = ConceptFactory(parent=self.source)
+        self.collection.add_expressions(
+            {'expressions': [self.older.uri, self.newer.uri]}, self.collection.created_by)
+        self.later = self.collection.last_child_update + datetime.timedelta(minutes=1)
+
+    def get_head(self):
+        return Collection.objects.get(id=self.collection.id)
+
+    def get_older_member(self):
+        return self.get_head().expansion.concepts.get(versioned_object_id=self.older.id)
+
+    def later_clock(self):
+        return patch('core.common.models.timezone', **{'now.return_value': self.later})
+
+    @patch('core.common.models.get_export_service')
+    def test_removing_a_member_that_isnt_the_newest_stops_serving_the_head_export(self, export_service_mock):
+        head = self.get_head()
+        stale_key = head.version_export_path
+        export_service_mock.return_value.exists.side_effect = lambda key: key == stale_key
+        self.assertTrue(head.has_export())
+
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([self.older.uri])
+
+        head = self.get_head()
+        self.assertEqual(
+            list(head.expansion.concepts.values_list('versioned_object_id', flat=True)), [self.newer.id])
+        self.assertEqual(head.last_child_update, self.later)
+        self.assertNotEqual(head.version_export_path, stale_key)
+        self.assertFalse(head.has_export())
+
+    def test_removing_a_reference_without_members_moves_the_key(self):
+        self.collection.add_expressions(
+            {'expressions': [f'{self.source.uri}concepts/unknown/']}, self.collection.created_by)
+        head = self.get_head()
+        stale_key = head.version_export_path
+
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([f'{self.source.uri}concepts/unknown/'])
+
+        self.assertEqual(self.get_head().last_child_update, self.later)
+        self.assertNotEqual(self.get_head().version_export_path, stale_key)
+
+    def test_the_instance_that_removed_references_gives_the_new_key(self):
+        head = self.get_head()
+        stale_key = head.version_export_path
+
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            head.delete_references([self.older.uri])
+
+        self.assertEqual(head.last_child_update, self.later)
+        self.assertEqual(head.version_export_path, self.get_head().version_export_path)
+        self.assertNotEqual(head.version_export_path, stale_key)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_another_repo_s_source_moves_the_key_of_the_collection_listing_its_concepts(self, _):
+        with self.later_clock():
+            self.source.delete(force=True)
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_removing_members_from_the_expansion_moves_the_key(self):
+        member = self.get_older_member()
+        with self.later_clock():
+            self.get_head().expansion.concepts.remove(member)
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_clearing_a_concept_s_expansions_moves_their_collection_s_key(self):
+        member = self.get_older_member()
+        with self.later_clock():
+            member.expansion_set.clear()
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_hard_deleting_a_member_moves_the_key_of_the_collection_listing_it(self):
+        member = self.get_older_member()
+        with self.later_clock():
+            Concept.objects.filter(id=member.id).delete()
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    def test_switching_the_expansion_moves_the_key(self):
+        head = self.get_head()
+        head.expansion_uri = ExpansionFactory(collection_version=head).uri
+        with patch('core.collections.models.timezone', **{'now.return_value': self.later}):
+            head.save()
+        self.assertEqual(self.get_head().last_child_removal_at, self.later)
+
+    def test_switching_the_expansion_with_update_fields_moves_the_key(self):
+        head = self.get_head()
+        head.expansion_uri = ExpansionFactory(collection_version=head).uri
+        with patch('core.collections.models.timezone', **{'now.return_value': self.later}):
+            head.save(update_fields=['expansion_uri'])
+        self.assertEqual(self.get_head().last_child_removal_at, self.later)
+
+    def test_a_value_set_update_saving_a_version_over_head_keeps_the_key(self):
+        """It saves a version instance with HEAD's id and expansion, which is no switch, and carries no mark of HEAD"""
+        version = OrganizationCollectionFactory(
+            organization=self.collection.organization, mnemonic=self.collection.mnemonic, version='v1')
+        version.expansion_uri = ExpansionFactory(collection_version=version).uri
+        version.save()
+        version = Collection.objects.get(id=version.id)
+        head = self.get_head()
+        head.mark_own_child_removal()
+        marked_at = self.get_head().last_child_removal_at
+
+        version.id, version.version, version.released = head.id, HEAD, False
+        version.expansion_uri = head.expansion_uri
+        with self.later_clock(), patch('core.collections.models.timezone', **{'now.return_value': self.later}):
+            errors = Collection.persist_changes(version, version.created_by, None, keep_private=True)
+
+        self.assertEqual(errors, {})
+        self.assertEqual(self.get_head().last_child_removal_at, marked_at)
+
+    def test_a_save_from_an_older_copy_keeps_a_removal_mark(self):
+        for update_fields in (None, self.get_head().get_fields_but_access()):
+            with self.subTest(update_fields=update_fields):
+                older_copy = self.get_head()
+                self.get_head().mark_own_child_removal()
+                marked_at = self.get_head().last_child_removal_at
+                older_copy.name = 'Renamed'
+
+                older_copy.save(update_fields=update_fields)
+
+                head = self.get_head()
+                self.assertEqual((head.name, head.last_child_removal_at), ('Renamed', marked_at))
+
+    def test_adding_a_member_older_than_a_removal_moves_the_key(self):
+        middle = ConceptFactory(parent=self.source)  # newer than the member left, older than the removal
+        with self.later_clock(), self.captureOnCommitCallbacks(execute=True):
+            self.get_head().delete_references([self.newer.uri])
+        added_at = self.later + datetime.timedelta(minutes=1)
+
+        with patch('core.collections.models.timezone', **{'now.return_value': added_at}):
+            self.get_head().add_expressions({'expressions': [middle.uri]}, self.collection.created_by)
+
+        head = self.get_head()
+        self.assertIn(middle.id, head.expansion.concepts.values_list('versioned_object_id', flat=True))
+        self.assertEqual(head.last_child_update, added_at)
+
+    def test_an_edit_of_an_empty_collection_after_a_removal_moves_the_key(self):
+        collection = OrganizationCollectionFactory()
+        removed_at = timezone.now() - datetime.timedelta(minutes=5)
+        Collection.objects.filter(id=collection.id).update(
+            last_child_removal_at=removed_at, updated_at=removed_at + datetime.timedelta(minutes=1))
+
+        self.assertEqual(
+            Collection.objects.get(id=collection.id).last_child_update, removed_at + datetime.timedelta(minutes=1))

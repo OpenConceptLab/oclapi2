@@ -1,7 +1,6 @@
 from datetime import timedelta
 
 from django.db import connection
-from django.db.models import F
 from django.db.models.signals import pre_delete
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -12,10 +11,10 @@ from core.collections.health import (
     ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.constants import EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
-from core.collections.models import CollectionReference, Expansion
+from core.collections.models import Collection, CollectionReference, Expansion
 from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
-from core.common.tasks import seed_children_to_new_version, recheck_expansion_health
+from core.common.tasks import seed_children_to_new_version, recheck_expansion_health, compute_expansion_health
 from core.common.tests import OCLTestCase, OCLAPITestCase
 from core.concepts.models import Concept
 from core.concepts.tests.factories import ConceptFactory
@@ -667,12 +666,129 @@ class ExpansionHealthStorageTest(OCLTestCase):
         self.assertEqual(Expansion.objects.values_list('health', 'health_is_current').get(id=other.id), (None, None))
         self.assertTrue(self.stored()[1])
 
+    def set_default(self, expansion):
+        collection = Collection.objects.get(id=self.collection.id)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+    def test_a_new_default_gets_health_now_and_the_old_default_drops_its_own(self):
+        self.assertTrue(self.stored()[1])
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        self.assertEqual(
+            Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id), (None, None))
+
+        self.set_default(new_default)
+
+        health, is_current = Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id)
+        self.assertTrue(is_current)
+        self.assertEqual(health['state'], EMPTY)
+        self.assertEqual(self.stored(), (None, None))
+
+    def test_a_new_default_with_health_off_is_only_marked_not_current(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        revision = Expansion.objects.values_list('health_revision', flat=True).get(id=new_default.id)
+
+        with patch.object(Expansion, 'is_health_on', return_value=False), \
+                patch.object(ExpansionHealth, 'compute') as compute:
+            self.set_default(new_default)
+
+        compute.assert_not_called()
+        self.assertGreater(
+            Expansion.objects.values_list('health_revision', flat=True).get(id=new_default.id), revision)
+        self.assertEqual(
+            Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id), (None, None))
+        self.assertEqual(self.stored(), (None, None))
+
+    def test_a_new_default_still_building_gets_health_from_its_build(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+        # its build loaded the version before the switch
+        building = Expansion.objects.get(id=new_default.id)
+        self.assertFalse(building.is_default)
+
+        with patch.object(ExpansionHealth, 'compute', return_value={'state': EMPTY}) as compute:
+            self.set_default(new_default)
+            compute.assert_not_called()
+            Expansion.objects.filter(id=new_default.id).update(is_processing=False)
+            building.update_health()
+
+        self.assertEqual(
+            Expansion.objects.values_list('health', 'health_is_current').get(id=new_default.id),
+            ({'state': EMPTY}, True))
+
+    def test_a_new_default_still_building_is_marked_out_of_date_until_its_build_ends(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+        revision = Expansion.objects.values_list('health_revision', flat=True).get(id=new_default.id)
+
+        with patch.object(ExpansionHealth, 'compute') as compute:
+            self.set_default(new_default)
+
+        compute.assert_not_called()
+        health_revision, health, is_current = Expansion.objects.values_list(
+            'health_revision', 'health', 'health_is_current').get(id=new_default.id)
+        self.assertGreater(health_revision, revision)
+        self.assertEqual((health, is_current), (None, False))
+
+    def test_a_new_default_still_building_with_health_off_is_only_marked_not_current(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+
+        with patch.object(Expansion, 'is_health_on', return_value=False):
+            self.set_default(new_default)
+
+        self.assertIsNone(Expansion.objects.values_list('health_is_current', flat=True).get(id=new_default.id))
+
+    def test_a_new_default_whose_build_ends_while_it_is_marked_is_recomputed(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        Expansion.objects.filter(id=new_default.id).update(is_processing=True)
+
+        def build_ends():
+            Expansion.objects.filter(id=new_default.id).update(is_processing=False)
+            return True
+
+        with patch.object(Expansion, 'is_health_on', side_effect=build_ends), \
+                patch.object(Expansion, 'mark_health_out_of_date') as mark_health_out_of_date:
+            self.set_default(new_default)
+
+        mark_health_out_of_date.assert_called_once()
+
+    def test_the_store_is_a_one_table_update(self):
+        with CaptureQueriesContext(connection) as context:
+            self.expansion.update_health()
+
+        stores = [query['sql'] for query in context.captured_queries
+                  if query['sql'].startswith('UPDATE "collection_expansions"') and '"health_is_current" = true' in
+                  query['sql']]
+        self.assertEqual(len(stores), 1, stores)
+        self.assertNotIn('IN (SELECT', stores[0])
+        self.assertIn('EXISTS', stores[0])
+        self.assertTrue(self.stored()[1])
+
+    def test_a_build_of_the_old_default_ending_after_the_switch_stores_no_health(self):
+        new_default = Expansion.persist(index=False, collection_version=self.collection, mnemonic='other')
+        rebuilding = Expansion.objects.get(id=self.expansion.id)
+        self.assertTrue(rebuilding.is_default)
+
+        self.set_default(new_default)
+        rebuilding.update_health()
+
+        self.assertEqual(self.stored(), (None, None))
+
+    def test_a_queued_run_skips_health_a_newer_run_already_stored(self):
+        self.assertTrue(self.stored()[1])
+
+        with patch.object(ExpansionHealth, 'compute') as compute:
+            compute_expansion_health(self.expansion.id)
+
+        compute.assert_not_called()
+
     def test_a_change_while_it_computes_is_not_stored_as_current(self):
         computed = []
 
         def compute(_health):
             if not computed:  # the first run is overtaken by a change
-                Expansion.objects.filter(id=self.expansion.id).update(health_revision=F('health_revision') + 1)
+                Expansion.mark_health_not_current([self.expansion.id])
             computed.append(1)
             return {'state': HEALTHY, 'run': len(computed)}
 

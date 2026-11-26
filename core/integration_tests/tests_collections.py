@@ -4610,7 +4610,7 @@ class CollectionReferenceViewTest(OCLAPITestCase):
         self.assertEqual(response.status_code, 404)
 
         response = self.client.get(
-            self.collection.url + 'references/123/')
+            self.collection.url + 'references/' + str(self.reference.id + 1) + '/')  # not one of its references
 
         self.assertEqual(response.status_code, 404)
 
@@ -5151,7 +5151,7 @@ class CollectionVersionExpansionResolvedRepoUpdatesViewTest(OCLAPITestCase):
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v1', released=True)
         source_v2 = OrganizationSourceFactory(
             mnemonic=source_head.mnemonic, organization=source_head.organization, version='v2', released=True)
-        self.expansion.explicit_source_versions.add(source_v1)
+        self.expansion.evaluated_source_versions.add(source_v1)
 
         response = self.client.get(
             self.expansion.url + 'resolved-repo-updates/',
