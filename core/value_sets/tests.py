@@ -328,7 +328,7 @@ class ValueSetTest(OCLAPITestCase):
         # recorded as a filter OCL couldn't apply, not as one that matched nothing
         self.assertIn(
             {'url': reference.expression, 'namespace': reference.namespace, 'type': 'reference.filter',
-             'reason': 'filter_not_applied',
+             'include': True, 'reason': 'filter_not_applied',
              'filter': [{'property': 'concept', 'op': 'is-a'}]},
             head.expansion.unresolved_repo_versions)
 

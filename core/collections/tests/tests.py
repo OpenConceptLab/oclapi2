@@ -2331,10 +2331,20 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(expansion.concepts.count(), 0)
         self.assertEqual(reference.unresolved_reason, REFERENCE_FILTER_NOT_APPLIED)
         self.assertIn({
-            'url': reference.expression, 'namespace': None, 'type': 'reference.filter',
+            'url': reference.expression, 'namespace': None, 'type': 'reference.filter', 'include': True,
             'reason': 'filter_not_applied',
             'filter': [{'property': 'concept', 'op': 'is-a'}, {'property': 'concept_class', 'op': 'regex'}]
         }, expansion.unresolved_repo_versions)
+        # an exclusion building the same expression keeps the include's entry, and records its own
+        exclusion = CollectionReference(
+            system=source.uri, collection=collection, created_by=source.created_by, include=False,
+            filter=reference.filter, expression=reference.expression)
+
+        expansion.add_references([exclusion])
+
+        self.assertEqual(
+            sorted(entry['include'] for entry in expansion.unresolved_repo_versions
+                   if entry['type'] == 'reference.filter'), [False, True])
         # a well-specified filter is evaluated: whatever it matches, it isn't one OCL couldn't apply
         evaluated = CollectionReference(
             system=source.uri, filter=[{'property': 'datatype', 'op': 'in', 'value': 'N/A,Text'}])

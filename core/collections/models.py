@@ -1428,7 +1428,7 @@ class CollectionReference(models.Model):
     def to_unresolved_filter(self):
         return {
             'url': self.expression, 'namespace': self.namespace, 'type': UNRESOLVED_FILTER_TYPE,
-            'reason': REFERENCE_FILTER_NOT_APPLIED, 'filter': self.unapplied_filters
+            'include': self.include, 'reason': REFERENCE_FILTER_NOT_APPLIED, 'filter': self.unapplied_filters
         }
 
     def to_unresolved_resource_version(self):
@@ -2580,13 +2580,15 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return (entry_type,)
         if entry_type == 'reference.system':
             return entry_type, entry.get('url'), entry.get('version') or None
+        if entry_type == UNRESOLVED_FILTER_TYPE:  # an include and an exclusion can build one expression
+            return entry_type, entry.get('url'), entry.get('include', True)
         return entry_type, entry.get('url')
 
     @staticmethod
     def get_unresolved_entry_keys_of(reference, is_reevaluating):
         """The unresolved entry keys a reference's evaluation decides, whether it resolves them or not"""
         keys = {('reference.valueset', valueset) for valueset in reference.valueset or []}
-        keys.add((UNRESOLVED_FILTER_TYPE, reference.expression))
+        keys.add((UNRESOLVED_FILTER_TYPE, reference.expression, reference.include))
         if reference.system:
             keys.add(('reference.system', reference.system, reference.version or None))
         if is_reevaluating:
