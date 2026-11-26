@@ -30,8 +30,7 @@ from core.common.constants import SEARCH_PARAM, LIST_DEFAULT_LIMIT, CSV_DEFAULT_
     LIMIT_PARAM, NOT_FOUND, MUST_SPECIFY_EXTRA_PARAM_IN_BODY, INCLUDE_RETIRED_PARAM, VERBOSE_PARAM, HEAD, LATEST, \
     BRIEF_PARAM, ES_REQUEST_TIMEOUT, INCLUDE_INACTIVE, FHIR_LIMIT_PARAM, RAW_PARAM, SEARCH_MAP_CODES_PARAM, \
     INCLUDE_SEARCH_META_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, EXCLUDE_WILDCARD_SEARCH_PARAM, UPDATED_BY_USERNAME_PARAM, \
-    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER, FACET_SIZE, \
-    VERIFIED_REPO_RESCORE_BOOST, EXACT_ID_REPO_RESCORE_BOOST, REPO_RESCORE_WINDOW_SIZE
+    CANONICAL_URL_REQUEST_PARAM, CHECKSUMS_PARAM, ACCESS_TYPE_NONE, HTTP_COMPRESS_HEADER, FACET_SIZE
 from core.common.exceptions import Http400
 from core.common.mixins import PathWalkerMixin, SourceChildMixin
 from core.common.permissions import CanViewConceptDictionary
@@ -1461,31 +1460,30 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                   }
                 }
             )
-        if is_ranked_by_score and (self.is_concept_container_document_model() or self.is_repo_document_model()):
-            results = results.extra(rescore=self.get_verified_repos_rescore())
+        if sort and is_ranked_by_score and (
+                self.is_concept_container_document_model() or self.is_repo_document_model()):
+            results = results.extra(rescore=self.get_repo_rescore())
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         results = self.scope_map_codes(
             results.source(excludes=['_synonyms_embeddings', '_embeddings']), self.map_codes_release)
         return results.sort(*sort_attrs) if sort else results
 
-    def get_verified_repos_rescore(self):
-        """Repositories that match: an exact id match first, then the verified ones, then the rest, each by its score"""
+    def get_repo_rescore(self):
+        """Repositories that match: an exact id first, then the verified ones, then the rest, each by its score"""
         return {
-            'window_size': REPO_RESCORE_WINDOW_SIZE,
+            'window_size': 1000,
             'query': {
-                'score_mode': 'total',
-                'query_weight': 1.0,
-                'rescore_query_weight': 1.0,
                 'rescore_query': {
                     'bool': {
                         'should': [
-                            {'constant_score': {
-                                'filter': {'term': {'verified': 'true'}}, 'boost': VERIFIED_REPO_RESCORE_BOOST}},
+                            {'constant_score': {  # boosts sit above any text score, so they order in tiers
+                                'filter': {'term': {'verified': 'true'}}, 'boost': 10_000}},
                             {'constant_score': {
                                 'filter': {'term': {'_mnemonic': {
-                                    'value': self.get_search_string(False, False), 'case_insensitive': True}}},
-                                'boost': EXACT_ID_REPO_RESCORE_BOOST}},
+                                    'value': self.get_search_string(lower=False, decode=False),
+                                    'case_insensitive': True}}},
+                                'boost': 100_000}},
                         ]
                     }
                 }

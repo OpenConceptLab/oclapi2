@@ -41,11 +41,11 @@ class SourceDocument(Document):
     match_algorithm = fields.ListField(fields.KeywordField())
     repo_type = fields.KeywordField()
     retired = fields.KeywordField(attr='retired')
-    verified = fields.KeywordField()
+    verified = fields.KeywordField(attr='is_verified')
 
     class Django:
         model = Source
-        related_models = [Source]  # a version's verification and release decide whether its HEAD is verified
+        related_models = [Source]
         fields = [
             'full_name',
             'revision_date',
@@ -194,10 +194,6 @@ class SourceDocument(Document):
         return Source.OBJECT_TYPE
 
     @staticmethod
-    def prepare_verified(instance):
-        return instance.is_verified
-
-    @staticmethod
     def get_instances_from_related(related_instance):
-        """The HEAD whose verified flag a version's save can change"""
+        """The HEAD, whose verified flag follows its latest release: what saving a version can change"""
         return None if related_instance.is_head else related_instance.head
