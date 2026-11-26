@@ -1,5 +1,6 @@
 import importlib
 import json
+from datetime import timedelta
 import threading
 import time
 from types import SimpleNamespace
@@ -20,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.test import APIClient
 
 from core.collections.models import Collection
-from core.collections.tests.factories import OrganizationCollectionFactory
+from core.collections.tests.factories import OrganizationCollectionFactory, ExpansionFactory
 from core.common.constants import HEAD, RETIRED_ACCESS_TYPE_EDIT, ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW, \
     OPENMRS_VALIDATION_SCHEMA
 from core.common.exceptions import BatchIndexingError
@@ -3558,6 +3559,78 @@ class SourceMappedSourcesIndexTest(OCLAPITransactionTestCase):
                 transaction.set_rollback(True)
 
             self.assertIn(f'Index Only Scan using {index} on mappings', plan, plan)
+
+
+class SourceHeadExportKeyTest(OCLTestCase):
+    """A HEAD export is served while a file with its key (last_child_update) exists, so a hard delete must move it"""
+    def setUp(self):
+        super().setUp()
+        self.source = OrganizationSourceFactory()
+        self.older = ConceptFactory(parent=self.source)
+        self.newer = ConceptFactory(parent=self.source)
+        self.later = Source.objects.get(id=self.source.id).last_child_update + timedelta(minutes=1)
+
+    def get_head(self):
+        return Source.objects.get(id=self.source.id)
+
+    def later_clock(self):
+        return patch('core.common.models.timezone', **{'now.return_value': self.later})
+
+    @patch('core.common.models.get_export_service')
+    def test_hard_deleting_a_concept_that_isnt_the_newest_stops_serving_the_head_export(self, export_service_mock):
+        head = self.get_head()
+        stale_key = head.version_export_path
+        export_service_mock.return_value.exists.side_effect = lambda key: key == stale_key
+        self.assertTrue(head.has_export())
+
+        with self.later_clock():
+            Concept.objects.filter(versioned_object_id=self.older.id).delete()
+
+        head = self.get_head()
+        self.assertFalse(Concept.objects.filter(versioned_object_id=self.older.id).exists())
+        self.assertEqual(head.last_child_update, self.later)
+        self.assertNotEqual(head.version_export_path, stale_key)
+        self.assertFalse(head.has_export())
+
+    def test_hard_deleting_a_mapping_moves_the_key(self):
+        MappingFactory(parent=self.source, from_concept=self.older, to_concept=self.newer)
+        mapping = Mapping.objects.filter(parent=self.source).order_by('id').first()
+        self.later = self.get_head().last_child_update + timedelta(minutes=1)
+
+        with self.later_clock():
+            mapping.delete()
+
+        self.assertEqual(self.get_head().last_child_update, self.later)
+
+    @staticmethod
+    def get_marks(queries):
+        return [
+            query for query in queries if query['sql'].startswith('UPDATE') and 'last_child_removal_at' in query['sql']]
+
+    def test_a_hard_delete_of_many_members_marks_their_source_once(self):
+        with CaptureQueriesContext(connection) as queries:
+            Concept.objects.filter(parent_id=self.source.id).delete()
+        self.assertEqual(len(self.get_marks(queries)), 1)
+
+    @patch('core.common.models.delete_s3_objects')
+    def test_deleting_a_source_doesn_t_mark_it_for_each_member(self, _):
+        with CaptureQueriesContext(connection) as queries:
+            self.get_head().delete()
+        self.assertEqual(self.get_marks(queries), [])
+
+    def test_a_delete_without_an_origin_still_marks_the_collections_listing_the_row(self):
+        from django.db.models.deletion import Collector
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        expansion.concepts.add(self.older)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+
+        collector = Collector(using='default')
+        collector.collect([self.older])
+        collector.delete()
+
+        self.assertIsNotNone(Collection.objects.get(id=collection.id).last_child_removal_at)
 
 
 class SourceNumericMnemonicIndexTest(OCLTestCase):

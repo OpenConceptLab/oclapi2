@@ -173,6 +173,15 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
     ):
         is_new = not self.id
         dirty_fields = self.get_dirty_fields()
+        # as stored: an instance of another version saved over this row (a FHIR ValueSet update) isn't a switch
+        switches_expansion = self.id and dirty_fields.get('expansion_uri') and (
+            update_fields is None or 'expansion_uri' in update_fields) and Collection.objects.filter(
+            id=self.id).exclude(expansion_uri=self.expansion_uri).exists()
+        if switches_expansion:
+            self.last_child_removal_at = timezone.now()  # another expansion may not list all of this one's members
+            self.__dict__.pop('version_export_path', None)
+            if update_fields is not None:
+                update_fields = [*update_fields, 'last_child_removal_at']
 
         super().save(*args, force_insert=force_insert, force_update=force_update, using=using,
                      update_fields=update_fields)
@@ -314,8 +323,13 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         self.__dict__.pop('locked_collection_versions', None)
         if user and user.is_authenticated:
             self.updated_by = user
+        fields = ['updated_by', 'updated_at']
+        if added_references:  # an added member can be older than the others, or than a removal, so it marks the key
+            self.last_child_removal_at = timezone.now()
+            self.__dict__.pop('version_export_path', None)
+            fields.append('last_child_removal_at')
         # only who changed it: its other values were saved by the caller, and a concurrent write's stay (its access)
-        self.save(update_fields=['updated_by', 'updated_at'])
+        self.save(update_fields=fields)
         self.update_children_counts()
         return added_references, errors
 
@@ -361,7 +375,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 expansion = self.expansion if self.expansion_uri else None
                 if expansion:
                     expansion.delete_expressions(expressions)
-                self.references.all().delete()
+                if self.references.all().delete()[0]:
+                    self.mark_own_child_removal()
                 if expansion:
                     expansion.drop_unresolved_entries_of_deleted_references()
                     expansion.mark_health_out_of_date()
@@ -376,7 +391,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             expansion = self.expansion if self.expansion_uri else None
             if expansion:
                 expansion.delete_references(references)
-            references.delete()
+            if references.delete()[0]:  # an export lists references too, even one that has no members
+                self.mark_own_child_removal()
             if expansion:
                 expansion.drop_unresolved_entries_of_deleted_references()
                 expansion.mark_health_out_of_date()
