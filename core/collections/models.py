@@ -2347,6 +2347,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     is_resolved = not ref.unapplied_valuesets and not unapplied_filters and (ref_system_versions or (
                         is_valueset_only and (_explicit_valueset_versions or _evaluated_valueset_versions)))
                     (resolved_ref_ids if is_resolved else unresolved_ref_ids).append(ref.id)
+            elif ref.unapplied_valuesets or unapplied_filters:
+                pass  # its saved results predate the rule: it adds or removes nothing
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
