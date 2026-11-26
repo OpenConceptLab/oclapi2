@@ -505,6 +505,17 @@ class ExpandCases(OpsCorpusMixin):
         expansion.save()
         self.assertEqual(issues_of(self.expand(url=FEVERS)),
                          ['error|not-found|not-found||VS_EXP_IMPORT_UNK_PINNED'])
+        # one that exists but has no default expansion is named as one that couldn't be applied, not one not found
+        expansion.unresolved_repo_versions = [{'url': 'http://example.org/vs', 'type': 'reference.valueset',
+                                               'reason': 'valueset_not_expanded'}]
+        expansion.save()
+        response = self.expand(url=FEVERS)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(issues_of(response), ['error|processing|vs-invalid||OCL_VS_EXP_IMPORT_NOT_EXPANDED'])
+        self.assertEqual(
+            response.data['issue'][0]['details']['text'],
+            "The included value set 'http://example.org/vs' has no default expansion, so it could not be applied "
+            "and the value set cannot be expanded")
         # a pinned concept or mapping is named as one, not as a code system; a code system keeps its message
         cannot = 'could not be found, so the value set cannot be expanded'
         concept, mapping = '/orgs/Acme/sources/CS/concepts/fever/', '/orgs/Acme/sources/CS/mappings/1/'

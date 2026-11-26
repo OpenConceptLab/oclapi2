@@ -46,7 +46,7 @@ from django.db.models import BooleanField, Case, Exists, ExpressionWrapper, F, F
 from django.db.models.functions import Coalesce, JSONObject
 from django.db.models.lookups import Regex
 
-from core.collections.constants import UNRESOLVED_RESOURCE_VERSION_TYPE
+from core.collections.constants import UNRESOLVED_RESOURCE_VERSION_TYPE, REFERENCE_VALUESET_NOT_EXPANDED
 from core.collections.models import Expansion
 from core.collections.utils import is_mapping
 from core.common.constants import HEAD
@@ -252,6 +252,11 @@ def unresolved(reference, value_set):
         kinds = {pinned.is_mapping for pinned in value_set.references.filter(
             expression=url, resource_version=version).only('reference_type', 'expression')}
         kind = 'mapping' if (kinds.pop() if len(kinds) == 1 else is_mapping(url)) else 'concept'
+    if kind == 'reference.valueset' and reference.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED:
+        return outcomes.FhirError(
+            f"The included value set '{url}' has no default expansion, so it could not be applied and the value set "
+            "cannot be expanded", tx_issue_type='vs-invalid', message_id='OCL_VS_EXP_IMPORT_NOT_EXPANDED',
+            status_code=422)
     message_id, message = UNRESOLVED.get(kind, UNRESOLVED['system'])[bool(version)]
     return outcomes.NotFoundError(message.format(url=url, version=version), tx_issue_type='not-found',
                                   message_id=message_id, status_code=422)

@@ -2166,9 +2166,10 @@ class CollectionReferenceTest(OCLTestCase):
                 self.assertEqual(concepts.count(), 0)
                 self.assertEqual(mappings.count(), 0)
                 self.assertEqual(reference.unapplied_valuesets, [(valueset_uri, reason)])
-                self.assertEqual(
-                    reference.resolve_valueset_versions_with_unresolved[2],
-                    [{'url': valueset_uri, 'namespace': None, 'type': 'reference.valueset'}])
+                entry = {'url': valueset_uri, 'namespace': None, 'type': 'reference.valueset'}
+                if reason == REFERENCE_VALUESET_NOT_EXPANDED:
+                    entry['reason'] = reason
+                self.assertEqual(reference.resolve_valueset_versions_with_unresolved[2], [entry])
 
     def test_get_concepts_one_valueset_that_cant_be_applied_among_others_finds_nothing(self):
         valueset = OrganizationCollectionFactory()
@@ -2199,7 +2200,8 @@ class CollectionReferenceTest(OCLTestCase):
         self.assertEqual(expansion.concepts.count(), 0)
         self.assertEqual(reference.unresolved_reason, REFERENCE_VALUESET_NOT_EXPANDED)
         self.assertIn(
-            {'url': unexpanded.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset'},
+            {'url': unexpanded.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset',
+             'reason': REFERENCE_VALUESET_NOT_EXPANDED},
             expansion.unresolved_repo_versions)
 
     def test_resolve_valueset_versions_with_unresolved_resolves_explicit_and_evaluated(self):

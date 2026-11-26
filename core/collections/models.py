@@ -1536,8 +1536,10 @@ class CollectionReference(models.Model):
             if version.id:
                 to_add.append(version)
             if valueset in unapplied:
-                unresolved.append(
-                    {'url': valueset, 'namespace': self.resolution_namespace, 'type': 'reference.valueset'})
+                entry = {'url': valueset, 'namespace': self.resolution_namespace, 'type': 'reference.valueset'}
+                if unapplied[valueset] == REFERENCE_VALUESET_NOT_EXPANDED:
+                    entry['reason'] = REFERENCE_VALUESET_NOT_EXPANDED  # it exists: not answered as one not found
+                unresolved.append(entry)
         return explicit, evaluated, unresolved
 
     def clean(self):
