@@ -4943,8 +4943,7 @@ class ExpansionTest(OCLTestCase):
         self.assertIsNone(new._collection_source_version)  # pylint: disable=protected-access
 
 
-@tag('es')
-class ExpansionParametersTest(OCLTestCase):
+class ExpansionParametersKeysTest(OCLTestCase):
     def test_normalize_keys(self):
         self.assertEqual(
             ExpansionParameters.normalize_keys({'system - version': 'a', 'exclude - system': 'b', 'activeOnly': True}),
@@ -4971,6 +4970,9 @@ class ExpansionParametersTest(OCLTestCase):
             ['systemVersion', 'foo'])
         self.assertEqual(ExpansionParameters.get_unsupported_keys(None), [])
 
+
+@tag('es')
+class ExpansionParametersTest(OCLTestCase):
     def test_apply_active_only(self):
         ConceptFactory(id=1, retired=False, mnemonic='active')
         ConceptFactory(id=2, retired=True, mnemonic='retired')
