@@ -1083,8 +1083,9 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
             sync=self.sync
         )
         headers = self.get_success_headers(serializer.validated_data)
-        return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
-                        headers=headers)
+        return Response(
+            self.get_response_serializer_class()(expansion, context={'request': request}).data,
+            status=status.HTTP_201_CREATED, headers=headers)
 
     @staticmethod
     def get_system_version_errors(parameters, version):

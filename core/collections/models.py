@@ -27,7 +27,7 @@ from core.collections.constants import (
     REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT,
     REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT,
     EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
-from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE
+from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE, get_health_for
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
@@ -499,19 +499,21 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         default_expansion = Expansion.objects.filter(
             uri=models.OuterRef('expansion_uri'), collection_version_id=models.OuterRef('id'))
         return queryset.annotate(
-            expansion_health_state=models.Subquery(default_expansion.values('health__state')[:1]),
+            expansion_health_data=models.Subquery(default_expansion.values('health')[:1]),
             expansion_health_is_current=models.Subquery(default_expansion.values('health_is_current')[:1]))
 
     @staticmethod
-    def get_expansion_health(version):
-        """{state, is_current} of the version's default expansion; None until it has been computed"""
-        if hasattr(version, 'expansion_health_state'):
-            state, is_current = version.expansion_health_state, version.expansion_health_is_current
+    def get_expansion_health(version, access):
+        """{state, is_current} of the version's default expansion as the reader `access` is for sees it; None until it
+        has been computed"""
+        if hasattr(version, 'expansion_health_data'):
+            health, is_current = version.expansion_health_data, version.expansion_health_is_current
         elif version.expansion_uri:
-            state, is_current = version.expansions.filter(uri=version.expansion_uri).values_list(
-                'health__state', 'health_is_current').first() or (None, None)
+            health, is_current = version.expansions.filter(uri=version.expansion_uri).values_list(
+                'health', 'health_is_current').first() or (None, None)
         else:
-            state, is_current = None, None
+            health, is_current = None, None
+        state = (get_health_for(health, access) or {}).get('state')
         return {'state': state, 'is_current': is_current} if state else None
 
     @cached_property
@@ -2769,17 +2771,26 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         recorded = None
         for entry in self.unresolved_repo_versions or []:
             if entry.get('reason') and entry.get('type') == 'reference.valueset':
-                version, _ = Collection.resolve_reference_expression(entry.get('url'), entry.get('namespace'))
-                if version.id:  # the version the build recorded, if any, not the one the URL resolves to now
-                    if recorded is None:
-                        recorded = [*self.explicit_collection_versions.all(), *self.evaluated_collection_versions.all()]
-                    version = next((
-                        _version for _version in recorded if drop_version(_version.uri) == drop_version(version.uri)
-                    ), version)
-                if not version.id or not version.has_view_access(user):
+                if recorded is None:
+                    recorded = self.get_recorded_collection_versions()
+                version = self.get_valueset_entry_version(entry.get('url'), entry.get('namespace'), recorded)
+                if not version or not version.has_view_access(user):
                     entry = {key: value for key, value in entry.items() if key != 'reason'}
             entries.append(entry)
         return entries
+
+    def get_recorded_collection_versions(self):
+        return [*self.explicit_collection_versions.all(), *self.evaluated_collection_versions.all()]
+
+    @staticmethod
+    def get_valueset_entry_version(url, namespace, recorded):
+        """The value set version an unresolved entry names: the one the build recorded, if any, not the one the URL
+        resolves to now. None when it isn't found"""
+        version, _ = Collection.resolve_reference_expression(url, namespace)
+        if not version.id:
+            return None
+        return next((_version for _version in recorded if drop_version(_version.uri) == drop_version(version.uri)),
+                    version)
 
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
