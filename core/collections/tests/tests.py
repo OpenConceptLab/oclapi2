@@ -4466,6 +4466,15 @@ class ExpansionTest(OCLTestCase):
 
         self.assertEqual(diff, {source_v1.url: source_v2.url})
 
+    def test_get_resolved_repo_version_diff_skips_a_repository_that_no_longer_resolves(self):
+        collection = OrganizationCollectionFactory()
+        expansion = ExpansionFactory(collection_version=collection)
+        # a release whose repository has no HEAD
+        orphan = OrganizationCollectionFactory(version='v1', released=True)
+        expansion.evaluated_collection_versions.add(orphan)
+
+        self.assertEqual(expansion.get_resolved_repo_version_diff_with_latest_updates(), {})
+
     @staticmethod
     def _released_versions(factory, *versions):
         head = factory()

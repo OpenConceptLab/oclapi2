@@ -2836,9 +2836,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     continue
                 repo_url = drop_version(version.url)
                 resolved, _ = ConceptContainerModel.resolve_reference_expression(repo_url)
-                if resolved and resolved.url != version.url:
-                    if access and 'collection' in rel and not (
-                            resolved.id and access.can_view(version) and access.can_view(resolved)):
+                # a repository that no longer resolves is answered as an unsaved one, with no URL
+                if resolved and resolved.id and resolved.url != version.url:
+                    if access and 'collection' in rel and not (access.can_view(version) and access.can_view(resolved)):
                         continue
                     diff[version.url] = resolved.url
 
