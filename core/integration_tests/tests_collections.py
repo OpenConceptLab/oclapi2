@@ -1285,6 +1285,21 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         add_references_mock.assert_not_called()
         self.assertEqual(self.collection.references.count(), 1)
 
+    @patch('core.collections.views.add_references')
+    def test_put_search_url_with_paging_parameters_isnt_refused(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        add_references_mock.return_value = ([], {}, [])
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [f'{self.concept.parent.uri}concepts/?q=fever&page=2&limit=25&sortAsc=name']}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        add_references_mock.assert_called_once()
+
     def test_put_200_concept_expression_with_a_query_string_its_filter_never_applies_to(self):
         response = self.client.put(
             self.collection.uri + 'references/',

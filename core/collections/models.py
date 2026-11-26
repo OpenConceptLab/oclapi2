@@ -33,7 +33,9 @@ from core.collections.utils import is_concept, is_mapping
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import (
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
-    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
+    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX, LIMIT_PARAM,
+    OFFSET_PARAM, FACETS_ONLY, BRIEF_PARAM, RAW_PARAM, INCLUDE_RETIRED_PARAM, INCLUDE_MAPPINGS_PARAM,
+    INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM,
     CONSECUTIVE_HYPHENS_REGEX, SERIALIZATION_RETRY_ATTEMPTS)
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
@@ -1190,10 +1192,17 @@ class CollectionReference(models.Model):
         EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM,
         VERBOSE_PARAM)
 
+    # a pasted search URL's parameters that aren't filters (paging, sorting, what each result shows): set aside
+    NON_FILTER_SEARCH_PARAMS = (
+        'page', LIMIT_PARAM, OFFSET_PARAM, 'sortAsc', 'sortDesc', FACETS_ONLY, BRIEF_PARAM, RAW_PARAM,
+        INCLUDE_RETIRED_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM)
+
     def get_filter_clause_property(self, filter_def):
-        """The property a filter entry matches on; None for a search modifier (exact_match, verbose and the like);
-        False for one that can't be applied: a property that isn't allowed, or an op not in ALLOWED_FILTER_OPS"""
+        """The property a filter entry matches on; None for a search modifier (exact_match, verbose and the like) or
+        a parameter set aside; False for one that can't be applied: a property not allowed, or an op not allowed"""
         prop = filter_def.get('property')
+        if prop in self.NON_FILTER_SEARCH_PARAMS:
+            return None
         is_modifier = bool(prop) and (
             to_snake_case(prop) == 'exact_match' or prop in self.SEARCH_MODIFIER_FILTER_PROPERTIES)
         if is_modifier or not prop or (
@@ -1240,7 +1249,7 @@ class CollectionReference(models.Model):
             pks = []
             document = resource_klass.get_search_document()
             search = document.search()
-            has_clause = has_unapplied = False
+            has_unapplied = False
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
                 prop = self.get_filter_clause_property(filter_def)
                 if not prop:
@@ -1258,9 +1267,8 @@ class CollectionReference(models.Model):
                     field = prop if prop.startswith('extras.') else to_snake_case(prop)
                     search = search.filter(Q('bool', should=[
                         Q('match', **{field: val}) for val in values], minimum_should_match=1))
-                has_clause = True
-            if has_unapplied and not has_clause:
-                return resource_klass.objects.none()  # no clause it could apply: never all of the candidates
+            if has_unapplied:
+                return resource_klass.objects.none()  # an entry it can't apply never leaves the others to widen it
             for ids in id_batches(queryset, 500):
                 # iterating on queryset because ES has max_clause limit default to 1024
                 pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC), len(ids))

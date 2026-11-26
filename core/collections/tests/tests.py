@@ -1773,7 +1773,7 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual(sorted(matched.values_list('id', flat=True)), sorted(concept.id for concept in concepts))
 
-    def test_get_concepts_applies_es_filter_with_case_switch_extras_and_unknown_property(self):
+    def test_get_concepts_applies_es_filter_with_case_switch_extras_and_search_url_parameters(self):
         source = OrganizationSourceFactory()
         concept = ConceptFactory(parent=source, concept_class='Diagnosis', extras={'nested': 'val1'})
         other_concept = ConceptFactory(parent=source, concept_class='Procedure')
@@ -1784,12 +1784,25 @@ class CollectionReferenceTest(OCLTestCase):
             filter=[
                 {'property': 'conceptClass', 'value': 'Diagnosis', 'op': '='},
                 {'property': 'extras.nested', 'value': 'val1', 'op': '='},
-                {'property': 'nonsense_prop', 'value': 'x', 'op': '='},
+                {'property': 'page', 'value': '2', 'op': '='},
+                {'property': 'limit', 'value': '25', 'op': '='},
             ]
         )
         concepts, _mappings = reference.get_concepts()
 
         self.assertEqual(list(concepts.values_list('id', flat=True)), [concept.id])
+
+        # one entry it can't apply makes the whole filter find nothing, whatever the others match
+        reference = CollectionReference(
+            system=source.uri, created_by=source.created_by, version='HEAD',
+            filter=[
+                {'property': 'conceptClass', 'value': 'Diagnosis', 'op': '='},
+                {'property': 'nonsense_prop', 'value': 'x', 'op': '='},
+            ]
+        )
+        concepts, _mappings = reference.get_concepts()
+
+        self.assertEqual(concepts.count(), 0)
 
     def test_get_concepts_applies_in_op(self):
         source = OrganizationSourceFactory()
@@ -1841,6 +1854,8 @@ class CollectionReferenceTest(OCLTestCase):
                 ({'property': 'q', 'op': 'in'}, 'q'),
                 ({'property': 'exact_match', 'op': '='}, None),
                 ({'property': 'verbose', 'op': '='}, None),
+                ({'property': 'page', 'op': '='}, None),
+                ({'property': 'limit', 'op': 'in'}, None),
                 ({'property': 'nonsense_prop', 'op': '='}, False),
                 ({'property': '', 'op': '='}, False),
                 ({'property': 'concept_class', 'op': 'is-a'}, False),
@@ -1864,6 +1879,9 @@ class CollectionReferenceTest(OCLTestCase):
             "Filter op 'is-a' is not supported for property 'concept'. Use one of: =, in.",
         ])
         self.assertEqual(CollectionReference(filter=None).get_filter_errors(), [])
+        self.assertEqual(CollectionReference(filter=[
+            {'property': 'q', 'value': 'x', 'op': '='}, {'property': 'page', 'value': '2', 'op': '='},
+            {'property': 'sortAsc', 'value': 'name', 'op': '='}]).get_filter_errors(), [])
         self.assertEqual(CollectionReference(code='c1', filter=[
             {'property': 'includeMappings', 'value': 'true', 'op': '='}]).get_filter_errors(), [])
         self.assertEqual(CollectionReference(filter=[{'property': 'bar'}]).get_filter_errors(), [])
