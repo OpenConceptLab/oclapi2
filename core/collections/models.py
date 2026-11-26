@@ -1207,8 +1207,9 @@ class CollectionReference(models.Model):
         return prop
 
     def get_filter_errors(self):
-        """Why each filter entry that can't be applied can't be, for a reference being saved"""
-        if not self.filter or not self.is_valid_filter():
+        """Why each filter entry that can't be applied can't be, for a reference being saved. A reference to a
+        code never applies its filter, so it has none"""
+        if not self.should_apply_filter() or not self.is_valid_filter():
             return []
         errors = []
         for filter_def in self.filter:  # pylint: disable=not-an-iterable

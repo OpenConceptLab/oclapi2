@@ -1256,6 +1256,16 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         add_references_mock.assert_not_called()
         self.assertEqual(self.collection.references.count(), 1)
 
+    def test_put_200_concept_expression_with_a_query_string_its_filter_never_applies_to(self):
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [f'{self.concept.uri}?includeMappings=true']}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_put_200_filter_with_in_op(self):
         source = self.concept.parent
         diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')

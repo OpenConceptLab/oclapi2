@@ -1861,6 +1861,8 @@ class CollectionReferenceTest(OCLTestCase):
             "Filter op 'is-a' is not supported for property 'datatype'. Use one of: =, in."
         ])
         self.assertEqual(CollectionReference(filter=None).get_filter_errors(), [])
+        self.assertEqual(CollectionReference(code='c1', filter=[
+            {'property': 'includeMappings', 'value': 'true', 'op': '='}]).get_filter_errors(), [])
         self.assertEqual(CollectionReference(filter=[{'property': 'bar'}]).get_filter_errors(), [])
 
     def test_get_concepts_applies_es_filter_with_q_property(self):
