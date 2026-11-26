@@ -4735,6 +4735,21 @@ class ExpansionTest(OCLTestCase):
         self.assertEqual(reference.unresolved_reason, REFERENCE_VERSION_NOT_HELD)
         self.assertEqual(list(expansion.concepts.all()), [old])
 
+    def test_add_references_a_pinned_reference_whose_valueset_cant_be_applied_says_so(self):
+        source, old, _, _ = CollectionReferenceTest.source_with_replaced_concept_version()
+        _, expansion, reference = self._expansion_with_resource_version_reference(source, old)
+        reference.valueset = [OrganizationCollectionFactory().uri]
+        reference.clear_resolution_cache()
+
+        with patch.object(CollectionReference, 'is_resource_version_repo_resolution_on', return_value=True), \
+                patch.object(Expansion, 'index_resources'):
+            expansion.add_references([reference])
+
+        self.assertEqual(reference.unresolved_reason, REFERENCE_VALUESET_NOT_EXPANDED)
+        self.assertEqual(expansion.concepts.count(), 0)
+        self.assertNotIn(
+            'reference.resource_version', [entry['type'] for entry in expansion.unresolved_repo_versions])
+
     @staticmethod
     def _system_reference(collection, system, version):
         reference = CollectionReference(

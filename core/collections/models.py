@@ -2282,7 +2282,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                         )
                         _mappings = _mappings.union(__mappings)
                     _mappings = Mapping.objects.filter(id__in=_mappings.values_list('id', flat=True))
-                if resolve_by_resource_version and ref.is_resource_versioned and \
+                if resolve_by_resource_version and ref.is_resource_versioned and not ref.unapplied_valuesets and \
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
                     ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD
