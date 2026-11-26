@@ -5676,6 +5676,23 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
         parser.parse()
         return parser.to_reference_structure()[0]
 
+    def test_filter_round_trips_through_its_expression(self):
+        filters = [
+            {'property': 'q', 'op': '=', 'value': 'fever'},
+            {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'},
+            {'property': 'datatype', 'op': '=', 'value': 'N/A'},
+        ]
+        reference = CollectionReference(
+            system='/orgs/MyOrg/sources/MySource/', reference_type='concepts', filter=filters)
+
+        expression = reference.build_expression()
+
+        self.assertEqual(
+            expression,
+            '/orgs/MyOrg/sources/MySource/concepts/?q=fever&concept_class=Diagnosis&concept_class=Procedure'
+            '&datatype=N/A')
+        self.assertEqual(self.get_structure(expression=expression)['filter'], filters)
+
     def test_parse_concept_expressions(self):
         reference = self.get_structure(expression='/concepts/')
         self.assertEqual(

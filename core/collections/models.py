@@ -1579,6 +1579,9 @@ class CollectionReference(models.Model):
         if filters:
             queries = []
             for filter_def in filters:  # pylint: disable=not-an-iterable
+                if filter_def.get('op') == self.OPERATOR_IN:  # repeated, as the parser reads an in back
+                    queries += [f'{filter_def["property"]}={value}' for value in self.get_filter_values(filter_def)]
+                    continue
                 value = ','.join(filter_def['value']) if isinstance(filter_def['value'], list) else filter_def['value']
                 queries.append(f'{filter_def["property"]}={value}')
             return '&'.join(queries)
