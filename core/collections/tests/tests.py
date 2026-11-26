@@ -25,7 +25,7 @@ from rest_framework.response import Response
 from core.collections.constants import SOURCE_TO_CONCEPTS, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL, \
     EXPANSION_LOCKED_REPO_VERSION_TOGGLE, RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, REFERENCE_FOUND_NOTHING, \
     REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS, VERSION_EXPANSION_LOCK, VERSION_EXPANSION_LATEST, \
-    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED
+    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_ALREADY_EXISTS
 from core.collections.dry_runs import ExpansionDryRun
 from core.collections.documents import CollectionDocument
 from core.common.constants import SERIALIZATION_RETRY_ATTEMPTS
@@ -2211,6 +2211,23 @@ class CollectionReferenceTest(OCLTestCase):
 
         self.assertEqual(concepts.count(), 0)
         self.assertEqual(reference.unapplied_valuesets, [(unexpanded.uri, REFERENCE_VALUESET_NOT_EXPANDED)])
+
+    def test_add_references_a_filter_saved_before_escaping_is_still_a_duplicate(self):
+        source = OrganizationSourceFactory()
+        collection = OrganizationCollectionFactory(autoexpand_head=False)
+        earlier = CollectionReference(
+            expression=f'{source.uri}concepts/?q=heart failure', collection=collection, system=source.uri,
+            filter=[{'property': 'q', 'op': '=', 'value': 'heart failure'}])
+        earlier.save()
+        again = CollectionReference(system=source.uri, filter=[{'property': 'q', 'op': '=', 'value': 'heart failure'}])
+
+        added, errors = collection.add_references([again], source.created_by)
+
+        self.assertEqual(added, [])
+        self.assertEqual(again.expression, earlier.expression)
+        self.assertEqual(
+            errors[earlier.expression][earlier.expression]['errors'][0]['description'], REFERENCE_ALREADY_EXISTS)
+        self.assertEqual(collection.references.count(), 1)
 
     def test_add_references_cascade_and_transform_with_a_valueset_that_cant_be_applied_says_why(self):
         source = OrganizationSourceFactory()
@@ -5767,7 +5784,7 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
         self.assertEqual(
             expression,
             '/orgs/MyOrg/sources/MySource/concepts/?q=fever&concept_class=Diagnosis&concept_class=Procedure'
-            '&datatype=N/A&external_id=a%26b%3Dc%20d')
+            '&datatype=N/A&external_id=a%26b%3Dc d')
         self.assertEqual(self.get_structure(expression=expression)['filter'], filters)
 
     def test_parse_concept_expressions(self):

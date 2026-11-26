@@ -2,7 +2,6 @@ import json
 import logging
 import time
 from contextlib import nullcontext
-from urllib.parse import quote
 
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
@@ -1593,10 +1592,15 @@ class CollectionReference(models.Model):
         if self.expression is None:
             self.expression = self.build_expression()
 
-    @staticmethod
-    def quote_filter_value(value):
-        """Escaped as the parser unescapes it, so a value with & or = reads back whole"""
-        return quote(str(value), safe='/,:|')
+    # only what splits or changes a value as the parser reads it; spaces stay, so earlier expressions still match
+    FILTER_VALUE_ESCAPES = (('%', '%25'), ('&', '%26'), ('=', '%3D'), ('#', '%23'), ('+', '%2B'))
+
+    @classmethod
+    def quote_filter_value(cls, value):
+        value = str(value)
+        for character, escape in cls.FILTER_VALUE_ESCAPES:
+            value = value.replace(character, escape)
+        return value
 
     def filter_to_querystring(self):
         if not self.is_valid_filter():
