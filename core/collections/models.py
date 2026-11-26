@@ -316,6 +316,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
 
     def add_references(self, references, user=None, _async=False):
         errors = {}
+        unapplied_errors = {}
         added_references = []
         total_references = []
         is_locked = CollectionReference.is_expansion_locked_repo_version_on()
@@ -329,7 +330,7 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             generated = reference.generate_references()
             if not generated and reference.unapplied_valuesets:
                 # a cascade-and-transform reference whose value set can't be applied generates nothing: say why
-                errors[reference.expression] = [self.get_unapplied_valueset_message(reference)]
+                unapplied_errors[reference.expression] = [self.get_unapplied_valueset_message(reference)]
             total_references += generated
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
@@ -347,6 +348,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 continue
             if reference.id:
                 added_references.append(reference)
+        # a direct add of the same expression in this request answers for it instead
+        added_expressions = {reference.expression for reference in added_references}
+        errors = {
+            **{expression: error for expression, error in unapplied_errors.items()
+               if expression not in added_expressions}, **errors}
 
         if self.expansion_uri:
             expansion = self.expansion

@@ -2251,6 +2251,23 @@ class CollectionReferenceTest(OCLTestCase):
             [entry.get('reason') for entry in expansion.get_unresolved_repo_versions_for(None)],
             [None, 'valueset_not_expanded', None])
 
+    def test_add_references_a_direct_add_answers_for_a_cascade_that_cant_be_applied_with_the_same_expression(self):
+        source = OrganizationSourceFactory()
+        concept = ConceptFactory(parent=source)
+        unexpanded = OrganizationCollectionFactory()
+        collection = OrganizationCollectionFactory()
+        cascading = CollectionReference(
+            system=source.uri, code=concept.mnemonic, valueset=[unexpanded.uri], cascade='sourcemappings',
+            transform='resourceversions', created_by=source.created_by)
+        direct = CollectionReference(
+            system=source.uri, code=concept.mnemonic, valueset=[unexpanded.uri], created_by=source.created_by)
+
+        added, errors = collection.add_references([cascading, direct], source.created_by)
+
+        self.assertEqual(cascading.expression, direct.expression)
+        self.assertEqual([reference.id for reference in added], [direct.id])
+        self.assertEqual(errors, {})
+
     def test_add_references_records_a_valueset_that_cant_be_applied(self):
         source = OrganizationSourceFactory()
         ConceptFactory(parent=source)
