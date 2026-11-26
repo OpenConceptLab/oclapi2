@@ -809,8 +809,9 @@ class ExpansionDetailSerializer(ValueSetAccessMixin, ModelSerializer):
         access = self.value_set_access
         versions = list(versions)
         access.prime_versions(versions)
+        # built without the request, as the nested lists always were: no external exports per row
         return CollectionVersionListSerializer(
-            [version for version in versions if access.can_view(version)], many=True, context=self.context).data
+            [version for version in versions if access.can_view(version)], many=True).data
 
     def get_explicit_collection_versions(self, obj):
         return self.get_viewable_collection_versions(obj.explicit_collection_versions.all())

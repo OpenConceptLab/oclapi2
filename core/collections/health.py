@@ -31,6 +31,7 @@ HEALTHY = 'healthy'
 
 SYSTEM_VERSION_PARAMETER_TYPE = 'expansion.parameters.system-version'
 VALUE_SET_WITHOUT_EXPANSION = 'value_set_without_expansion'
+UNRESOLVED_REFERENCES = 'unresolved_references'
 RESOURCE_TYPES = ('concepts', 'mappings')
 MEMBER_REASONS = (
     # references can't resolve to an unreleased version yet, so its owner needs to see it
@@ -311,7 +312,7 @@ class ExpansionHealth:
             key = version.uri if version else (url, namespace)
             value_set = value_sets.setdefault(key, {
                 'url': version.versioned_object_url if version else url, 'namespace': None if version else namespace,
-                'version_url': version.uri if version else None, 'reference_ids': set()})
+                'version_url': version.uri if version else None, 'reference_ids': set(), 'entries': 0})
             value_set['reference_ids'].add(reference_id)
 
         for reference_id in self.unexpanded_value_set_reference_ids:
@@ -329,9 +330,18 @@ class ExpansionHealth:
                     entry_versions[(url, namespace)] = self.expansion.get_valueset_entry_version(
                         url, namespace, recorded)
                 add(url, namespace, entry_versions[(url, namespace)], reference_id)
+        self.add_unresolved_entries(value_sets, entry_versions)
         return sorted((
             {**value_set, 'reference_ids': sorted(value_set['reference_ids'])} for value_set in value_sets.values()
         ), key=lambda value_set: (value_set['url'] or '', value_set['version_url'] or ''))
+
+    def add_unresolved_entries(self, value_sets, entry_versions):
+        """How many unresolved entries each value set stands for: one a reader can't view counts them as unresolved"""
+        for entry in self.expansion.unresolved_repo_versions or []:
+            if self.is_counted_as_without_expansion(entry):
+                key = (entry.get('url'), entry.get('namespace') or None)
+                version = entry_versions[key]
+                value_sets[version.uri if version else key]['entries'] += 1
 
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member (None: nothing to judge it against), and the keys of its
@@ -457,7 +467,7 @@ class ExpansionHealth:
         unresolved = self.expansion.unresolved_repo_versions or []
         # a value set with no expansion is counted once, as one without expansion
         # one no reference matches any more (its namespace changed) is still unresolved
-        add('unresolved_references', len([
+        add(UNRESOLVED_REFERENCES, len([
             entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE and
             not self.is_counted_as_without_expansion(entry)]))
         add(VALUE_SET_WITHOUT_EXPANSION, **self.get_value_set_without_expansion())
@@ -523,22 +533,34 @@ def get_health_value_set_urls(health):
 
 
 def get_health_for(health, access):
-    """Stored health as one reader may see it: a value set they can't view answers as not found, so it isn't
-    counted, and the state follows the reasons left. Health stored before it named its value sets counts none"""
+    """Stored health as one reader may see it: a value set they can't view answers as not found, so it isn't counted
+    as one without expansion, and any unresolved entry it left counts as unresolved. The state follows the reasons
+    left. Health stored before it named its value sets counts none, except for staff"""
     reasons = (health or {}).get('reasons')
-    if not reasons or all(reason.get('code') != VALUE_SET_WITHOUT_EXPANSION for reason in reasons):
+    if not reasons or access.is_staff or all(reason.get('code') != VALUE_SET_WITHOUT_EXPANSION for reason in reasons):
         return health
-    kept = []
+    access.prime_urls(get_health_value_set_urls(health))
+    kept, hidden_entries, position = [], 0, None
     for reason in reasons:
-        if reason.get('code') == VALUE_SET_WITHOUT_EXPANSION:
-            value_sets = [
-                value_set for value_set in reason.get('value_sets') or []
-                if access.can_view_url(value_set.get('version_url'))]
-            count = count_value_set_references(value_sets)
-            if not count:
-                continue
-            reason = {**reason, 'count': count, 'value_sets': value_sets}
-        kept.append(reason)
+        if reason.get('code') != VALUE_SET_WITHOUT_EXPANSION:
+            kept.append(reason)
+            continue
+        position = len(kept)
+        value_sets = []
+        for value_set in reason.get('value_sets') or []:
+            if access.can_view_url(value_set.get('version_url')):
+                value_sets.append(value_set)
+            else:
+                hidden_entries += value_set.get('entries') or 0
+        count = count_value_set_references(value_sets)
+        if count:
+            kept.append({**reason, 'count': count, 'value_sets': value_sets})
+    if hidden_entries:
+        unresolved = next((reason for reason in kept if reason.get('code') == UNRESOLVED_REFERENCES), None)
+        if unresolved:
+            kept[kept.index(unresolved)] = {**unresolved, 'count': unresolved['count'] + hidden_entries}
+        else:
+            kept.insert(position, {'code': UNRESOLVED_REFERENCES, 'count': hidden_entries})
     state = health.get('state')
     if state == UNHEALTHY and not kept:
         state = HEAD_RESOLVED if health.get('head_resolved_repositories') else HEALTHY
