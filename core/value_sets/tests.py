@@ -305,6 +305,8 @@ class ValueSetTest(OCLAPITestCase):
                 'id': 'c2',
                 'url': 'http://c2.com',
                 'status': 'draft',
+                'name': 'collection1',
+                'description': 'This is a test collection',
                 'compose': {'include': [{
                     'system': 'http://some/url',
                     'version': self.org_source_v2.version,
@@ -314,7 +316,7 @@ class ValueSetTest(OCLAPITestCase):
             format='json'
         )
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.data)
         head = Collection.objects.get(user=self.user, mnemonic='c2', version='HEAD')
         reference = head.references.get()
         self.assertEqual(reference.filter, [{'property': 'concept', 'op': 'is-a', 'value': self.concept_1.mnemonic}])
