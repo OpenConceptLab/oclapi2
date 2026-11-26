@@ -274,6 +274,45 @@ class ExpansionHealthTest(OCLTestCase):
 
         self.assertEqual(self.reason_codes(self.health()), {'value_set_without_expansion': 1})
 
+    def test_a_value_set_with_no_expansion_is_counted_once(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        self.reference(concept, version)
+        unexpanded = OrganizationCollectionFactory(organization=self.source.organization)
+        reference = CollectionReference(
+            expression=f'{self.source.uri}concepts/', collection=self.collection, system=self.source.uri,
+            valueset=[unexpanded.uri])
+        reference.save()
+        # recorded in the namespace the reference resolves in, as a build records it
+        self.expansion.unresolved_repo_versions = [{
+            'url': unexpanded.uri, 'namespace': reference.resolution_namespace, 'type': 'reference.valueset',
+            'reason': 'valueset_not_expanded'}]
+        self.expansion.save()
+
+        self.assertEqual(self.reason_codes(self.health()), {'value_set_without_expansion': 1})
+
+        # recorded for the URL in another namespace, it matches no reference: still an unresolved one
+        self.expansion.unresolved_repo_versions = [{
+            'url': unexpanded.uri, 'namespace': '/orgs/other/', 'type': 'reference.valueset',
+            'reason': 'valueset_not_expanded'}]
+        self.expansion.save()
+
+        self.assertEqual(self.reason_codes(self.health()), {'unresolved_references': 1})
+
+    def test_a_filter_ocl_cant_apply_is_counted_apart_from_unresolved_references(self):
+        concept = ConceptFactory(parent=self.source)
+        version = concept.get_latest_version()
+        self.expansion.evaluated_source_versions.add(self.release('v1', version))
+        self.reference(concept, version)
+        self.expansion.unresolved_repo_versions = [
+            {'url': f'{self.source.uri}concepts/?concept=x', 'namespace': None, 'type': 'reference.filter',
+             'reason': 'filter_not_applied', 'filter': [{'property': 'concept', 'op': 'is-a'}]},
+            {'url': '/orgs/nobody/sources/nothing/', 'type': 'reference.system'}]
+        self.expansion.save()
+
+        self.assertEqual(self.reason_codes(self.health()), {'filter_not_applied': 1, 'unresolved_references': 1})
+
     def test_repository_recorded_at_two_versions_by_unversioned_references_is_a_duplicate(self):
         concept = ConceptFactory(parent=self.source)
         version = concept.get_latest_version()

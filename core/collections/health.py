@@ -7,6 +7,7 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from django.utils.functional import cached_property
 
+from core.collections.constants import REFERENCE_VALUESET_NOT_EXPANDED, UNRESOLVED_FILTER_TYPE
 from core.common.constants import HEAD
 from core.common.utils import drop_version
 
@@ -262,6 +263,30 @@ class ExpansionHealth:
                     self.expansion, valueset_version_cache=self._valueset_version_cache))
         }
 
+    @cached_property
+    def unexpanded_value_set_entries(self):
+        """(ids of the references naming a value set the build recorded as having no default expansion, the
+        (url, namespace) of each such entry one of them matched)"""
+        named = {
+            (entry.get('url'), entry.get('namespace') or None)
+            for entry in self.expansion.unresolved_repo_versions or []
+            if entry.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED}
+        urls = {url for url, _ in named}
+        reference_ids, matched = set(), set()
+        for reference in self.references:
+            if not set(reference.valueset or []) & urls:
+                continue
+            # a canonical URL can resolve differently in another namespace
+            keys = {(valueset, reference.resolution_namespace or None) for valueset in reference.valueset} & named
+            if keys:
+                reference_ids.add(reference.id)
+                matched |= keys
+        return reference_ids, matched
+
+    def is_counted_as_without_expansion(self, entry):
+        return entry.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED and (
+            entry.get('url'), entry.get('namespace') or None) in self.unexpanded_value_set_entries[1]
+
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member (None: nothing to judge it against), and the keys of its
         resolved repo versions that hold it"""
@@ -384,10 +409,17 @@ class ExpansionHealth:
         add('resource_versioned_references', len(
             [reference for reference in self.references if reference.is_resource_versioned]))
         unresolved = self.expansion.unresolved_repo_versions or []
-        add('unresolved_references', len(
-            [entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE]))
+        # a value set with no expansion is counted once, as one without expansion
+        # one no reference matches any more (its namespace changed) is still unresolved
+        add('unresolved_references', len([
+            entry for entry in unresolved if entry.get('type') not in (
+                SYSTEM_VERSION_PARAMETER_TYPE, UNRESOLVED_FILTER_TYPE) and
+            not self.is_counted_as_without_expansion(entry)]))
+        # OCL couldn't evaluate these, so they are counted apart from references that resolved to nothing
+        add('filter_not_applied', len([entry for entry in unresolved if entry.get('type') == UNRESOLVED_FILTER_TYPE]))
         add('value_set_without_expansion', len(
-            self.unexpanded_value_set_reference_ids | self.unexpanded_value_set_exclude_ids))
+            self.unexpanded_value_set_reference_ids | self.unexpanded_value_set_exclude_ids |
+            self.unexpanded_value_set_entries[0]))
         add('system_version_unresolved', len(
             [entry for entry in unresolved if entry.get('type') == SYSTEM_VERSION_PARAMETER_TYPE]))
         for member_class, code in MEMBER_REASONS:
