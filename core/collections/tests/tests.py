@@ -1793,9 +1793,9 @@ class CollectionReferenceTest(OCLTestCase):
 
     def test_get_concepts_applies_in_op(self):
         source = OrganizationSourceFactory()
-        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')
-        procedure = ConceptFactory(parent=source, concept_class='Procedure')
-        other = ConceptFactory(parent=source, concept_class='Misc')
+        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis', mnemonic='renal-failure')
+        procedure = ConceptFactory(parent=source, concept_class='Procedure', mnemonic='headache')
+        other = ConceptFactory(parent=source, concept_class='Misc', mnemonic='fever')
         ConceptDocument().update([diagnosis, procedure, other])
 
         reference = CollectionReference(
