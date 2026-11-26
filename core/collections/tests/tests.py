@@ -4,6 +4,7 @@ import os
 import random
 import tempfile
 import threading
+from datetime import timedelta
 from io import StringIO
 
 from celery_once import AlreadyQueued
@@ -14,6 +15,7 @@ from django.http import QueryDict
 from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from django.db import OperationalError, connection, transaction
+from django.utils import timezone
 from mock import patch, Mock, call
 from mock.mock import ANY
 from rest_framework import status
@@ -406,6 +408,23 @@ class CollectionTest(OCLTestCase):
         self.assertEqual(collection2.references.count(), 1)
         self.assertEqual(collection1.references.first().expression, collection2.references.first().expression)
         self.assertNotEqual(collection1.references.first().id, collection2.references.first().id)
+
+    def test_seed_references_copies_head_last_resolved_at(self):
+        head = OrganizationCollectionFactory()
+        version = OrganizationCollectionFactory(version='v1', mnemonic=head.mnemonic, organization=head.organization)
+        resolved_at = timezone.now() - timedelta(days=3)
+        resolved = CollectionReference(
+            expression='/orgs/a/sources/a/concepts/c1/', collection=head, last_resolved_at=resolved_at)
+        resolved.save()
+        unresolved = CollectionReference(
+            expression='/orgs/missing/sources/missing/concepts/c1/', collection=head, last_resolved_at=None)
+        unresolved.save()
+
+        version.seed_references()
+
+        self.assertEqual(
+            dict(version.references.values_list('expression', 'last_resolved_at')),
+            {resolved.expression: resolved_at, unresolved.expression: None})
 
     def test_validate_reference_already_exists(self):
         collection = OrganizationCollectionFactory()
