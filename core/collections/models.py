@@ -1462,11 +1462,16 @@ class CollectionReference(models.Model):
         return [version for _, version in self.resolved_valuesets if version.id]
 
     @cached_property
+    def viewable_valueset_version_ids(self):
+        return {
+            version.id for version in self.resolve_valueset_versions if version.can_view_all_content(self.created_by)}
+
+    @cached_property
     def valueset_expansions(self):
         """{value set version id: its default expansion} for those the reference's creator can view"""
         return {
             version.id: version.expansion for version in self.resolve_valueset_versions
-            if version.expansion_uri and version.can_view_all_content(self.created_by)
+            if version.expansion_uri and version.id in self.viewable_valueset_version_ids
         }
 
     @cached_property
@@ -1475,7 +1480,7 @@ class CollectionReference(models.Model):
         answers as one that doesn't exist"""
         unapplied = []
         for valueset, version in self.resolved_valuesets:
-            if not version.id or not version.can_view_all_content(self.created_by):
+            if not version.id or version.id not in self.viewable_valueset_version_ids:
                 unapplied.append((valueset, REFERENCE_VALUESET_NOT_FOUND))
             elif not self.valueset_expansions.get(version.id):
                 unapplied.append((valueset, REFERENCE_VALUESET_NOT_EXPANDED))
@@ -1511,7 +1516,7 @@ class CollectionReference(models.Model):
 
     VALUESET_RESOLUTION_CACHE = (
         'resolved_valuesets', 'resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved',
-        'valueset_expansions', 'unapplied_valuesets')
+        'viewable_valueset_version_ids', 'valueset_expansions', 'unapplied_valuesets')
 
     def clear_resolution_cache(self):
         for attr in ('resolution_namespace', 'resolve_system_version', 'resolve_expression_system_version',
