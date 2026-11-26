@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction, OperationalError
-from django.db.models import UniqueConstraint, F, QuerySet, Max
+from django.db.models import UniqueConstraint, F, QuerySet, Max, Exists, OuterRef
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -192,6 +192,8 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             self.resolve_url_registry_entries_later()
         if self.id and not is_new and HEALTH_RELEVANT_VERSION_FIELDS & set(dirty_fields):
             Expansion.mark_health_not_current_for_repository(self)
+        if self.id and not is_new and 'expansion_uri' in dirty_fields:
+            Expansion.on_default_expansion_change(self, dirty_fields['expansion_uri'])
 
     def post_create_actions(self):
         if self.should_auto_expand:
@@ -2808,7 +2810,8 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return None
         from core.collections.health import ExpansionHealth
         expansions = Expansion.objects.filter(id=self.id)
-        if not self.is_default:
+        # read now, not from the version a build loaded at its start: the default may have changed since
+        if not Collection.objects.filter(id=self.collection_version_id, expansion_uri=self.uri).exists():
             expansions.update(health=None, health_is_current=None)
             self.health = None
             return None
@@ -2824,7 +2827,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return None
         # the store bumps it too, so an older run that ends after a newer one (a rebuild's) can't overwrite it. Never
         # during a build, which may have cleared the members: the build computes its own once it ends
-        if not expansions.filter(health_revision=revision, is_processing=False).update(
+        is_default = Collection.objects.filter(id=OuterRef('collection_version_id'), expansion_uri=OuterRef('uri'))
+        # an Exists, not a join, keeps it a one-table update that re-checks the revision of the latest committed row
+        if not expansions.filter(Exists(is_default), health_revision=revision, is_processing=False).update(
                 health=health, health_is_current=True, health_revision=F('health_revision') + 1):
             # marked, or stored by a newer run, while it computed: a fresh run reads the change
             if not expansions.filter(is_processing=True).exists():
@@ -2920,6 +2925,23 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         ).values_list('id', flat=True).distinct())
         cls.mark_health_not_current(expansion_ids)
         return expansion_ids
+
+    @classmethod
+    def on_default_expansion_change(cls, collection_version, previous_uri):
+        """Only the default keeps health: the one that stops being it drops its stored health, and the new default
+        is recomputed now rather than by the nightly recheck"""
+        expansions = cls.objects.filter(collection_version_id=collection_version.id)
+        if previous_uri and previous_uri != collection_version.expansion_uri:
+            # bumped, so a run that started while it was the default can't store its result
+            expansions.filter(uri=previous_uri).update(
+                health=None, health_is_current=None, health_revision=F('health_revision') + 1)
+        default = expansions.filter(uri=collection_version.expansion_uri).only('id', 'is_processing').first() \
+            if collection_version.expansion_uri else None
+        # out of date, not None: its build computes health once it ends. A build that ended meanwhile is recomputed
+        marked = default and default.is_processing and cls.is_health_on() and expansions.filter(
+            id=default.id, is_processing=True).update(health_is_current=False, health_revision=F('health_revision') + 1)
+        if default and not marked:
+            default.mark_health_out_of_date()
 
     @classmethod
     def mark_health_not_current_for_value_set(cls, collection_version):
