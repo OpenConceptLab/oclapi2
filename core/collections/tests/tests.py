@@ -1854,11 +1854,14 @@ class CollectionReferenceTest(OCLTestCase):
             {'property': 'conceptclass', 'value': 'Diagnosis', 'op': '='},
             {'property': 'datatype', 'value': 'N/A', 'op': 'is-a'},
             {'property': 'excludeFuzzy', 'value': 'false', 'op': '='},
+            {'property': 'concept', 'value': 'x', 'op': 'is-a'},
         ])
 
         self.assertEqual(reference.get_filter_errors(), [
             "Filter property 'conceptclass' is not supported.",
-            "Filter op 'is-a' is not supported for property 'datatype'. Use one of: =, in."
+            "Filter op 'is-a' is not supported for property 'datatype'. Use one of: =, in.",
+            "Filter property 'concept' is not supported.",
+            "Filter op 'is-a' is not supported for property 'concept'. Use one of: =, in.",
         ])
         self.assertEqual(CollectionReference(filter=None).get_filter_errors(), [])
         self.assertEqual(CollectionReference(code='c1', filter=[

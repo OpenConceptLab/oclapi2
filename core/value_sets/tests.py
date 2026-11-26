@@ -210,7 +210,7 @@ class ValueSetTest(OCLAPITestCase):
         self.assertEqual(resource['compose']['include'][0]['version'], self.org_source_v2.version)
         self.assertIsNone(resource['compose']['include'][0].get('concept'))
 
-    def test_create_with_is_a_filter_and_system(self):
+    def test_create_with_supported_filter_and_system(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
 
         response = self.client.post(
@@ -243,8 +243,8 @@ class ValueSetTest(OCLAPITestCase):
                     "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
                     "filter": [
                       {
-                        "property": "concept",
-                        "op": "is-a",
+                        "property": "concept_class",
+                        "op": "=",
                         "value": "_ActEncounterCode"
                       }
                     ]
@@ -283,7 +283,7 @@ class ValueSetTest(OCLAPITestCase):
         )
         self.assertEqual(
             resource['compose']['include'][0]['filter'][0],
-            {'property': 'concept', 'op': 'is-a', 'value': '_ActEncounterCode'}
+            {'property': 'concept_class', 'op': '=', 'value': '_ActEncounterCode'}
         )
         self.assertIsNone(resource['compose']['include'][0].get('concept'))
         self.assertEqual(
@@ -293,6 +293,30 @@ class ValueSetTest(OCLAPITestCase):
                  'concept': [{'code': '_ActEncounterCode'}]
              }]
         )
+
+    def test_create_with_unsupported_filter_op_400(self):
+        response = self.client.post(
+            f'/users/{self.user.username}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'ValueSet',
+                'id': 'v3-ActEncounterCode',
+                'url': 'http://terminology.hl7.org/ValueSet/v3-ActEncounterCode',
+                'status': 'active',
+                'compose': {'include': [{
+                    'system': 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+                    'filter': [{'property': 'concept', 'op': 'is-a', 'value': '_ActEncounterCode'}]
+                }]}
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['resourceType'], 'OperationOutcome')
+        text = ' '.join(issue['details']['text'] for issue in response.data['issue'])
+        self.assertIn("Filter op 'is-a' is not supported for property 'concept'. Use one of: =, in.", text)
+        self.assertIn("Filter property 'concept' is not supported.", text)
+        self.assertFalse(Collection.objects.filter(mnemonic='v3-ActEncounterCode').exists())
 
     def test_create_with_filter_and_system_and_no_filter(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())

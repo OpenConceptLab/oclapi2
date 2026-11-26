@@ -89,6 +89,10 @@ class ComposeValueSetField(serializers.Field):
             exclude.update({'transform': 'resourceversions'})
             exclude.update({'include': False})
             references += self.transform_to_ref(exclude)
+        errors = {reference.expression: reference.get_filter_errors() for reference in references}
+        errors = {expression: messages for expression, messages in errors.items() if messages}
+        if errors:  # as the native API: a filter that can't be applied is refused, never saved to match everything
+            raise serializers.ValidationError({'filter': errors})
         if references:
             res = {'references': references}
             if 'lockedDate' in data:

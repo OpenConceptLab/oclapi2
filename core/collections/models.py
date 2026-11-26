@@ -1222,7 +1222,7 @@ class CollectionReference(models.Model):
                 prop in self.get_allowed_filter_properties_but_need_case_switch())
             if not is_known_property:
                 errors.append(f"Filter property '{prop}' is not supported.")
-            else:
+            if operator not in self.ALLOWED_FILTER_OPS:
                 errors.append(
                     f"Filter op '{operator}' is not supported for property '{prop}'. "
                     f"Use one of: {', '.join(self.ALLOWED_FILTER_OPS)}.")
