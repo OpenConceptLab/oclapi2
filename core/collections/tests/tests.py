@@ -1849,19 +1849,20 @@ class CollectionReferenceTest(OCLTestCase):
         reference = CollectionReference(reference_type='concepts')
         for filter_def, expected in (
                 ({'property': 'concept_class', 'op': '='}, 'concept_class'),
-                ({'property': 'conceptClass', 'op': 'in'}, 'concept_class'),
+                ({'property': 'conceptClass', 'op': 'in', 'value': 'a,b'}, 'concept_class'),
                 ({'property': 'extras.nested', 'op': '='}, 'extras.nested'),
-                ({'property': 'q', 'op': 'in'}, 'q'),
+                ({'property': 'q', 'op': 'in', 'value': 'a,b'}, 'q'),
                 ({'property': 'exact_match', 'op': '='}, None),
                 ({'property': 'verbose', 'op': '='}, None),
                 ({'property': 'verbose', 'op': 'regex'}, False),
                 ({'property': 'exact_match', 'op': 'is-a'}, False),
                 ({'property': 'page', 'op': '='}, None),
-                ({'property': 'limit', 'op': 'in'}, None),
+                ({'property': 'limit', 'op': 'in', 'value': '1,2'}, None),
                 ({'property': 'nonsense_prop', 'op': '='}, False),
                 ({'property': '', 'op': '='}, False),
                 ({'property': 'concept_class', 'op': 'is-a'}, False),
-                ({'property': 'extras.nested', 'op': 'regex'}, False)):
+                ({'property': 'extras.nested', 'op': 'regex'}, False),
+                ({'property': 'concept_class', 'op': 'in', 'value': ''}, False)):
             with self.subTest(filter_def=filter_def):
                 self.assertEqual(reference.get_filter_clause_property(filter_def), expected)
 
@@ -1872,6 +1873,7 @@ class CollectionReferenceTest(OCLTestCase):
             {'property': 'datatype', 'value': 'N/A', 'op': 'is-a'},
             {'property': 'excludeFuzzy', 'value': 'false', 'op': '='},
             {'property': 'concept', 'value': 'x', 'op': 'is-a'},
+            {'property': 'external_id', 'value': ' , ', 'op': 'in'},
         ])
 
         self.assertEqual(reference.get_filter_errors(), [
@@ -1879,6 +1881,7 @@ class CollectionReferenceTest(OCLTestCase):
             "Filter op 'is-a' is not supported for property 'datatype'. Use one of: =, in.",
             "Filter property 'concept' is not supported.",
             "Filter op 'is-a' is not supported for property 'concept'. Use one of: =, in.",
+            "Filter op 'in' for property 'external_id' has no values.",
         ])
         self.assertEqual(CollectionReference(filter=None).get_filter_errors(), [])
         self.assertEqual(CollectionReference(filter=[
@@ -5737,6 +5740,7 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
             {'property': 'q', 'op': '=', 'value': 'fever'},
             {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'},
             {'property': 'datatype', 'op': '=', 'value': 'N/A'},
+            {'property': 'external_id', 'op': '=', 'value': 'a&b=c d'},
         ]
         reference = CollectionReference(
             system='/orgs/MyOrg/sources/MySource/', reference_type='concepts', filter=filters)
@@ -5746,7 +5750,7 @@ class CollectionReferenceExpressionStringParserTest(OCLTestCase):
         self.assertEqual(
             expression,
             '/orgs/MyOrg/sources/MySource/concepts/?q=fever&concept_class=Diagnosis&concept_class=Procedure'
-            '&datatype=N/A')
+            '&datatype=N/A&external_id=a%26b%3Dc%20d')
         self.assertEqual(self.get_structure(expression=expression)['filter'], filters)
 
     def test_parse_concept_expressions(self):

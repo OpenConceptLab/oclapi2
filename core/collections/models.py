@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from contextlib import nullcontext
+from urllib.parse import quote
 
 from celery_once import AlreadyQueued
 from dirtyfields import DirtyFieldsMixin
@@ -1213,7 +1214,8 @@ class CollectionReference(models.Model):
         """The property a filter entry matches on; None for a search modifier (exact_match, verbose and the like) or
         a parameter set aside; False for one that can't be applied: a property not allowed, or an op not allowed"""
         prop = filter_def.get('property')
-        if filter_def.get('op') not in self.ALLOWED_FILTER_OPS:
+        if filter_def.get('op') not in self.ALLOWED_FILTER_OPS or (
+                filter_def.get('op') == self.OPERATOR_IN and not self.get_filter_values(filter_def)):
             return False
         if prop in self.NON_FILTER_SEARCH_PARAMS:
             return None
@@ -1247,11 +1249,15 @@ class CollectionReference(models.Model):
                 errors.append(
                     f"Filter op '{operator}' is not supported for property '{prop}'. "
                     f"Use one of: {', '.join(self.ALLOWED_FILTER_OPS)}.")
+            elif is_known_property:
+                errors.append(f"Filter op 'in' for property '{prop}' has no values.")
         return errors
 
     def get_filter_values(self, filter_def):
-        value = filter_def['value']
-        if filter_def['op'] == self.OPERATOR_IN:
+        value = filter_def.get('value')
+        if filter_def.get('op') == self.OPERATOR_IN:
+            if value is None:
+                return []
             values = value if isinstance(value, list) else str(value).split(',')
             return compact([str(val).strip() for val in values])
         return [value]
@@ -1268,9 +1274,6 @@ class CollectionReference(models.Model):
                     has_unapplied = has_unapplied or prop is False
                     continue
                 values = self.get_filter_values(filter_def)
-                if not values:
-                    has_unapplied = True
-                    continue
                 if prop == 'q':
                     criteria = compact([self._get_search_criterion(val, document) for val in values])
                     if criteria:
@@ -1584,6 +1587,11 @@ class CollectionReference(models.Model):
         if self.expression is None:
             self.expression = self.build_expression()
 
+    @staticmethod
+    def quote_filter_value(value):
+        """Escaped as the parser unescapes it, so a value with & or = reads back whole"""
+        return quote(str(value), safe='/,:|')
+
     def filter_to_querystring(self):
         if not self.is_valid_filter():
             return None
@@ -1592,10 +1600,12 @@ class CollectionReference(models.Model):
             queries = []
             for filter_def in filters:  # pylint: disable=not-an-iterable
                 if filter_def.get('op') == self.OPERATOR_IN:  # repeated, as the parser reads an in back
-                    queries += [f'{filter_def["property"]}={value}' for value in self.get_filter_values(filter_def)]
+                    queries += [
+                        f'{filter_def["property"]}={self.quote_filter_value(value)}'
+                        for value in self.get_filter_values(filter_def)]
                     continue
                 value = ','.join(filter_def['value']) if isinstance(filter_def['value'], list) else filter_def['value']
-                queries.append(f'{filter_def["property"]}={value}')
+                queries.append(f'{filter_def["property"]}={self.quote_filter_value(value)}')
             return '&'.join(queries)
         return None
 
