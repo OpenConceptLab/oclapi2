@@ -32,6 +32,9 @@ HEALTHY = 'healthy'
 SYSTEM_VERSION_PARAMETER_TYPE = 'expansion.parameters.system-version'
 VALUE_SET_WITHOUT_EXPANSION = 'value_set_without_expansion'
 UNRESOLVED_REFERENCES = 'unresolved_references'
+# the reasons get_reasons adds before unresolved_references, in its order
+REASONS_BEFORE_UNRESOLVED = (
+    'inconsistent_resolution', 'duplicate_repo_versions', 'locked_version_deleted', 'resource_versioned_references')
 RESOURCE_TYPES = ('concepts', 'mappings')
 MEMBER_REASONS = (
     # references can't resolve to an unreleased version yet, so its owner needs to see it
@@ -316,25 +319,29 @@ class ExpansionHealth:
                 'version_urls': sorted(version.uri for version in versions), 'reference_ids': set(), 'entries': 0})
             value_set['reference_ids'].add(reference_id)
 
-        for reference_id in self.unexpanded_value_set_reference_ids:
-            for version in self.resolved_versions[reference_id]:
-                add(None, None, [version], reference_id)
-        for reference_id, versions in self.unexpanded_value_set_excludes.items():
-            for version in versions:
-                add(None, None, [version], reference_id)
-        recorded, entry_versions = None, {}
+        entry_versions = self.get_entry_versions()
+        # a reference's entry is counted once, on the versions grouped under it, as its reason is shown
+        grouped = {}
         for reference_id, keys in self.unexpanded_value_set_entries.items():
-            for url, namespace in keys:
-                if (url, namespace) not in entry_versions:
-                    if recorded is None:
-                        recorded = self.expansion.get_recorded_collection_versions()
-                    entry_versions[(url, namespace)] = self.expansion.get_valueset_entry_versions(
-                        url, namespace, recorded)
-                add(url, namespace, entry_versions[(url, namespace)], reference_id)
+            for key in keys:
+                add(*key, entry_versions[key], reference_id)
+                grouped.setdefault(reference_id, set()).update(version.uri for version in entry_versions[key])
+        for reference_id, versions in [
+                *((_id, self.resolved_versions[_id]) for _id in self.unexpanded_value_set_reference_ids),
+                *self.unexpanded_value_set_excludes.items()]:
+            for version in versions:
+                if version.uri not in grouped.get(reference_id, set()):
+                    add(None, None, [version], reference_id)
         self.add_unresolved_entries(value_sets, entry_versions)
         return sorted((
             {**value_set, 'reference_ids': sorted(value_set['reference_ids'])} for value_set in value_sets.values()
         ), key=lambda value_set: (value_set['url'] or '', value_set['version_urls']))
+
+    def get_entry_versions(self):
+        """{(url, namespace) of each counted entry: the value set versions it names}"""
+        keys = self.counted_unexpanded_entries
+        recorded = self.expansion.get_recorded_collection_versions() if keys else []
+        return {key: self.expansion.get_valueset_entry_versions(*key, recorded) for key in keys}
 
     @staticmethod
     def value_set_key(url, namespace, versions):
@@ -554,12 +561,11 @@ def get_health_for(health, access):
     if not reasons or access.is_staff or all(reason.get('code') != VALUE_SET_WITHOUT_EXPANSION for reason in reasons):
         return health
     access.prime_urls(get_health_value_set_urls(health))
-    kept, hidden_entries, position = [], 0, None
+    kept, hidden_entries = [], 0
     for reason in reasons:
         if reason.get('code') != VALUE_SET_WITHOUT_EXPANSION:
             kept.append(reason)
             continue
-        position = len(kept)
         value_sets = []
         for value_set in reason.get('value_sets') or []:
             if can_view_value_set(value_set, access):
@@ -574,6 +580,10 @@ def get_health_for(health, access):
         if unresolved:
             kept[kept.index(unresolved)] = {**unresolved, 'count': unresolved['count'] + hidden_entries}
         else:
+            # where the computation puts it, so it reads as a value set not found would
+            position = next((
+                index for index, reason in enumerate(kept) if reason.get('code') not in REASONS_BEFORE_UNRESOLVED
+            ), len(kept))
             kept.insert(position, {'code': UNRESOLVED_REFERENCES, 'count': hidden_entries})
     state = health.get('state')
     if state == UNHEALTHY and not kept:

@@ -9,7 +9,7 @@ from mock import patch, Mock
 from pydash import get
 
 from core.collections.health import (
-    ExpansionHealth, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
+    ExpansionHealth, get_health_for, RELEASE, UNRELEASED, HEAD_MEMBER, INTERIM, MISMATCH, AMBIGUOUS,
     UNATTRIBUTED, EMPTY, UNHEALTHY, HEAD_RESOLVED, HEALTHY)
 from core.collections.constants import EXPANSION_HEALTH_RECHECK_WINDOW_SECONDS
 from core.collections.models import Collection, CollectionReference, Expansion
@@ -477,6 +477,19 @@ class ExpansionHealthTest(OCLTestCase):
         self.assertEqual(reason['value_sets'], [{
             'url': other.uri, 'namespace': None, 'version_urls': [other_release.uri], 'reference_ids': [reference.id],
             'entries': 0}])
+
+    def test_a_hidden_value_set_s_entries_read_as_unresolved_references_in_their_usual_place(self):
+        access = Mock(is_staff=False, can_view_url=Mock(return_value=False))
+        health = {'state': UNHEALTHY, 'head_resolved_repositories': [], 'reasons': [
+            {'code': 'resource_versioned_references', 'count': 1},
+            {'code': 'filter_not_applied', 'count': 1},
+            {'code': 'value_set_without_expansion', 'count': 1, 'value_sets': [
+                {'url': '/orgs/a/collections/b/', 'namespace': None, 'version_urls': ['/orgs/a/collections/b/v1/'],
+                 'reference_ids': [1], 'entries': 1}]}]}
+
+        self.assertEqual(
+            [reason['code'] for reason in get_health_for(health, access)['reasons']],
+            ['resource_versioned_references', 'unresolved_references', 'filter_not_applied'])
 
     def test_a_value_set_named_by_two_references_is_stored_once_with_both(self):
         other = OrganizationCollectionFactory(organization=self.source.organization)
@@ -1630,7 +1643,26 @@ class ExpansionHealthVisibilityTest(OCLAPITestCase):
                 data = self.get(self.expansion.uri, reader)
                 self.assertEqual(
                     self.reason_count(data['health'], 'unresolved_references'), 0 if can_view else 1)
+                # counted once: not also under the one resolved version an outsider can view
+                self.assertEqual(self.reason_count(data['health']), 2 if can_view else 0)
                 self.assertEqual('reason' in data['unresolved_repo_versions'][0], can_view)
+
+    def test_resolved_repo_updates_list_a_value_set_s_versions_only_to_a_reader_who_can_view_them(self):
+        def released(organization, public_access=ACCESS_TYPE_VIEW):
+            head = OrganizationCollectionFactory(organization=organization, public_access=public_access)
+            return [
+                OrganizationCollectionFactory(
+                    mnemonic=head.mnemonic, organization=organization, version=version, released=True,
+                    public_access=public_access) for version in ('v1', 'v2')]
+        private_v1, private_v2 = released(self.private_org, ACCESS_TYPE_NONE)
+        public_v1, public_v2 = released(self.collection.organization)
+        self.expansion.evaluated_collection_versions.add(private_v1, public_v1)
+
+        for reader, can_view in self.readers():
+            with self.subTest(reader=get(reader, 'username', 'anonymous')):
+                diff = self.get(self.expansion.uri + 'resolved-repo-updates/', reader)
+                self.assertEqual(diff.get(public_v1.url), public_v2.url)
+                self.assertEqual(diff.get(private_v1.url), private_v2.url if can_view else None)
 
     @staticmethod
     def reason_count(health, code='value_set_without_expansion'):

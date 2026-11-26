@@ -2823,8 +2823,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
             self.unresolved_repo_versions or [])
 
-    def get_resolved_repo_version_diff_with_latest_updates(self):
-        """Each recorded repo version a rebuild would move, with what its repository resolves to now"""
+    def get_resolved_repo_version_diff_with_latest_updates(self, access=None):
+        """Each recorded repo version a rebuild would move, with what its repository resolves to now. With a reader's
+        ValueSetViewAccess, a value set's only when they can view both versions"""
         diff = {}
         kept_ids = self.get_repo_version_ids_a_rebuild_keeps()
 
@@ -2835,6 +2836,9 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 repo_url = drop_version(version.url)
                 resolved, _ = ConceptContainerModel.resolve_reference_expression(repo_url)
                 if resolved and resolved.url != version.url:
+                    if access and 'collection' in rel and not (
+                            resolved.id and access.can_view(version) and access.can_view(resolved)):
+                        continue
                     diff[version.url] = resolved.url
 
         for relation in self.REPO_VERSION_RELATIONS:
