@@ -2952,10 +2952,10 @@ class TasksTest(OCLTestCase):
         export_source_task_mock.apply_async.assert_called_once_with(
             (source_v1.id,), queue='default', persist_args=True, task_id=ANY)
         index_source_concepts_task_mock.apply_async.assert_called_once_with(
-            (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True}),
+            (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True, 'verified': False}),
             queue='indexing', persist_args=True, task_id=ANY)
         index_source_mappings_task_mock.apply_async.assert_called_once_with(
-            (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True}),
+            (source_v1.id, {'_append_source_version': 'v1', 'is_in_latest_source_version': True, 'verified': False}),
             queue='indexing', persist_args=True, task_id=ANY)
 
     @patch('core.common.tasks.source_version_compare')
@@ -2995,11 +2995,11 @@ class TasksTest(OCLTestCase):
             index_source_concepts_task_mock.apply_async.mock_calls,
             [
                 call(
-                    (source_v1.id, {'is_in_latest_source_version': False}), {'exclude_members_of': source_v2.id},
+                    (source_v1.id, {'is_in_latest_source_version': False, 'verified': False}), {'exclude_members_of': source_v2.id},
                     queue='indexing', persist_args=True, task_id=ANY
                 ),
                 call(
-                    (source_v2.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}),
+                    (source_v2.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True, 'verified': False}),
                     queue='indexing', persist_args=True, task_id=ANY
                 )
             ]
@@ -3008,11 +3008,11 @@ class TasksTest(OCLTestCase):
             index_source_mappings_task_mock.apply_async.mock_calls,
             [
                 call(
-                    (source_v1.id, {'is_in_latest_source_version': False}), {'exclude_members_of': source_v2.id},
+                    (source_v1.id, {'is_in_latest_source_version': False, 'verified': False}), {'exclude_members_of': source_v2.id},
                     queue='indexing', persist_args=True, task_id=ANY
                 ),
                 call(
-                    (source_v2.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True}),
+                    (source_v2.id, {'_append_source_version': 'v2', 'is_in_latest_source_version': True, 'verified': False}),
                     queue='indexing', persist_args=True, task_id=ANY
                 )
             ]
@@ -3034,11 +3034,11 @@ class TasksTest(OCLTestCase):
             index_children_async_mock.mock_calls,
             [
                 call(
-                    source_v1, source_v2.created_by, {'is_in_latest_source_version': False},
+                    source_v1, source_v2.created_by, {'is_in_latest_source_version': False, 'verified': False},
                     exclude_members_of=source_v2.id),
                 call(
                     source_v2, source_v2.created_by,
-                    {'_append_source_version': 'v2', 'is_in_latest_source_version': True}
+                    {'_append_source_version': 'v2', 'is_in_latest_source_version': True, 'verified': False}
                 )
             ]
         )
@@ -3059,9 +3059,9 @@ class TasksTest(OCLTestCase):
             index_children_async_mock.mock_calls,
             [
                 call(
-                    source_v1, source_v2.created_by, {'is_in_latest_source_version': False},
+                    source_v1, source_v2.created_by, {'is_in_latest_source_version': False, 'verified': False},
                     exclude_members_of=source_v2.id),
-                call(source_v2, source_v2.created_by, {'is_in_latest_source_version': True})
+                call(source_v2, source_v2.created_by, {'is_in_latest_source_version': True, 'verified': False})
             ]
         )
 

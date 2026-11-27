@@ -7,6 +7,16 @@ from core.common.constants import INCLUDE_SUMMARY
 from core.pins.models import Pin
 
 
+def with_latest_release(repo, data):
+    """
+    A pinned repository's latest released version and whether it's verified: a pin's card names the version Verified
+    applies to (ocl_issues#3028)
+    """
+    latest = repo.get_latest_released_version() if repo.is_head else None
+    return {**data, 'latest_released_version': latest.version if latest else None,
+            'verified': bool(latest and latest.verification)}
+
+
 def build_resource_data(obj):
     resource = obj.resource
     if not resource:
@@ -14,12 +24,12 @@ def build_resource_data(obj):
     resource_type = resource.resource_type.lower()
     if resource_type == 'source':
         from core.sources.serializers import SourceDetailSerializer
-        return SourceDetailSerializer(
-            resource, context={'request': {'query_params': {INCLUDE_SUMMARY: True}}}).data
+        return with_latest_release(resource, SourceDetailSerializer(
+            resource, context={'request': {'query_params': {INCLUDE_SUMMARY: True}}}).data)
     if resource_type == 'collection':
         from core.collections.serializers import CollectionDetailSerializer
-        return CollectionDetailSerializer(
-            resource, context={'request': {'query_params': {INCLUDE_SUMMARY: True}}}).data
+        return with_latest_release(resource, CollectionDetailSerializer(
+            resource, context={'request': {'query_params': {INCLUDE_SUMMARY: True}}}).data)
     if resource_type == 'organization':
         from core.orgs.serializers import OrganizationDetailSerializer
         return OrganizationDetailSerializer(resource).data

@@ -424,6 +424,8 @@ class ConceptListSerializer(ConceptAbstractSerializer):
     version_updated_by = DateTimeField(source='updated_by.username', read_only=True)
     latest_source_version = SerializerMethodField()
     property = JSONField(source='summary_properties', read_only=True)
+    # in its source's latest release, which has a verification record: the search index's verified (ocl_issues#3027)
+    verified = BooleanField(source='is_verified_in_list', read_only=True)
 
     class Meta:
         model = Concept
@@ -433,7 +435,7 @@ class ConceptListSerializer(ConceptAbstractSerializer):
             'owner', 'owner_type', 'owner_url', 'display_name', 'display_locale', 'version', 'update_comment',
             'locale', 'version_created_by', 'version_created_on', 'mappings', 'is_latest_version', 'versions_url',
             'version_url', 'extras', 'type', 'versioned_object_id', 'version_updated_on', 'version_updated_by',
-            'latest_source_version', 'property', 'retire_reason'
+            'latest_source_version', 'property', 'retire_reason', 'verified'
         )
 
 

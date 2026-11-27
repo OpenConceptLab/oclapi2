@@ -98,13 +98,14 @@ class CollectionListSerializer(AbstractResourceSerializer):
     summary = SerializerMethodField()
     checksums = SerializerMethodField()
     latest_released_version = SerializerMethodField()
+    verified = SerializerMethodField()
 
     class Meta:
         model = Collection
         fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
             'collection_type', 'updated_at', 'canonical_url', 'autoexpand_head',
-            'summary', 'type', 'checksums', 'latest_released_version'
+            'summary', 'type', 'checksums', 'latest_released_version', 'verified'
         )
 
     def __init__(self, *args, **kwargs):
@@ -120,6 +121,7 @@ class CollectionListSerializer(AbstractResourceSerializer):
                 self.fields.pop('summary', None)
             if not self.include_latest_released_version:
                 self.fields.pop('latest_released_version', None)
+                self.fields.pop('verified', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -141,6 +143,10 @@ class CollectionListSerializer(AbstractResourceSerializer):
         return get(obj.get_latest_released_version(), 'version') if (
                 self.include_latest_released_version and obj.is_head
         ) else None
+
+    def get_verified(self, obj):
+        """Whether the latest released version has a verification record; what the search index's verified flag holds"""
+        return obj.is_verified if (self.include_latest_released_version and obj.is_head) else None
 
 
 class CollectionVersionListSerializer(ExpansionHealthSummaryMixin, ModelSerializer):

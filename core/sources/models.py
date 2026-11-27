@@ -709,13 +709,18 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             for version in versions_to_unflag:
                 # Members shared with this release keep their True: the False request leaves them out
                 version.index_children_async(
-                    user, {'is_in_latest_source_version': False}, exclude_members_of=self.id)
+                    user, {'is_in_latest_source_version': False, 'verified': False}, exclude_members_of=self.id)
 
+            # a concept is verified while it's in the latest release and that release has a record (ocl_issues#3027)
+            verified = bool(self.verification)
             if only_update:
-                self.index_children_async(user, {'is_in_latest_source_version': True})
+                self.index_children_async(user, {'is_in_latest_source_version': True, 'verified': verified})
             else:
                 self.index_children_async(
-                    user, {'_append_source_version': self.version, 'is_in_latest_source_version': True}
+                    user, {
+                        '_append_source_version': self.version, 'is_in_latest_source_version': True,
+                        'verified': verified
+                    }
                 )
             return True
         return False
@@ -731,11 +736,21 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             latest_released = self.get_latest_released_version()
             # Members shared with the latest release keep their True: the False request leaves them out
             self.index_children_async(
-                user, {'is_in_latest_source_version': False},
+                user, {'is_in_latest_source_version': False, 'verified': False},
                 exclude_members_of=latest_released.id if latest_released else None)
 
             if latest_released:
-                latest_released.index_children_async(user, {'is_in_latest_source_version': True})
+                latest_released.index_children_async(
+                    user, {'is_in_latest_source_version': True, 'verified': bool(latest_released.verification)})
+
+    def index_concepts_verified(self, was_verified, user=None):
+        """
+        The latest release's concepts carry its verified flag in search (ocl_issues#3027): setting or clearing its
+        record rewrites it. Another release's record changes nothing there until it becomes the latest.
+        """
+        if bool(self.verification) != was_verified and not self.is_head and self.is_latest_released:
+            self.index_concepts_async(
+                user or self.updated_by, {'is_in_latest_source_version': True, 'verified': bool(self.verification)})
 
     def seed_concepts(self, index=True):
         head = self.head
@@ -882,7 +897,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 return partial_doc, exclude_members_of
             if get(seed_task, 'summary') == {SEED_STAGE: SEED_RELEASE_INDEXED}:
                 superseded.record_seed_stage(SEED_MEMBERS_WRITTEN)
-        return {key: value for key, value in partial_doc.items() if key != 'is_in_latest_source_version'}, None
+        # verified follows the release flag it's written with, so an out of date one goes too (ocl_issues#3027)
+        return {key: value for key, value in partial_doc.items()
+                if key not in ('is_in_latest_source_version', 'verified')}, None
 
     def sync_concept_vectors_async(self, user=None, recheck=True, countdown=None):
         """

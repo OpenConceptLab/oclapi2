@@ -225,7 +225,8 @@ class HierarchicalConcepts(models.Model):
 class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pylint: disable=too-many-public-methods
     LIST_PREFETCHES = ('parent', 'created_by', 'updated_by', 'names')
     FIELD_PREFETCHES = ('descriptions', )
-    LATEST_SOURCE_VERSION_FIELDS = ('latest_source_version', 'property')  # property: get_parent_source_version
+    # property: get_parent_source_version; verified: is_verified_in_list
+    LATEST_SOURCE_VERSION_FIELDS = ('latest_source_version', 'property', 'verified')
 
     class Meta:
         db_table = 'concepts'
@@ -324,6 +325,7 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
         'updated_by': {'sortable': False, 'filterable': False, 'facet': True},
         'is_latest_version': {'sortable': False, 'filterable': True},
         'is_in_latest_source_version': {'sortable': False, 'filterable': True},
+        'verified': {'sortable': False, 'filterable': True, 'facet': True},
         'concept_class': {
             'sortable': True, 'filterable': True, 'facet': True, 'exact': False,
             'facet_field': 'concept_class_text.keyword'

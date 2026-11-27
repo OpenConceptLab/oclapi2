@@ -1432,7 +1432,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         if is_ranked_by_score and self.is_concept_document():
             search_str = self.get_search_string(lower=False)
             results = results.extra(
-                rescore={
+                rescore=[{
                   "window_size": 400,
                   "query": {
                     "score_mode": "total",
@@ -1458,7 +1458,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                       }
                     }
                   }
-                }
+                }, self.get_verified_concept_rescore()]
             )
         if sort and is_ranked_by_score and (
                 self.is_concept_container_document_model() or self.is_repo_document_model()):
@@ -1468,6 +1468,20 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         results = self.scope_map_codes(
             results.source(excludes=['_synonyms_embeddings', '_embeddings']), self.map_codes_release)
         return results.sort(*sort_attrs) if sort else results
+
+    @staticmethod
+    def get_verified_concept_rescore():
+        """
+        A moderate boost for concepts in a verified release (ocl_issues#3027): enough to lift one above copies of the
+        same code, not above a better match elsewhere. Multiplied after the exact name boost, so it keeps that order.
+        """
+        return {
+            'window_size': 400,
+            'query': {
+                'score_mode': 'multiply',
+                'rescore_query': {'constant_score': {'filter': {'term': {'verified': 'true'}}, 'boost': 1.25}}
+            }
+        }
 
     def get_repo_rescore(self):
         """Repositories that match: an exact id first, then the verified ones, then the rest, each by its score"""
