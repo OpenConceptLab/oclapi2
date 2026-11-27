@@ -1216,6 +1216,7 @@ class OrganizationRepoListsRetiredTest(OCLAPITestCase):
             self.assertEqual(
                 sorted(repo['short_code'] for repo in response.data), ['active-repo', 'retired-repo'], url)
 
+
 class OrganizationResourceListRoutesTest(OCLAPITestCase):
     def test_the_org_list_routes_under_a_user_create_nothing(self):
         user = UserProfileFactory(username='batman')
