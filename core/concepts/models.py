@@ -1,3 +1,5 @@
+from contextvars import ContextVar
+
 from django.conf import settings
 from django.contrib.postgres.indexes import HashIndex
 from django.core.exceptions import ValidationError
@@ -25,6 +27,20 @@ from core.concepts.constants import CONCEPT_TYPE, LOCALES_FULLY_SPECIFIED, LOCAL
     MAX_NAMES_LIMIT, MAX_DESCRIPTIONS_LIMIT
 from core.concepts.mixins import ConceptValidationMixin
 from core.services.storages.postgres import PostgresQL
+
+# A bulk-import part that a Source Version snapshot waits on collects its hierarchy work here, for the import to apply
+# in order before the snapshot: run inside parallel parts' transactions, it would contend for the same parents.
+DEFERRED_HIERARCHY = ContextVar('deferred_hierarchy', default=None)
+
+
+def process_hierarchy(task, *args):
+    deferred = DEFERRED_HIERARCHY.get()
+    if deferred is not None:
+        deferred.append([task.name, list(args)])
+    elif get(settings, 'TEST_MODE', False):
+        task(*args)
+    else:
+        task.apply_async(args, queue='concurrent', permanent=False)
 
 
 class AbstractLocalizedText(ChecksumModel):
@@ -1228,14 +1244,8 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
                 update_mappings_concept.apply_async((concept.id,), queue='default', permanent=False)
 
             if parent_concept_uris and not skip_hierarchy_tasks:
-                if get(settings, 'TEST_MODE', False):
-                    process_hierarchy_for_new_concept(
-                        concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
-                else:
-                    process_hierarchy_for_new_concept.apply_async(
-                        (concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version),
-                        queue='concurrent', permanent=False
-                    )
+                process_hierarchy(process_hierarchy_for_new_concept,
+                                  concept.id, get(initial_version, 'id'), parent_concept_uris, create_parent_version)
             if create_initial_version and concept._counted is True:
                 parent.update_concepts_count()
             concept.set_checksums(sync=sync_checksum)
@@ -1295,21 +1305,13 @@ class Concept(ConceptValidationMixin, SourceChildMixin, VersionedModel):  # pyli
 
     def _process_prev_latest_version_hierarchy(self, prev_latest, add_prev_version_children=True):
         if add_prev_version_children:
-            task = process_hierarchy_for_new_parent_concept_version
-            if get(settings, 'TEST_MODE', False):
-                task(prev_latest.id, self.id)
-            else:
-                task.apply_async((prev_latest.id, self.id), queue='concurrent', permanent=False)
+            process_hierarchy(process_hierarchy_for_new_parent_concept_version, prev_latest.id, self.id)
 
     def _process_latest_version_hierarchy(self, prev_latest, parent_concept_uris=None, create_parent_version=True):
         if get(self, '_isolated'):  # a seeding import links the hierarchy when it commits the version
             return
-        task = process_hierarchy_for_concept_version
-        args = (self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
-        if get(settings, 'TEST_MODE', False):
-            task(*args)
-        else:
-            task.apply_async(args, queue='concurrent', permanent=False)
+        process_hierarchy(process_hierarchy_for_concept_version,
+                          self.id, get(prev_latest, 'id'), parent_concept_uris, create_parent_version)
 
     @staticmethod
     def validate_locales_limit(names, descriptions):
