@@ -48,7 +48,7 @@ from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
                                drop_version, get_falsy_values, parse_id, get_event_metadata, split_canonical,
-                               is_canonical_uri)
+                               is_canonical_uri, to_snake_case)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
@@ -1043,6 +1043,9 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
     document_model = ConceptDocument  # the filters' collection facets count only versions the requester can view
+    # the filters that match a concept row by the collections it's a member of
+    COLLECTION_MEMBERSHIP_FILTERS = (
+        'collection', 'collection_url', 'collection_owner_url', 'collection_version', 'expansion', 'expansion_url')
     es_fields = Concept.es_fields
     # Semantic kNN. Above ~1000 candidates ES compares far more vectors per clause for no gain in hits
     # (OpenConceptLab/ocl_online#255).
@@ -1136,6 +1139,10 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
         target_repo_filter = filters.get('target_repo', None)
+        # a collection's reference to a HEAD concept without a version holds HEAD's own concept row, not its newest
+        # version: keep both rows then, as before, so the collection's members still match
+        head_latest_only = not any(
+            to_snake_case(key) in self.COLLECTION_MEMBERSHIP_FILTERS for key in original_filters)
         search_repo_url = f"/orgs/{repo_params.get('owner')}/sources/{repo_params.get('source')}/"
         is_bridge = (is_semantic and target_repo_filter and
                      drop_version(target_repo_filter) != search_repo_url)
@@ -1146,7 +1153,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter,
-                variants_repo=variants_repo,
+                variants_repo=variants_repo, head_latest_only=head_latest_only,
             )
             print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
             start_time = time.time()

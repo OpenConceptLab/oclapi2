@@ -4838,12 +4838,23 @@ class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
         latest_clause = {'match': {'is_latest_version': True}}
         repo_params = {'owner': 'O', 'source': 'S'}
 
-        def must(version):
+        def must(version, head_latest_only=True):
             return ConceptFuzzySearch.get_filter_criteria(
-                {}, False, {**repo_params, 'source_version': version}, None).to_dict()['bool']['must']
+                {}, False, {**repo_params, 'source_version': version}, None,
+                head_latest_only=head_latest_only).to_dict()['bool']['must']
 
         self.assertIn(latest_clause, must('HEAD'))
         self.assertNotIn(latest_clause, must('v1'))
+        self.assertNotIn(latest_clause, must('HEAD', head_latest_only=False))
+
+    def test_collection_filter_keeps_head_concept_rows(self):
+        """A collection's versionless reference holds HEAD's own concept row, so a collection filter keeps it."""
+        for filters, head_latest_only in [
+                ({}, True), ({'concept_class': 'Diagnosis'}, True), ({'collection': 'C'}, False),
+                ({'collectionOwnerUrl': '/orgs/O/'}, False), ({'expansion': 'e1'}, False)]:
+            with patch.object(ConceptFuzzySearch, 'search', wraps=ConceptFuzzySearch.search) as search_mock:
+                self.match({'filter': filters})
+            self.assertEqual(search_mock.call_args.kwargs['head_latest_only'], head_latest_only, filters)
 
     def test_post_200_best_match_drops_low_matches(self):
         malaria_version_id = self.malaria.get_latest_version().id
