@@ -1192,6 +1192,31 @@ class OrganizationSourceListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 0)
 
 
+class OrganizationRepoListsRetiredTest(OCLAPITestCase):
+    def test_get_leaves_out_retired_unless_include_retired(self):
+        user = UserProfileFactory(username='batman')
+        token = f'Token {user.get_token()}'
+        org = OrganizationFactory(mnemonic='gotham')
+        org.members.add(user)
+        OrganizationSourceFactory(organization=org, mnemonic='active-repo')
+        OrganizationSourceFactory(organization=org, mnemonic='retired-repo', retired=True)
+        OrganizationCollectionFactory(organization=org, mnemonic='active-repo')
+        OrganizationCollectionFactory(organization=org, mnemonic='retired-repo', retired=True)
+
+        for url in [
+                '/user/orgs/sources/', '/users/batman/orgs/sources/',
+                '/user/orgs/collections/', '/users/batman/orgs/collections/'
+        ]:
+            response = self.client.get(url, HTTP_AUTHORIZATION=token)
+            self.assertEqual(response.status_code, 200, url)
+            self.assertEqual([repo['short_code'] for repo in response.data], ['active-repo'], url)
+
+            response = self.client.get(url + '?includeRetired=true', HTTP_AUTHORIZATION=token)
+            self.assertEqual(response.status_code, 200, url)
+            self.assertEqual(
+                sorted(repo['short_code'] for repo in response.data), ['active-repo', 'retired-repo'], url)
+
+
 class OrganizationResourceListRoutesTest(OCLAPITestCase):
     def test_the_org_list_routes_under_a_user_create_nothing(self):
         user = UserProfileFactory(username='batman')

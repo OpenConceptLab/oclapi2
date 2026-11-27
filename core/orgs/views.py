@@ -326,6 +326,8 @@ class OrganizationResourceAbstractListView:
         queryset = self.queryset.filter(organization__in=user.organizations.all())
         if self.version:
             queryset = queryset.filter(version=self.version)
+        if hasattr(super(), 'apply_filters'):  # the repo lists' retired rule; map projects have none
+            queryset = super().apply_filters(queryset)
         return self.filter_queryset_by_public_access(queryset)
 
 

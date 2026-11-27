@@ -426,6 +426,29 @@ class CollectionListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
+    def test_get_leaves_out_retired_unless_include_retired(self):
+        org = OrganizationFactory(mnemonic='retired-list-org')
+        OrganizationCollectionFactory(organization=org, mnemonic='active-collection')
+        OrganizationCollectionFactory(organization=org, mnemonic='retired-collection', retired=True)
+        user = UserProfileFactory(username='retired-list-user')
+        UserCollectionFactory(user=user, mnemonic='active-collection')
+        UserCollectionFactory(user=user, mnemonic='retired-collection', retired=True)
+
+        for url in [org.collections_url, user.collections_url]:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([coll['short_code'] for coll in response.data], ['active-collection'])
+
+            response = self.client.get(url + '?includeRetired=true')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(coll['short_code'] for coll in response.data), ['active-collection', 'retired-collection'])
+
+        response = self.client.get(
+            '/user/collections/', HTTP_AUTHORIZATION='Token ' + user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([coll['short_code'] for coll in response.data], ['active-collection'])
+
 
 class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_get_200(self):

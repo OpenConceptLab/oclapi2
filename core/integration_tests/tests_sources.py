@@ -38,6 +38,7 @@ from core.mappings.models import Mapping
 from core.mappings.serializers import MappingVersionExportSerializer
 from core.mappings.tests.factories import MappingFactory
 from core.orgs.models import Organization
+from core.orgs.tests.factories import OrganizationFactory
 from core.sources.constants import SEED_MEMBERS_WRITTEN, SEED_RELEASE_INDEXED, SEED_STAGE
 from core.sources.models import Source, CloneLimitExceeded
 from core.sources.serializers import SourceDetailSerializer, SourceVersionExportSerializer
@@ -242,6 +243,29 @@ class SourceListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(list(response.data.keys()), ['name'])
+
+    def test_get_leaves_out_retired_unless_include_retired(self):
+        org = OrganizationFactory(mnemonic='retired-list-org')
+        OrganizationSourceFactory(organization=org, mnemonic='active-source')
+        OrganizationSourceFactory(organization=org, mnemonic='retired-source', retired=True)
+        user = UserProfileFactory(username='retired-list-user')
+        UserSourceFactory(user=user, mnemonic='active-source')
+        UserSourceFactory(user=user, mnemonic='retired-source', retired=True)
+
+        for url in [org.sources_url, user.sources_url]:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([source['short_code'] for source in response.data], ['active-source'])
+
+            response = self.client.get(url + '?includeRetired=true')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(source['short_code'] for source in response.data), ['active-source', 'retired-source'])
+
+        response = self.client.get(
+            '/user/sources/', HTTP_AUTHORIZATION='Token ' + user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([source['short_code'] for source in response.data], ['active-source'])
 
 
 class SourceRetrieveUpdateDestroyViewTest(OCLAPITestCase):
@@ -2540,6 +2564,21 @@ class SourceMappedSourcesListViewTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['url'], source2.url)
         get_mapped_sources_mock.assert_called_once()
+
+    @patch('core.sources.views.Source.get_mapped_sources')
+    def test_get_200_for_retired_source(self, get_mapped_sources_mock):
+        source2 = OrganizationSourceFactory(mnemonic='source2')
+        get_mapped_sources_mock.return_value = Source.objects.filter(id=source2.id)
+        self.source.retired = True
+        self.source.save()
+
+        response = self.client.get(
+            self.source.url + 'mapped-sources/',
+            HTTP_AUTHORIZATION=f'Token {self.token}'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([source['url'] for source in response.data], [source2.url])
 
     def test_post_405(self):
         response = self.client.post(
