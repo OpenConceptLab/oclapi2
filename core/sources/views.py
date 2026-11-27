@@ -687,6 +687,9 @@ class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
 class AbstractSourceMappedSourcesListView(SourceListView):
     is_searchable = False
 
+    def apply_filters(self, queryset):
+        return queryset  # the source in the URL is found whether or not it's retired
+
     def get_object_instance(self):
         return get_object_or_404(super().get_queryset().order_by('-created_at'))
 
