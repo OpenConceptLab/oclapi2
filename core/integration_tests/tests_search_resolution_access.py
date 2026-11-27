@@ -15,7 +15,7 @@ from core.mappings.tests.factories import MappingFactory
 from core.orgs.tests.factories import OrganizationFactory
 from core.sources.documents import SourceDocument
 from core.sources.models import Source
-from core.sources.tests.factories import OrganizationSourceFactory
+from core.sources.tests.factories import OrganizationSourceFactory, UserSourceFactory
 from core.url_registry.factories import GlobalURLRegistryFactory
 from core.users.models import UserProfile
 from core.users.tests.factories import UserProfileFactory
@@ -215,6 +215,57 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
                 (self.private_source.uri + 'latest/', None),
                 (None, {'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'ResolveSource'})]:
             self.assertEqual(self.searched_version(self.member, target_repo_url, target), 'HEAD')
+
+    def test_match_owner_shared_by_an_org_and_a_user_asks_for_owner_type(self):
+        """With no owner_type, an owner name both an org and a user have, at different newest releases, is ambiguous."""
+        self.member.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        org = OrganizationFactory(mnemonic='SharedName')
+        user = UserProfileFactory(username='SharedName')
+        OrganizationSourceFactory(organization=org, mnemonic='SharedSource')
+        OrganizationSourceFactory(organization=org, mnemonic='SharedSource', version='v1', released=True)
+        UserSourceFactory(user=user, mnemonic='SharedSource')
+        target_repo = {'owner': 'SharedName', 'source': 'SharedSource'}
+
+        response = self.match(self.member, None, target_repo)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data['detail'],
+            '"target_repo" owner "SharedName" names both an organization and a user with this source: set '
+            '"owner_type" to "Organization" or "User"')
+        self.assertEqual(self.searched_version(self.member, None, {**target_repo, 'owner_type': 'Organization'}), 'v1')
+        self.assertEqual(self.searched_version(self.member, None, {**target_repo, 'owner_type': 'User'}), 'HEAD')
+
+    def test_semantic_match_checks_the_version_searched(self):
+        """
+        Each repo version keeps its own match algorithms: a semantic $match that resolves to a release without the
+        semantic algorithm says so and points to HEAD.
+        """
+        self.member.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
+        semantic = [Source.TOKEN_MATCH_ALGORITHM, Source.SEMANTIC_MATCH_ALGORITHM]
+        head = OrganizationSourceFactory(organization=self.private_org, mnemonic='SemanticSource')
+        Source.objects.filter(id=head.id).update(match_algorithms=semantic)
+        release = OrganizationSourceFactory(
+            organization=self.private_org, mnemonic='SemanticSource', version='v1', released=True)
+        Source.objects.filter(id=release.id).update(match_algorithms=[Source.TOKEN_MATCH_ALGORITHM])
+        target_repo = {'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'SemanticSource'}
+        url = '/concepts/$match/?semantic=true'
+
+        for target_repo_url, target in [(head.uri, None), (None, target_repo)]:
+            response = self.match(self.member, target_repo_url, target, url=url)
+            self.assertEqual(response.status_code, 400, (target_repo_url, target))
+            self.assertEqual(
+                response.data['detail'],
+                'This repo version does not support semantic search: no version, or "latest", resolved to the '
+                'release "v1"; name "HEAD" to search HEAD')
+
+        response = self.match(self.member, head.uri + 'v1/', None, url=url)  # named, so the plain message
+        self.assertEqual(response.data['detail'], 'This repo version does not support semantic search')
+
+        for target_repo_url, target in [(head.uri + 'HEAD/', None), (None, {**target_repo, 'source_version': 'HEAD'})]:
+            with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch):
+                with self.assertRaises(StopSearch):
+                    self.match(self.member, target_repo_url, target, url=url)
 
 
 @tag('es')

@@ -1283,6 +1283,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
         """
         requested_version = get(target_repo_params, 'source_version') or get(target_repo_params, 'version')
         repo = None
+        resolved_latest = False  # whether the version searched is the one latest, or no version, resolved to
         if target_repo_url:
             url, url_version = cls.split_target_repo_url(target_repo_url)
             repo = ConceptFuzzySearch.get_target_repo(url)
@@ -1290,6 +1291,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             version = requested_version if requested_version in (HEAD, LATEST) else url_version
             if repo and version:
                 repo = cls.resolve_head_or_latest(repo.head or repo, version, user)
+                resolved_latest = version == LATEST
         if repo:
             if not repo.has_view_access(user):
                 raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
@@ -1302,8 +1304,12 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             if resolves:
                 # each source's HEAD was checked; search the version it resolves to, the same one for every source
                 repos = [cls.resolve_head_or_latest(head, requested_version or LATEST, user) for head in repos]
+                resolved_latest = requested_version != HEAD
                 if len({target_repo.version for target_repo in repos}) > 1:
-                    raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
+                    # an organization and a user of that name each have the source, at different newest releases
+                    raise Http400(
+                        f'"target_repo" owner "{target_repo_params.get("owner")}" names both an organization and a '
+                        f'user with this source: set "owner_type" to "Organization" or "User"')
             repo = repos[0]
             # search the repos that were checked, by their stored names: target_repo's own values may differ
             # in case or key names (e.g. "version", "org"), which the search filters would read differently
@@ -1314,6 +1320,12 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
         else:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
         if is_semantic and not repo.has_semantic_match_algorithm:
+            # each repo version keeps its own match algorithms, and only rows of a semantic version carry vectors,
+            # so the version searched is the one checked
+            if resolved_latest and not repo.is_head:
+                raise Http400(
+                    f'This repo version does not support semantic search: no version, or "latest", resolved to the '
+                    f'release "{repo.version}"; name "HEAD" to search HEAD')
             raise Http400('This repo version does not support semantic search')
         return repo_params
 
