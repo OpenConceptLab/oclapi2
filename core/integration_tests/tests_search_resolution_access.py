@@ -163,6 +163,59 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
                 self.match(self.admin, self.private_source.uri, head_target_repo)
         self.assertEqual(search_mock.call_args[0][2]['source_version'], 'HEAD')
 
+    def searched_version(self, user, target_repo_url, target_repo=None):
+        """The source version a $match searches."""
+        with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+            with self.assertRaises(StopSearch):
+                self.match(user, target_repo_url, target_repo)
+        return search_mock.call_args[0][2]['source_version']
+
+    def test_match_resolves_latest_head_and_no_version(self):
+        """
+        latest, and a target with no version, search the newest release the requester can view, else HEAD; HEAD and
+        a named version search themselves (OpenConceptLab/ocl_online#779).
+        """
+        preview = Group.objects.get(name=PREVIEW_GROUP_NAME)
+        for user in [self.outsider, self.member]:
+            user.groups.add(preview)
+        org = OrganizationFactory(mnemonic='LatestOrg')
+        org.members.add(self.member)
+        head = OrganizationSourceFactory(organization=org, mnemonic='LatestSource')
+        OrganizationSourceFactory(organization=org, mnemonic='LatestSource', version='v1', released=True)
+        OrganizationSourceFactory(
+            organization=org, mnemonic='LatestSource', version='v2', released=True, public_access=ACCESS_TYPE_NONE)
+        OrganizationSourceFactory(organization=org, mnemonic='LatestSource', version='v3')  # not released
+        target_repo = {'owner': 'LatestOrg', 'owner_type': 'Organization', 'source': 'LatestSource'}
+        latest_requests = [
+            (head.uri, None), (head.uri + 'latest/', None), (None, target_repo),
+            (None, {**target_repo, 'source_version': 'latest'}), (head.uri, {**target_repo, 'version': 'latest'})]
+        head_requests = [
+            (head.uri + 'HEAD/', None), (head.uri, {**target_repo, 'source_version': 'HEAD'}),
+            (None, {**target_repo, 'source_version': 'HEAD'})]
+
+        # v2, the newest release, is private: the outsider gets v1
+        for user, newest_viewable in [(self.outsider, 'v1'), (self.member, 'v2'), (self.admin, 'v2')]:
+            for target_repo_url, target in latest_requests:
+                self.assertEqual(
+                    self.searched_version(user, target_repo_url, target), newest_viewable,
+                    (user.username, target_repo_url, target))
+            for target_repo_url, target in head_requests:
+                self.assertEqual(
+                    self.searched_version(user, target_repo_url, target), 'HEAD', (target_repo_url, target))
+            for target_repo_url, target in [(head.uri + 'v3/', None), (None, {**target_repo, 'source_version': 'v3'})]:
+                self.assertEqual(self.searched_version(user, target_repo_url, target), 'v3')
+
+        # a named version the requester can't view stays unresolvable
+        for target_repo_url, target in [(head.uri + 'v2/', None), (None, {**target_repo, 'source_version': 'v2'})]:
+            self.assertEqual(self.match(self.outsider, target_repo_url, target).status_code, 400)
+
+        # with no release, latest is HEAD
+        self.member.groups.add(preview)
+        for target_repo_url, target in [
+                (self.private_source.uri + 'latest/', None),
+                (None, {'owner': 'ResolveOrg', 'owner_type': 'Organization', 'source': 'ResolveSource'})]:
+            self.assertEqual(self.searched_version(self.member, target_repo_url, target), 'HEAD')
+
 
 @tag('es')
 class RepoSearchOwnerCaseTest(SearchResolutionAccessBaseTest):

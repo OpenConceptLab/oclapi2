@@ -508,6 +508,10 @@ class ConceptFuzzySearch:  # pragma: no cover
                 must_clauses.append(Q('term', **{cls.exact_repo_fields[field]: value}))
             else:
                 must_clauses.append(Q('match', **{field: value}))
+        if repo_params.get('source_version') == HEAD:
+            # HEAD holds each concept and its newest concept version: keep to the latter, as a concept search under
+            # HEAD does, so each concept matches once (OpenConceptLab/ocl_online#779)
+            must_clauses.append(Q('match', is_latest_version=True))
         if not include_retired:
             must_clauses.append(Q('match', retired=False))
         for field in cls.filter_fields:

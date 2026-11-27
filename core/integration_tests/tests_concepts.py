@@ -4814,10 +4814,42 @@ class MetadataToConceptsListViewTest(CapacityRedisMockMixin, OCLAPITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('retired-match', self.result_ids(response.data[0]))
 
+    def test_post_200_head_target_matches_each_concept_once(self):
+        """HEAD holds each concept and its newest concept version: $match returns the latter only."""
+        head_target_repo = {
+            'owner': self.source.parent.mnemonic, 'owner_type': 'Organization', 'source': 'MatchSource',
+            'source_version': 'HEAD'}
+        malaria_version_id = str(self.malaria.get_latest_version().id)
+        self.assertNotEqual(malaria_version_id, str(self.malaria.id))
+
+        for data in [
+                {},  # the bare URL of a source with no release
+                {'target_repo_url': self.source.uri + 'HEAD/'},
+                {'target_repo': head_target_repo},  # what the Mapper sends for a HEAD project
+                {'target_repo_url': None, 'target_repo': head_target_repo}]:
+            response = self.match(data, query='?limit=10')
+
+            self.assertEqual(response.status_code, 200, data)
+            self.assertEqual(
+                [concept['uuid'] for concept in response.data[0]['results']], [malaria_version_id], data)
+
+    def test_filter_criteria_keep_head_to_latest_concept_versions(self):
+        """The filter keyword and semantic (knn) $match share keeps HEAD to each concept's newest version."""
+        latest_clause = {'match': {'is_latest_version': True}}
+        repo_params = {'owner': 'O', 'source': 'S'}
+
+        def must(version):
+            return ConceptFuzzySearch.get_filter_criteria(
+                {}, False, {**repo_params, 'source_version': version}, None).to_dict()['bool']['must']
+
+        self.assertIn(latest_clause, must('HEAD'))
+        self.assertNotIn(latest_clause, must('v1'))
+
     def test_post_200_best_match_drops_low_matches(self):
+        malaria_version_id = self.malaria.get_latest_version().id
         with patch.object(MetadataToConceptsListView, 'apply_score', autospec=True) as apply_score_mock:
             def apply_score(concept, *_args):
-                concept._match_type = 'very_high' if concept.id == self.malaria.id else 'low'  # pylint: disable=protected-access
+                concept._match_type = 'very_high' if concept.id == malaria_version_id else 'low'  # pylint: disable=protected-access
                 concept._score = concept._normalized_score = 1  # pylint: disable=protected-access
             apply_score_mock.side_effect = apply_score
 
