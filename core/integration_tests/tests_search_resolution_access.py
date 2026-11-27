@@ -202,8 +202,13 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
             for target_repo_url, target in head_requests:
                 self.assertEqual(
                     self.searched_version(user, target_repo_url, target), 'HEAD', (target_repo_url, target))
-            for target_repo_url, target in [(head.uri + 'v3/', None), (None, {**target_repo, 'source_version': 'v3'})]:
-                self.assertEqual(self.searched_version(user, target_repo_url, target), 'v3')
+            for target_repo_url, target in [
+                    (head.uri + 'v3/', None), (head.uri + '|v3', None),
+                    (None, {**target_repo, 'source_version': 'v3'})]:
+                self.assertEqual(self.searched_version(user, target_repo_url, target), 'v3', target_repo_url)
+            # url|HEAD and url|latest, as the resolver reads a relative url|version
+            self.assertEqual(self.searched_version(user, head.uri + '|HEAD'), 'HEAD')
+            self.assertEqual(self.searched_version(user, head.uri + '|latest'), newest_viewable)
 
         # a named version the requester can't view stays unresolvable
         for target_repo_url, target in [(head.uri + 'v2/', None), (None, {**target_repo, 'source_version': 'v2'})]:
@@ -217,24 +222,35 @@ class MatchAccessTest(SearchResolutionAccessBaseTest):
             self.assertEqual(self.searched_version(self.member, target_repo_url, target), 'HEAD')
 
     def test_match_owner_shared_by_an_org_and_a_user_asks_for_owner_type(self):
-        """With no owner_type, an owner name both an org and a user have, at different newest releases, is ambiguous."""
+        """
+        With no version, latest or HEAD and no owner_type, an owner name both an org and a user have the source of is
+        ambiguous, even when their newest releases share a name.
+        """
         self.member.groups.add(Group.objects.get(name=PREVIEW_GROUP_NAME))
         org = OrganizationFactory(mnemonic='SharedName')
         user = UserProfileFactory(username='SharedName')
         OrganizationSourceFactory(organization=org, mnemonic='SharedSource')
         OrganizationSourceFactory(organization=org, mnemonic='SharedSource', version='v1', released=True)
         UserSourceFactory(user=user, mnemonic='SharedSource')
+        UserSourceFactory(user=user, mnemonic='SharedSource', version='v1', released=True)
         target_repo = {'owner': 'SharedName', 'source': 'SharedSource'}
 
-        response = self.match(self.member, None, target_repo)
+        for version in [None, 'latest', 'HEAD']:
+            target = {**target_repo, 'source_version': version} if version else target_repo
+            response = self.match(self.member, None, target)
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.data['detail'],
-            '"target_repo" owner "SharedName" names both an organization and a user with this source: set '
-            '"owner_type" to "Organization" or "User"')
-        self.assertEqual(self.searched_version(self.member, None, {**target_repo, 'owner_type': 'Organization'}), 'v1')
-        self.assertEqual(self.searched_version(self.member, None, {**target_repo, 'owner_type': 'User'}), 'HEAD')
+            self.assertEqual(response.status_code, 400, version)
+            self.assertEqual(
+                response.data['detail'],
+                '"target_repo" owner "SharedName" names both an organization and a user with this source: set '
+                '"owner_type" to "Organization" or "User"')
+        for owner_type in ['Organization', 'User']:
+            with patch.object(ConceptFuzzySearch, 'search', side_effect=StopSearch) as search_mock:
+                with self.assertRaises(StopSearch):
+                    self.match(self.member, None, {**target_repo, 'owner_type': owner_type})
+            self.assertEqual(
+                search_mock.call_args[0][2],
+                {'owner': 'SharedName', 'owner_type': owner_type, 'source': 'SharedSource', 'source_version': 'v1'})
 
     def test_semantic_match_checks_the_version_searched(self):
         """

@@ -1244,13 +1244,15 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     def split_target_repo_url(target_repo_url):
         """
         target_repo_url and the version it names when that's HEAD or latest, which no repo version is stored at:
-        /orgs/O/sources/S/HEAD/ and /orgs/O/sources/S/latest/ (or a canonical url|HEAD, url|latest) give the bare
-        URL and the version. A relative URL naming no version gives latest, which the bare URL means. Otherwise
-        the URL as it is and None.
+        /orgs/O/sources/S/HEAD/ and /orgs/O/sources/S/latest/ (or url|HEAD, url|latest, relative or canonical) give
+        the bare URL and the version. A relative URL naming no version gives latest, which the bare URL means.
+        Otherwise (url|v1 included, which the resolver reads) the URL as it is and None.
         """
         url, version = split_canonical(target_repo_url)
-        if is_canonical_uri(url):
+        if version is not None:
             return (url, version) if version in (HEAD, LATEST) else (target_repo_url, None)
+        if is_canonical_uri(url):
+            return target_repo_url, None
         parts = compact(url.split('?')[0].split('/'))
         if len(parts) == 4:
             return url, LATEST
@@ -1302,14 +1304,15 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             if not repos or not all(target_repo.has_view_access(user) for target_repo in repos):
                 raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
             if resolves:
-                # each source's HEAD was checked; search the version it resolves to, the same one for every source
-                repos = [cls.resolve_head_or_latest(head, requested_version or LATEST, user) for head in repos]
-                resolved_latest = requested_version != HEAD
-                if len({target_repo.version for target_repo in repos}) > 1:
-                    # an organization and a user of that name each have the source, at different newest releases
+                if len(repos) > 1:
+                    # an organization and a user of that name each have the source: which one's HEAD or newest
+                    # release is meant, and its own mapped codes, needs the owner type
                     raise Http400(
                         f'"target_repo" owner "{target_repo_params.get("owner")}" names both an organization and a '
                         f'user with this source: set "owner_type" to "Organization" or "User"')
+                # the source's HEAD was checked; search the version it resolves to
+                repos = [cls.resolve_head_or_latest(repos[0], requested_version or LATEST, user)]
+                resolved_latest = requested_version != HEAD
             repo = repos[0]
             # search the repos that were checked, by their stored names: target_repo's own values may differ
             # in case or key names (e.g. "version", "org"), which the search filters would read differently
