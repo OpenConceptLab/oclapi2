@@ -183,7 +183,8 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
-        return queryset
+        # the retired rule of the search and the facets: retired ones are left out unless includeRetired=true
+        return queryset.filter(retired=False) if self._should_exclude_retired_from_search_results() else queryset
 
     def get_queryset(self):
         queryset = super().get_queryset()
