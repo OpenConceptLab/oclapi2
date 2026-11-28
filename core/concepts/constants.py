@@ -31,7 +31,7 @@ OPENMRS_DESCRIPTION_EXTERNAL_ID_ERROR = f'Concept description\'s External ID can
     f'{OPENMRS_EXTERNAL_ID_LENGTH} characters.'
 BASIC_DESCRIPTION_CANNOT_BE_EMPTY = 'Concept description cannot be empty'
 BASIC_NAMES_CANNOT_BE_EMPTY = 'A concept must have at least one name'
-MAX_LOCALES_LIMIT = 500
+MAX_LOCALES_LIMIT = 600
 MAX_NAMES_LIMIT = f'max limit {MAX_LOCALES_LIMIT} of names exceeded'
 MAX_DESCRIPTIONS_LIMIT = f'max limit {MAX_LOCALES_LIMIT} of descriptions exceeded'
 CONCEPT_WAS_RETIRED = 'Concept was retired'

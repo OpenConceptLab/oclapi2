@@ -2,15 +2,18 @@ import json
 from datetime import datetime
 
 from django.core.validators import RegexValidator
+from django.db.models import prefetch_related_objects
+from django.db.models.manager import BaseManager
 from pydash import get
 from rest_framework.fields import CharField, ListField, IntegerField, DateTimeField, JSONField, \
     BooleanField, SerializerMethodField, ChoiceField
 from rest_framework.relations import PrimaryKeyRelatedField
-from rest_framework.serializers import ModelSerializer, Serializer, ValidationError
+from rest_framework.serializers import ModelSerializer, Serializer, ValidationError, ListSerializer
 
 from core.client_configs.serializers import ClientConfigSerializer
 from core.collections.constants import VERSION_EXPANSION_CHOICES, VERSION_EXPANSION_NONE
-from core.collections.models import Collection, CollectionReference, Expansion
+from core.collections.health import ValueSetViewAccess, get_health_for, get_health_value_set_urls
+from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.common.constants import HEAD, DEFAULT_ACCESS_TYPE, NAMESPACE_REGEX, INCLUDE_SUMMARY, \
     INCLUDE_CLIENT_CONFIGS, INVALID_EXPANSION_URL, INCLUDE_STATES, INCLUDE_TASKS, INCLUDE_RESOLVED_REPO_VERSIONS, \
     INCLUDE_EXTERNAL_EXPORTS, INCLUDE_LATEST_RELEASED_VERSION, VERSION_EXPORT_EXCLUDED_FIELDS
@@ -23,6 +26,41 @@ from core.sources.serializers import SourceVersionListSerializer
 from core.users.models import UserProfile
 
 TRUTHY = get_truthy_values()
+
+
+class ValueSetAccessListSerializer(ListSerializer):  # pylint: disable=abstract-method
+    """Reads which value sets the reader can view for the whole page at once, before any item is serialized"""
+    def to_representation(self, data):
+        items = list(data.all() if isinstance(data, BaseManager) else data)
+        self.child.prime_value_set_access(items)
+        return super().to_representation(items)
+
+
+class ValueSetAccessMixin:
+    """Health and value set versions as the reader sees them: one they can't view answers as not found"""
+    @property
+    def value_set_access(self):
+        return ValueSetViewAccess.for_context(self.context)
+
+    @staticmethod
+    def get_stored_health(obj):
+        return obj.health
+
+    def prime_value_set_access(self, items):
+        self.value_set_access.prime_urls(
+            url for item in items for url in get_health_value_set_urls(self.get_stored_health(item)))
+
+    def get_health(self, obj):
+        return get_health_for(obj.health, self.value_set_access)
+
+
+class ExpansionHealthSummaryMixin(ValueSetAccessMixin):
+    @staticmethod
+    def get_stored_health(obj):
+        return getattr(obj, 'expansion_health_data', None)
+
+    def get_expansion_health(self, obj):
+        return Collection.get_expansion_health(obj, self.value_set_access)
 
 
 class CollectionMinimalSerializer(AbstractResourceSerializer):
@@ -105,7 +143,7 @@ class CollectionListSerializer(AbstractResourceSerializer):
         ) else None
 
 
-class CollectionVersionListSerializer(ModelSerializer):
+class CollectionVersionListSerializer(ExpansionHealthSummaryMixin, ModelSerializer):
     type = CharField(source='resource_version_type')
     short_code = CharField(source='mnemonic')
     owner = CharField(source='parent_resource')
@@ -129,18 +167,18 @@ class CollectionVersionListSerializer(ModelSerializer):
             'previous_version_url', 'autoexpand', 'expansion_url', 'checksums', 'external_exports', 'verification',
             'expansion_health'
         )
+        list_serializer_class = ValueSetAccessListSerializer
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        if not hasattr(instance, 'expansion_health_state'):
+        if not hasattr(instance, 'expansion_health_data'):
             # only the versions list annotates it, so version lists nested elsewhere add no query per row
             data.pop('expansion_health', None)
         return data
 
-    @staticmethod
-    def get_expansion_health(obj):
+    def get_expansion_health(self, obj):
         # only rows the versions list annotated: everywhere else the field is dropped, so no lookup per row
-        return Collection.get_expansion_health(obj) if hasattr(obj, 'expansion_health_state') else None
+        return super().get_expansion_health(obj) if hasattr(obj, 'expansion_health_data') else None
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -502,7 +540,8 @@ class CollectionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRep
         return ret
 
 
-class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
+class CollectionVersionDetailSerializer(
+        ExpansionHealthSummaryMixin, CollectionCreateOrUpdateSerializer, AbstractRepoResourcesSerializer):
     type = CharField(source='resource_version_type')
     uuid = CharField(source='id')
     id = CharField(source='version')
@@ -543,10 +582,7 @@ class CollectionVersionDetailSerializer(CollectionCreateOrUpdateSerializer, Abst
             'expansion_health'
         ) + AbstractRepoResourcesSerializer.Meta.fields
         read_only_fields = ('verification',)
-
-    @staticmethod
-    def get_expansion_health(obj):
-        return Collection.get_expansion_health(obj)
+        list_serializer_class = ValueSetAccessListSerializer
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -677,11 +713,26 @@ class CollectionVersionExportSerializer(CollectionVersionDetailSerializer):
         )
 
 
-class ExpansionSerializer(ModelSerializer):
+class ExpansionParametersValidationMixin:
+    @staticmethod
+    def validate_parameters(value):
+        """Keys lose their spaces, as they are read; a key no expansion applies or stores is rejected"""
+        if value and not isinstance(value, dict):
+            raise ValidationError('Must be an object of expansion parameters.')
+        value = ExpansionParameters.normalize_keys(value)
+        unsupported = ExpansionParameters.get_unsupported_keys(value)
+        if unsupported:
+            message = f"Not a supported expansion parameter. Use one of: {', '.join(ExpansionParameters.SUPPORTED)}."
+            raise ValidationError({key: [message] for key in unsupported})
+        return value
+
+
+class ExpansionSerializer(ExpansionParametersValidationMixin, ValueSetAccessMixin, ModelSerializer):
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
     parameters = JSONField()
     collection_version = CharField(read_only=True, source='collection_version_name')
+    health = SerializerMethodField()
 
     class Meta:
         model = Expansion
@@ -689,7 +740,8 @@ class ExpansionSerializer(ModelSerializer):
             'mnemonic', 'id', 'parameters', 'canonical_url', 'url', 'summary', 'is_processing',
             'collection_version', 'extras', 'health', 'health_is_current', 'built_with'
         )
-        read_only_fields = ('health', 'health_is_current', 'built_with')
+        read_only_fields = ('health_is_current', 'built_with')
+        list_serializer_class = ValueSetAccessListSerializer
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -715,17 +767,20 @@ class ExpansionSerializer(ModelSerializer):
         return summary
 
 
-class ExpansionDetailSerializer(ModelSerializer):
+class ExpansionDetailSerializer(ExpansionParametersValidationMixin, ValueSetAccessMixin, ModelSerializer):
+    COLLECTION_VERSION_RELATIONS = ('explicit_collection_versions', 'evaluated_collection_versions')
     summary = SerializerMethodField()
     url = CharField(source='uri', read_only=True)
     parameters = JSONField()
     created_on = DateTimeField(source='created_at', read_only=True)
     created_by = DateTimeField(source='created_by.username', read_only=True)
-    explicit_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
+    explicit_collection_versions = SerializerMethodField()
     explicit_source_versions = SourceVersionListSerializer(many=True, read_only=True)
-    evaluated_collection_versions = CollectionVersionListSerializer(many=True, read_only=True)
+    evaluated_collection_versions = SerializerMethodField()
     evaluated_source_versions = SourceVersionListSerializer(many=True, read_only=True)
     collection_version = CharField(read_only=True, source='collection_version_name')
+    unresolved_repo_versions = SerializerMethodField()
+    health = SerializerMethodField()
 
     class Meta:
         model = Expansion
@@ -736,7 +791,8 @@ class ExpansionDetailSerializer(ModelSerializer):
             'evaluated_collection_versions', 'evaluated_source_versions', 'extras', 'health', 'health_is_current',
             'built_with'
         )
-        read_only_fields = ('health', 'health_is_current', 'built_with')
+        read_only_fields = ('health_is_current', 'built_with')
+        list_serializer_class = ValueSetAccessListSerializer
 
     def __init__(self, *args, **kwargs):
         params = get(kwargs, 'context.request.query_params')
@@ -752,6 +808,30 @@ class ExpansionDetailSerializer(ModelSerializer):
             pass
 
         super().__init__(*args, **kwargs)
+
+    def get_unresolved_repo_versions(self, obj):
+        return obj.get_unresolved_repo_versions_for(get(self.context, 'request.user'))
+
+    def prime_value_set_access(self, items):
+        super().prime_value_set_access(items)
+        prefetch_related_objects(items, *self.COLLECTION_VERSION_RELATIONS)
+        self.value_set_access.prime_versions([
+            version for item in items for relation in self.COLLECTION_VERSION_RELATIONS
+            for version in getattr(item, relation).all()])
+
+    def get_viewable_collection_versions(self, versions):
+        access = self.value_set_access
+        versions = list(versions)
+        access.prime_versions(versions)
+        # built without the request, as the nested lists always were: no external exports per row
+        return CollectionVersionListSerializer(
+            [version for version in versions if access.can_view(version)], many=True).data
+
+    def get_explicit_collection_versions(self, obj):
+        return self.get_viewable_collection_versions(obj.explicit_collection_versions.all())
+
+    def get_evaluated_collection_versions(self, obj):
+        return self.get_viewable_collection_versions(obj.evaluated_collection_versions.all())
 
     def get_summary(self, obj):
         summary = None

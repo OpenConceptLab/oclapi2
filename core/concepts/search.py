@@ -218,7 +218,7 @@ class ConceptFuzzySearch:  # pragma: no cover
     def search(  # pylint: disable=too-many-locals,too-many-arguments,too-many-branches,too-many-statements
             cls, data, repo_url, repo_params=None, include_retired=False,
             is_semantic=False, num_candidates=2000, k_nearest=50, map_config=None, additional_filter_criterion=None,
-            locale_filter=None, variants_repo=None
+            locale_filter=None, variants_repo=None, head_latest_only=True
     ):
         from core.concepts.documents import ConceptDocument, RELEASE_MAP_CODES
         map_config = map_config or []
@@ -235,7 +235,7 @@ class ConceptFuzzySearch:  # pragma: no cover
                 query.to_dict(), release_id, inner_hit_names if highlight else None))
 
         filter_query = scoped(cls.get_filter_criteria(
-            data, include_retired, repo_params, repo_url, additional_filter_criterion))
+            data, include_retired, repo_params, repo_url, additional_filter_criterion, head_latest_only))
         or_clauses = []
 
         priority_criteria = []
@@ -500,7 +500,13 @@ class ConceptFuzzySearch:  # pragma: no cover
         return mapped_codes
 
     @classmethod
-    def get_filter_criteria(cls, data, include_retired, repo_params, repo_url, additional_filter_criterion=None):  # pylint: disable=too-many-arguments
+    def get_filter_criteria(  # pylint: disable=too-many-arguments
+            cls, data, include_retired, repo_params, repo_url, additional_filter_criterion=None, head_latest_only=True):
+        """
+        The filter a $match search runs under. With head_latest_only, HEAD keeps to each concept's newest version;
+        without it, HEAD's own concept rows stay too, which hold the memberships of collections that reference HEAD
+        concepts without a version.
+        """
         must_clauses = []
         repo_params = repo_params or cls.get_target_repo_params(repo_url)
         for field, value in repo_params.items():
@@ -508,6 +514,10 @@ class ConceptFuzzySearch:  # pragma: no cover
                 must_clauses.append(Q('term', **{cls.exact_repo_fields[field]: value}))
             else:
                 must_clauses.append(Q('match', **{field: value}))
+        if head_latest_only and repo_params.get('source_version') == HEAD:
+            # HEAD holds each concept and its newest concept version: keep to the latter, as a concept search under
+            # HEAD does, so each concept matches once (OpenConceptLab/ocl_online#779)
+            must_clauses.append(Q('match', is_latest_version=True))
         if not include_retired:
             must_clauses.append(Q('match', retired=False))
         for field in cls.filter_fields:

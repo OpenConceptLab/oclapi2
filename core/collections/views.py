@@ -10,6 +10,7 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from pydash import get
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import (
     RetrieveAPIView, DestroyAPIView, UpdateAPIView, ListAPIView,
     CreateAPIView)
@@ -27,8 +28,11 @@ from core.collections.constants import (
     UNKNOWN_REFERENCE_ADDED_TO_COLLECTION_FMT, TRANSFORM_TO_RESOURCE_VERSIONS, TRANSFORM_TO_EXTENSIONAL,
     REFERENCE_RESOLVED_TO_NOTHING_FMT, REFERENCE_VERSION_NOT_HELD_FMT, REFERENCE_VERSION_NOT_HELD,
     REFERENCE_NAMED_VERSION_NOT_HELD_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS_FMT, REFERENCE_EXCLUDED_BY_PARAMETERS,
+    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_VALUESET_NOT_FOUND_FMT,
+    REFERENCE_VALUESET_NOT_EXPANDED_FMT, REFERENCE_FILTER_NOT_APPLIED, REFERENCE_FILTER_NOT_APPLIED_FMT,
     REFERENCE_ADDED_AFTER_RELEASE_FMT)
 from core.collections.documents import CollectionDocument
+from core.collections.health import ValueSetViewAccess
 from core.collections.models import Collection, CollectionReference, Expansion, ExpansionParameters
 from core.collections.search import CollectionFacetedSearch
 from core.collections.serializers import (
@@ -181,7 +185,8 @@ class CollectionListView(CollectionBaseView, ConceptDictionaryCreateMixin, ListW
     default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
-        return queryset
+        # the retired rule of the search and the facets: retired ones are left out unless includeRetired=true
+        return queryset.filter(retired=False) if self._should_exclude_retired_from_search_results() else queryset
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -522,9 +527,19 @@ class CollectionReferencesView(
             raise Http400()
         return data, cascade, transform
 
+    def check_filters(self, data, cascade, transform):
+        """Before anything is queued: a filter that can't be applied is a 400, never saved to match everything"""
+        try:
+            errors = Collection.get_reference_filter_errors(data, self.request.user, cascade, transform)
+        except Exception:  # pylint: disable=broad-except
+            errors = None  # data the parser can't read is answered by adding it, as before
+        if errors:
+            raise ValidationError(errors)
+
     def update(self, request, *args, **kwargs):  # pylint: disable=too-many-locals,unused-argument # Fixme: Sny
         collection = self.get_object()
         data, cascade, transform = self.get_data()
+        self.check_filters(data, cascade, transform)
         task_args = (self.request.user.id, data, collection.id, cascade, transform)
 
         result = self.perform_task(add_references, task_args, queue='default')
@@ -602,6 +617,17 @@ class CollectionReferencesView(
                     REFERENCE_VERSION_NOT_HELD_FMT
                 item['message'] = message_format.format(
                     collection.name, item['repo_versions'][0], reference.resource_version)
+            elif reason == REFERENCE_FILTER_NOT_APPLIED:
+                item['repo_versions'] = []
+                item['message'] = REFERENCE_FILTER_NOT_APPLIED_FMT.format(collection.name, ', '.join(
+                    f"property '{entry['property']}' op '{entry['op']}'" for entry in reference.unapplied_filters))
+            elif reason in (REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED):
+                item['repo_versions'] = [
+                    valueset for valueset, _reason in reference.unapplied_valuesets if _reason == reason
+                ] or list(reference.valueset or [])
+                message_format = REFERENCE_VALUESET_NOT_FOUND_FMT if reason == REFERENCE_VALUESET_NOT_FOUND else \
+                    REFERENCE_VALUESET_NOT_EXPANDED_FMT
+                item['message'] = message_format.format(collection.name, ', '.join(item['repo_versions']))
             else:
                 item['repo_versions'] = reference.get_evaluated_repo_version_urls(
                     expansion, user, system_version_cache)
@@ -1072,8 +1098,9 @@ class CollectionVersionExpansionsView(CollectionBaseView, ListWithHeadersMixin, 
             sync=self.sync
         )
         headers = self.get_success_headers(serializer.validated_data)
-        return Response(self.get_response_serializer_class()(expansion).data, status=status.HTTP_201_CREATED,
-                        headers=headers)
+        return Response(
+            self.get_response_serializer_class()(expansion, context={'request': request}).data,
+            status=status.HTTP_201_CREATED, headers=headers)
 
     @staticmethod
     def get_system_version_errors(parameters, version):
@@ -1163,7 +1190,9 @@ class CollectionVersionExpansionResolvedRepoUpdatesView(
 
     def get(self, request, *args, **kwargs):  # pylint: disable=unused-argument
         obj = self.get_object()
-        return Response(obj.get_resolved_repo_version_diff_with_latest_updates(), status=status.HTTP_200_OK)
+        return Response(
+            obj.get_resolved_repo_version_diff_with_latest_updates(ValueSetViewAccess(request.user)),
+            status=status.HTTP_200_OK)
 
 
 class CollectionVersionExpansionReEvaluateView(CollectionVersionExpansionBaseView, TaskMixin):

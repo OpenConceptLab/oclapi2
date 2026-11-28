@@ -7,13 +7,13 @@ from moto import mock_aws
 
 from celery_once import AlreadyQueued
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import override_settings, tag
 from mock import patch, Mock, ANY
 from mock.mock import PropertyMock
 from rest_framework.exceptions import ErrorDetail
 
 from core.collections.constants import REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS
-from core.collections.models import CollectionReference, Collection
+from core.collections.models import CollectionReference, Collection, default_expansion_parameters
 from core.collections.serializers import CollectionVersionExportSerializer, CollectionReferenceDetailSerializer
 from core.collections.tests.factories import OrganizationCollectionFactory, UserCollectionFactory, ExpansionFactory
 from core.common.constants import ACCESS_TYPE_NONE, ACCESS_TYPE_VIEW
@@ -22,6 +22,7 @@ from core.common.tasks import export_collection, delete_s3_objects, add_referenc
 from core.common.tests import OCLAPITestCase
 from core.integration_tests.tests_access_control import PrivateHeadVersionAccessMixin
 from core.common.utils import get_latest_dir_in_path, drop_version, get_export_key_pattern
+from core.concepts.documents import ConceptDocument
 from core.concepts.models import Concept
 from core.concepts.serializers import ConceptVersionExportSerializer, ConceptListSerializer
 from core.concepts.tests.factories import ConceptFactory
@@ -425,6 +426,29 @@ class CollectionListViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 405)
 
+    def test_get_leaves_out_retired_unless_include_retired(self):
+        org = OrganizationFactory(mnemonic='retired-list-org')
+        OrganizationCollectionFactory(organization=org, mnemonic='active-collection')
+        OrganizationCollectionFactory(organization=org, mnemonic='retired-collection', retired=True)
+        user = UserProfileFactory(username='retired-list-user')
+        UserCollectionFactory(user=user, mnemonic='active-collection')
+        UserCollectionFactory(user=user, mnemonic='retired-collection', retired=True)
+
+        for url in [org.collections_url, user.collections_url]:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([coll['short_code'] for coll in response.data], ['active-collection'])
+
+            response = self.client.get(url + '?includeRetired=true')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                sorted(coll['short_code'] for coll in response.data), ['active-collection', 'retired-collection'])
+
+        response = self.client.get(
+            '/user/collections/', HTTP_AUTHORIZATION='Token ' + user.get_token())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([coll['short_code'] for coll in response.data], ['active-collection'])
+
 
 class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
     def test_get_200(self):
@@ -637,6 +661,35 @@ class CollectionRetrieveUpdateDestroyViewTest(OCLAPITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'name': [ErrorDetail(string='This field may not be blank.', code='blank')]})
+
+
+@tag('es')
+class CollectionReferencesFilterViewTest(OCLAPITestCase):
+    def test_put_200_filter_with_in_op(self):
+        user = UserProfileFactory()
+        collection = UserCollectionFactory(user=user)
+        expansion = ExpansionFactory(collection_version=collection)
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        source = OrganizationSourceFactory()
+        diagnosis = ConceptFactory(parent=source, concept_class='Diagnosis')
+        procedure = ConceptFactory(parent=source, concept_class='Procedure')
+        ConceptFactory(parent=source, concept_class='Misc')
+        ConceptDocument().update(source.concepts_set.all())
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {'data': [{'system': source.uri, 'filter': [
+                {'property': 'concept_class', 'op': 'in', 'value': 'Diagnosis,Procedure'}]}]},
+            HTTP_AUTHORIZATION='Token ' + user.get_token(),
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]['added'], True)
+        self.assertEqual(
+            set(collection.expansion.concepts.values_list('versioned_object_id', flat=True)),
+            {diagnosis.id, procedure.id})
 
 
 class CollectionReferencesViewTest(OCLAPITestCase):
@@ -1231,6 +1284,102 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                            f'{source.uri} holds resource version v9'
             }]
         )
+
+    @patch('core.collections.views.add_references')
+    def test_put_400_filter_with_a_property_or_op_it_cant_apply(self, add_references_mock):
+        source = self.concept.parent
+        expression = f'{source.uri}concepts/?conceptclass=Diagnosis'
+        for data, expected in (
+                ({'expressions': [expression]}, {expression: {'filter': [
+                    "Filter property 'conceptclass' is not supported."]}}),
+                ([{'system': source.uri, 'filter': [{'property': 'concept_class', 'op': 'is-a', 'value': 'D'}]}],
+                 {f'{source.uri}concepts/?concept_class=D': {'filter': [
+                     "Filter op 'is-a' is not supported for property 'concept_class'. Use one of: =, in."]}})):
+            with self.subTest(data=data):
+                response = self.client.put(
+                    self.collection.uri + 'references/',
+                    {'data': data},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), expected)
+        add_references_mock.assert_not_called()
+        self.assertEqual(self.collection.references.count(), 1)
+
+    @patch('core.collections.views.add_references')
+    def test_put_search_url_with_paging_parameters_isnt_refused(self, add_references_mock):
+        add_references_mock.__name__ = 'add_references'
+        add_references_mock.return_value = ([], {}, [])
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [f'{self.concept.parent.uri}concepts/?q=fever&page=2&limit=25&sortAsc=name']}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        add_references_mock.assert_called_once()
+
+    def test_put_200_concept_expression_with_a_query_string_its_filter_never_applies_to(self):
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': {'expressions': [f'{self.concept.uri}?includeMappings=true']}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_put_200_reference_with_a_valueset_that_has_no_expansion_says_so_on_autoexpand_head(self):
+        collection = UserCollectionFactory(user=self.user)
+        expansion = ExpansionFactory(collection_version=collection, mnemonic='autoexpand-HEAD')
+        collection.expansion_uri = expansion.uri
+        collection.save()
+        self.assertTrue(expansion.is_auto_generated)
+        unexpanded = OrganizationCollectionFactory()
+
+        response = self.client.put(
+            collection.uri + 'references/',
+            {'data': [
+                {'system': self.concept.parent.uri, 'valueset': [unexpanded.uri], 'code': self.concept.mnemonic}]},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(
+            response.data[0]['message'],
+            f'The reference is saved in collection {collection.name}, but it adds nothing: '
+            f'value set {unexpanded.uri} has no default expansion')
+        self.assertEqual(collection.expansion.concepts.count(), 0)
+
+    def test_put_200_reference_with_a_valueset_that_has_no_expansion_says_so(self):
+        source = self.concept.parent
+        concept = ConceptFactory(parent=source)
+        unexpanded = OrganizationCollectionFactory()
+
+        response = self.client.put(
+            self.collection.uri + 'references/',
+            {'data': [{'system': source.uri, 'valueset': [unexpanded.uri], 'code': concept.mnemonic}]},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['added'], True)
+        self.assertEqual(response.data[0]['resolved'], False)
+        self.assertEqual(response.data[0]['repo_versions'], [unexpanded.uri])
+        self.assertEqual(
+            response.data[0]['message'],
+            f'The reference is saved in collection {self.collection.name}, but it adds nothing: '
+            f'value set {unexpanded.uri} has no default expansion')
+        self.assertEqual(self.collection.expansion.concepts.count(), 1)
 
     @patch('core.collections.views.add_references')
     def test_put_200_reference_the_expansion_parameters_exclude_says_so(self, add_references_mock):
@@ -4949,6 +5098,59 @@ class CollectionVersionExpansionsViewTest(OCLAPITestCase):
         manual = self.collection.expansions.get(mnemonic='e1')
         self.assertEqual(list(manual.concepts.all()), [latest_concept])
         self.assertEqual(list(default.evaluated_collection_versions.all()), [default_lock])
+
+    def test_post_unsupported_parameter_400(self):
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {'activeOnly': True, 'systemVersion': 'https://a.org|v1', 'foo': 1}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(sorted(response.data['parameters']), ['foo', 'systemVersion'])
+        self.assertIn('Not a supported expansion parameter.', response.data['parameters']['foo'][0])
+        self.assertEqual(self.collection.expansions.count(), 0)
+
+    def test_post_parameters_that_arent_an_object_400(self):
+        for parameters in (['activeOnly'], 'activeOnly', 1):
+            with self.subTest(parameters=parameters):
+                response = self.client.post(
+                    self.collection.url + 'HEAD/expansions/',
+                    {'mnemonic': 'e1', 'parameters': parameters},
+                    HTTP_AUTHORIZATION='Token ' + self.token,
+                    format='json'
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, {'parameters': ['Must be an object of expansion parameters.']})
+        self.assertEqual(self.collection.expansions.count(), 0)
+
+    def test_post_with_every_default_parameter_201(self):
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {**default_expansion_parameters(), 'activeOnly': True}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.collection.expansions.get(mnemonic='e1').parameters['activeOnly'], True)
+
+    def test_post_drops_spaces_from_parameter_keys(self):
+        source = OrganizationSourceFactory()
+        v1 = OrganizationSourceFactory(organization=source.organization, mnemonic=source.mnemonic, version='v1')
+
+        response = self.client.post(
+            self.collection.url + 'HEAD/expansions/',
+            {'mnemonic': 'e1', 'parameters': {'system - version': v1.uri, 'active Only': True}},
+            HTTP_AUTHORIZATION='Token ' + self.token,
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            self.collection.expansions.get(mnemonic='e1').parameters, {'system-version': v1.uri, 'activeOnly': True})
 
     def test_post_system_version_with_two_versions_of_one_source_400(self):
         source = OrganizationSourceFactory()

@@ -294,6 +294,44 @@ class ValueSetTest(OCLAPITestCase):
              }]
         )
 
+    def test_create_with_a_filter_it_cant_apply_resolves_to_nothing(self):
+        ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
+
+        response = self.client.post(
+            f'/users/{self.user.username}/ValueSet/',
+            HTTP_AUTHORIZATION='Token ' + self.user_token,
+            data={
+                'resourceType': 'ValueSet',
+                'id': 'c2',
+                'url': 'http://c2.com',
+                'status': 'draft',
+                'name': 'collection1',
+                'description': 'This is a test collection',
+                'compose': {'include': [{
+                    'system': 'http://some/url',
+                    'version': self.org_source_v2.version,
+                    'filter': [{'property': 'concept', 'op': 'is-a', 'value': self.concept_1.mnemonic}]
+                }]}
+            },
+            format='json'
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        head = Collection.objects.get(user=self.user, mnemonic='c2', version='HEAD')
+        reference = head.references.get()
+        self.assertEqual(reference.filter, [{'property': 'concept', 'op': 'is-a', 'value': self.concept_1.mnemonic}])
+        self.assertIsNone(reference.last_resolved_at)
+        self.assertEqual(reference.concepts.count(), 0)
+        for version in head.versions:
+            if version.expansion_uri:
+                self.assertEqual(version.expansion.concepts.count(), 0, version.version)
+        # recorded as a filter OCL couldn't apply, not as one that matched nothing
+        self.assertIn(
+            {'url': reference.expression, 'namespace': reference.namespace, 'type': 'reference.filter',
+             'include': True, 'reason': 'filter_not_applied',
+             'filter': [{'property': 'concept', 'op': 'is-a'}]},
+            head.expansion.unresolved_repo_versions)
+
     def test_create_with_filter_and_system_and_no_filter(self):
         ConceptDocument().update(self.org_source_v2.head.concepts_set.all())
 

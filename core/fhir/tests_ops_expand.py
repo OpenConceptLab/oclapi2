@@ -505,6 +505,36 @@ class ExpandCases(OpsCorpusMixin):
         expansion.save()
         self.assertEqual(issues_of(self.expand(url=FEVERS)),
                          ['error|not-found|not-found||VS_EXP_IMPORT_UNK_PINNED'])
+        # one that exists but has no default expansion is named as one that couldn't be applied, not one not found
+        unexpanded = collection(OrganizationFactory(), 'unexpanded')
+        expansion.unresolved_repo_versions = [
+            {'url': unexpanded.uri, 'type': 'reference.valueset', 'reason': 'valueset_not_expanded'}]
+        expansion.save()
+        response = self.expand(url=FEVERS)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(issues_of(response), ['error|processing|vs-invalid||OCL_VS_EXP_IMPORT_NOT_EXPANDED'])
+        self.assertEqual(
+            response.data['issue'][0]['details']['text'],
+            f"The included value set '{unexpanded.uri}' has no default expansion, so it could not be applied "
+            "and the value set cannot be expanded")
+        # a filter OCL couldn't apply says so, naming what it couldn't apply
+        expansion.unresolved_repo_versions = [{
+            'url': '/orgs/Acme/sources/CS/concepts/?concept=fever', 'type': 'reference.filter',
+            'reason': 'filter_not_applied', 'filter': [{'property': 'concept', 'op': 'is-a'}]}]
+        expansion.save()
+        response = self.expand(url=FEVERS)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(issues_of(response), ['error|processing|vs-invalid||OCL_VS_EXP_FILTER_NOT_APPLIED'])
+        self.assertEqual(
+            response.data['issue'][0]['details']['text'],
+            "The filter of the reference '/orgs/Acme/sources/CS/concepts/?concept=fever' could not be applied "
+            "(property 'concept' op 'is-a'), so the value set cannot be expanded")
+        # to a caller who can't view it, it answers as one not found
+        expansion.unresolved_repo_versions = [{
+            'url': collection(OrganizationFactory(), 'unexpanded-private', public_access=ACCESS_TYPE_NONE).uri,
+            'type': 'reference.valueset', 'reason': 'valueset_not_expanded'}]
+        expansion.save()
+        self.assertEqual(issues_of(self.expand(url=FEVERS)), ['error|not-found|not-found||VS_EXP_IMPORT_UNK'])
         # a pinned concept or mapping is named as one, not as a code system; a code system keeps its message
         cannot = 'could not be found, so the value set cannot be expanded'
         concept, mapping = '/orgs/Acme/sources/CS/concepts/fever/', '/orgs/Acme/sources/CS/mappings/1/'

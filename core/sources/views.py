@@ -112,7 +112,8 @@ class SourceListView(SourceBaseView, ConceptDictionaryCreateMixin, ListWithHeade
     default_filters = {'version': HEAD}
 
     def apply_filters(self, queryset):
-        return queryset
+        # the retired rule of the search and the facets: retired ones are left out unless includeRetired=true
+        return queryset.filter(retired=False) if self._should_exclude_retired_from_search_results() else queryset
 
     def get_queryset(self):
         return self.filter_queryset_by_public_access(
@@ -685,6 +686,9 @@ class SourceClientConfigsView(SourceBaseView, ResourceClientConfigsView):
 
 class AbstractSourceMappedSourcesListView(SourceListView):
     is_searchable = False
+
+    def apply_filters(self, queryset):
+        return queryset  # the source in the URL is found whether or not it's retired
 
     def get_object_instance(self):
         return get_object_or_404(super().get_queryset().order_by('-created_at'))

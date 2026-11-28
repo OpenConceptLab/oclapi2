@@ -13,6 +13,7 @@ from django.db.models import UniqueConstraint, F, QuerySet, Max, Exists, OuterRe
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
+from elasticsearch_dsl import Q
 from pydash import get, compact, find
 
 from core.collections.constants import (
@@ -23,15 +24,19 @@ from core.collections.constants import (
     RESOURCE_VERSION_REPO_RESOLUTION_TOGGLE, UNRESOLVED_RESOURCE_VERSION_TYPE,
     INTENSIONAL_REFERENCE_RESOURCE_VERSIONS_TOGGLE, EXPANSION_LOCKED_REPO_VERSION_TOGGLE, VERSION_EXPANSION_LOCK,
     VERSION_EXPANSION_LATEST, REFERENCE_FOUND_NOTHING, REFERENCE_VERSION_NOT_HELD, REFERENCE_EXCLUDED_BY_PARAMETERS,
+    REFERENCE_VALUESET_NOT_FOUND, REFERENCE_VALUESET_NOT_EXPANDED, REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT,
+    REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT, REFERENCE_FILTER_NOT_APPLIED, UNRESOLVED_FILTER_TYPE,
     EXPANSION_HEALTH_TOGGLE, EXPANSION_HEALTH_DEBOUNCE_SECONDS, HEALTH_RELEVANT_VERSION_FIELDS)
-from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE
+from core.collections.health import SYSTEM_VERSION_PARAMETER_TYPE, get_health_for
 from core.collections.parsers import CollectionReferenceParser
 from core.collections.translators import CollectionReferenceTranslator
 from core.collections.utils import is_concept, is_mapping
 from core.common.checksums import VersionCompareMixin
 from core.common.constants import (
     ES_REQUEST_TIMEOUT, ES_REQUEST_TIMEOUT_ASYNC, HEAD, ALL, EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM,
-    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX,
+    SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM, NAMESPACE_INVALID_CHAR_REGEX, LIMIT_PARAM,
+    OFFSET_PARAM, FACETS_ONLY, BRIEF_PARAM, RAW_PARAM, INCLUDE_RETIRED_PARAM, INCLUDE_MAPPINGS_PARAM,
+    INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM,
     CONSECUTIVE_HYPHENS_REGEX, SERIALIZATION_RETRY_ATTEMPTS)
 from core.common.es import ESScript
 from core.common.models import ConceptContainerModel, BaseResourceModel
@@ -286,8 +291,31 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         references = parser.to_objects()
         return references
 
+    def get_unapplied_valueset_message(self, reference):
+        reason = reference.unapplied_valuesets[0][1]
+        message_format = REFERENCE_NOT_SAVED_VALUESET_NOT_EXPANDED_FMT \
+            if reason == REFERENCE_VALUESET_NOT_EXPANDED else REFERENCE_NOT_SAVED_VALUESET_NOT_FOUND_FMT
+        return message_format.format(
+            self.name, ', '.join(valueset for valueset, _reason in reference.unapplied_valuesets if _reason == reason))
+
+    @staticmethod
+    def get_reference_filter_errors(data, user=None, cascade=False, transform=False):
+        """{expression: {'filter': [why]}} for each reference to add whose filter names a property or op it can't
+        apply. Parsed only: nothing resolves or is saved"""
+        parser = CollectionReferenceParser(data, transform, cascade, user)
+        parser.parse()
+        errors = {}
+        for structure in parser.to_reference_structure():
+            reference = CollectionReference(
+                **{**structure, 'valueset': parser.get_formatted_valueset(structure.get('valueset'))})
+            filter_errors = reference.get_filter_errors()
+            if filter_errors:
+                errors[reference.expression or reference.build_expression()] = {'filter': filter_errors}
+        return errors
+
     def add_references(self, references, user=None, _async=False):
         errors = {}
+        unapplied_errors = {}
         added_references = []
         total_references = []
         is_locked = CollectionReference.is_expansion_locked_repo_version_on()
@@ -298,7 +326,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             if is_locked:
                 reference._async = _async  # pylint: disable=protected-access
             reference.clear_resolution_cache()
-            total_references += reference.generate_references()
+            generated = reference.generate_references()
+            if not generated and reference.unapplied_valuesets:
+                # a cascade-and-transform reference whose value set can't be applied generates nothing: say why
+                unapplied_errors[reference.expression] = [self.get_unapplied_valueset_message(reference)]
+            total_references += generated
         total_references = CollectionReference.dedupe_by_expression(total_references)
         for reference in total_references:
             reference.collection = self
@@ -315,6 +347,11 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
                 continue
             if reference.id:
                 added_references.append(reference)
+        # a direct include of the same expression in this request answers for it instead
+        added_expressions = {reference.expression for reference in added_references if reference.include}
+        errors = {
+            **{expression: error for expression, error in unapplied_errors.items()
+               if expression not in added_expressions}, **errors}
 
         if self.expansion_uri:
             expansion = self.expansion
@@ -462,19 +499,21 @@ class Collection(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
         default_expansion = Expansion.objects.filter(
             uri=models.OuterRef('expansion_uri'), collection_version_id=models.OuterRef('id'))
         return queryset.annotate(
-            expansion_health_state=models.Subquery(default_expansion.values('health__state')[:1]),
+            expansion_health_data=models.Subquery(default_expansion.values('health')[:1]),
             expansion_health_is_current=models.Subquery(default_expansion.values('health_is_current')[:1]))
 
     @staticmethod
-    def get_expansion_health(version):
-        """{state, is_current} of the version's default expansion; None until it has been computed"""
-        if hasattr(version, 'expansion_health_state'):
-            state, is_current = version.expansion_health_state, version.expansion_health_is_current
+    def get_expansion_health(version, access):
+        """{state, is_current} of the version's default expansion as the reader `access` is for sees it; None until it
+        has been computed"""
+        if hasattr(version, 'expansion_health_data'):
+            health, is_current = version.expansion_health_data, version.expansion_health_is_current
         elif version.expansion_uri:
-            state, is_current = version.expansions.filter(uri=version.expansion_uri).values_list(
-                'health__state', 'health_is_current').first() or (None, None)
+            health, is_current = version.expansions.filter(uri=version.expansion_uri).values_list(
+                'health', 'health_is_current').first() or (None, None)
         else:
-            state, is_current = None, None
+            health, is_current = None, None
+        state = (get_health_for(health, access) or {}).get('state')
         return {'state': state, 'is_current': is_current} if state else None
 
     @cached_property
@@ -1143,6 +1182,10 @@ class CollectionReference(models.Model):
         ))
 
     def _apply_search(self, search, val, document):
+        criterion = self._get_search_criterion(val, document)
+        return search.query(criterion) if criterion is not None else search
+
+    def _get_search_criterion(self, val, document):
         include_wildcard = self.has_param_in_filter(EXCLUDE_WILDCARD_SEARCH_PARAM.lower(), FALSEY)
         include_fuzzy = self.has_param_in_filter(EXCLUDE_FUZZY_SEARCH_PARAM.lower(), FALSEY)
         exclude_search_map_codes = self.has_param_in_filter(SEARCH_MAP_CODES_PARAM.lower(), FALSEY)
@@ -1152,46 +1195,102 @@ class CollectionReference(models.Model):
                 return {key: value for key, value in _fields.items() if not key.endswith('map_codes')}
             return _fields
 
-        search = search.query(CustomESSearch.get_exact_match_criterion(
+        criteria = [CustomESSearch.get_exact_match_criterion(
             val, document.get_match_phrase_attrs(), clean_fields(document.get_exact_match_attrs())
-        ))
-        if include_wildcard or include_fuzzy:
-            if include_wildcard:
-                search = search.query(
-                    CustomESSearch.get_wildcard_match_criterion(val, clean_fields(document.get_wildcard_search_attrs()))
-                )
-            if include_fuzzy:
-                search = search.query(
-                    CustomESSearch.get_fuzzy_match_criterion(val, document.get_fuzzy_search_attrs(), 10000, 2)
-                )
-        return search
+        )]
+        if include_wildcard:
+            criteria.append(
+                CustomESSearch.get_wildcard_match_criterion(val, clean_fields(document.get_wildcard_search_attrs())))
+        if include_fuzzy:
+            criteria.append(CustomESSearch.get_fuzzy_match_criterion(val, document.get_fuzzy_search_attrs(), 10000, 2))
+        criterion = None
+        for _criterion in compact(criteria):
+            criterion = _criterion if criterion is None else criterion & _criterion
+        return criterion
+
+    SEARCH_MODIFIER_FILTER_PROPERTIES = (
+        EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM, INCLUDE_SEARCH_META_PARAM,
+        VERBOSE_PARAM)
+
+    # a pasted search URL's parameters that aren't filters (paging, sorting, what each result shows): set aside
+    NON_FILTER_SEARCH_PARAMS = (
+        'page', LIMIT_PARAM, OFFSET_PARAM, 'sortAsc', 'sortDesc', FACETS_ONLY, BRIEF_PARAM, RAW_PARAM,
+        INCLUDE_RETIRED_PARAM, INCLUDE_MAPPINGS_PARAM, INCLUDE_INVERSE_MAPPINGS_PARAM, INCLUDE_EXTRAS_PARAM)
+
+    def get_filter_clause_property(self, filter_def):
+        """The property a filter entry matches on; None for a search modifier (exact_match, verbose and the like) or
+        a parameter set aside; False for one that can't be applied: a property not allowed, or an op not allowed"""
+        prop = filter_def.get('property')
+        if filter_def.get('op') not in self.ALLOWED_FILTER_OPS or (
+                filter_def.get('op') == self.OPERATOR_IN and not self.get_filter_values(filter_def)):
+            return False
+        if prop in self.NON_FILTER_SEARCH_PARAMS:
+            return None
+        is_modifier = bool(prop) and (
+            to_snake_case(prop) == 'exact_match' or prop in self.SEARCH_MODIFIER_FILTER_PROPERTIES)
+        if is_modifier or not prop or (
+                not prop.startswith('extras.') and prop not in self.get_allowed_filter_properties()):
+            if prop and prop in self.get_allowed_filter_properties_but_need_case_switch():
+                prop = to_snake_case(prop)
+            else:
+                return None if is_modifier else False
+        return prop
+
+    def get_filter_errors(self):
+        """Why each filter entry that can't be applied can't be, for a reference being saved. A reference to a
+        code never applies its filter, so it has none"""
+        if not self.should_apply_filter() or not self.is_valid_filter():
+            return []
+        errors = []
+        for filter_def in self.filter:  # pylint: disable=not-an-iterable
+            if self.get_filter_clause_property(filter_def) is not False:
+                continue
+            prop, operator = filter_def.get('property'), filter_def.get('op')
+            is_known_property = prop and (
+                prop.startswith('extras.') or prop in self.SEARCH_MODIFIER_FILTER_PROPERTIES or
+                prop in self.get_allowed_filter_properties() or
+                prop in self.get_allowed_filter_properties_but_need_case_switch())
+            if not is_known_property:
+                errors.append(f"Filter property '{prop}' is not supported.")
+            if operator not in self.ALLOWED_FILTER_OPS:
+                errors.append(
+                    f"Filter op '{operator}' is not supported for property '{prop}'. "
+                    f"Use one of: {', '.join(self.ALLOWED_FILTER_OPS)}.")
+            elif is_known_property:
+                errors.append(f"Filter op 'in' for property '{prop}' has no values.")
+        return errors
+
+    def get_filter_values(self, filter_def):
+        value = filter_def.get('value')
+        if filter_def.get('op') == self.OPERATOR_IN:
+            if value is None:
+                return []
+            values = value if isinstance(value, list) else str(value).split(',')
+            return compact([str(val).strip() for val in values])
+        return [value]
 
     def _apply_filters(self, queryset, resource_klass):
         if self.filter:
             pks = []
             document = resource_klass.get_search_document()
             search = document.search()
+            has_unapplied = False
             for filter_def in self.filter:  # pylint: disable=not-an-iterable
-                if to_snake_case(filter_def['property']) == 'exact_match' or filter_def['property'] in [
-                    EXCLUDE_WILDCARD_SEARCH_PARAM, EXCLUDE_FUZZY_SEARCH_PARAM, SEARCH_MAP_CODES_PARAM,
-                    INCLUDE_SEARCH_META_PARAM, VERBOSE_PARAM
-                ] or (
-                        not filter_def['property'] or (
-                            not filter_def['property'].startswith('extras.') and \
-                            filter_def['property'] not in self.get_allowed_filter_properties()
-                        )
-                ):
-                    if filter_def['property'] in self.get_allowed_filter_properties_but_need_case_switch():
-                        filter_def['property'] = to_snake_case(filter_def['property'])
-                    else:
-                        continue
-                val = filter_def['value']
-                if filter_def['property'] == 'q':
-                    search = self._apply_search(search, val, document)
-                elif filter_def['property'].startswith('extras.'):
-                    search = search.filter("match", **{filter_def["property"]: filter_def["value"]})
+                prop = self.get_filter_clause_property(filter_def)
+                if not prop:
+                    has_unapplied = has_unapplied or prop is False
+                    continue
+                values = self.get_filter_values(filter_def)
+                if prop == 'q':
+                    criteria = compact([self._get_search_criterion(val, document) for val in values])
+                    if criteria:
+                        search = search.query(Q('bool', should=criteria, minimum_should_match=1))
                 else:
-                    search = search.filter("match", **{to_snake_case(filter_def["property"]): filter_def["value"]})
+                    field = prop if prop.startswith('extras.') else to_snake_case(prop)
+                    search = search.filter(Q('bool', should=[
+                        Q('match', **{field: val}) for val in values], minimum_should_match=1))
+            if has_unapplied:
+                return resource_klass.objects.none()  # an entry it can't apply never leaves the others to widen it
             for ids in id_batches(queryset, 500):
                 # iterating on queryset because ES has max_clause limit default to 1024
                 pks += es_to_pks(es_id_in(search, ids).params(request_timeout=ES_REQUEST_TIMEOUT_ASYNC), len(ids))
@@ -1218,14 +1317,14 @@ class CollectionReference(models.Model):
                     is_latest_version=True
                 ) if self.is_static_transform else queryset.filter(id=F('versioned_object_id'))
 
-        if valueset_versions:
-            for valueset in valueset_versions:
-                if valueset.expansion_uri and valueset.can_view_all_content(self.created_by):
-                    rel = get(valueset.expansion, resource_relation)
-                    if queryset is None:
-                        queryset = rel.all()
-                    else:
-                        queryset &= rel.all()
+        if self.unapplied_valuesets:
+            return None  # a value set that can't narrow the reference never widens it to the whole system
+        for valueset in valueset_versions:
+            rel = get(self.valueset_expansions[valueset.id], resource_relation)
+            if queryset is None:
+                queryset = rel.all()
+            else:
+                queryset &= rel.all()
 
         return queryset
 
@@ -1317,6 +1416,23 @@ class CollectionReference(models.Model):
     def should_resolve_to_repo_version_with_resource_version(self):
         return self.can_resolve_to_repo_version_with_resource_version and self.is_resource_version_repo_resolution_on()
 
+    @property
+    def unapplied_filters(self):
+        """[{property, op}] of the filter entries OCL can't apply, for a reference whose filter applies"""
+        if not self.should_apply_filter() or not self.is_valid_filter():
+            return []
+        return [
+            {'property': filter_def.get('property'), 'op': filter_def.get('op')}
+            for filter_def in self.filter  # pylint: disable=not-an-iterable
+            if self.get_filter_clause_property(filter_def) is False
+        ]
+
+    def to_unresolved_filter(self):
+        return {
+            'url': self.expression, 'namespace': self.namespace, 'type': UNRESOLVED_FILTER_TYPE,
+            'include': self.include, 'reason': REFERENCE_FILTER_NOT_APPLIED, 'filter': self.unapplied_filters
+        }
+
     def to_unresolved_resource_version(self):
         return {
             'url': self.expression,
@@ -1379,15 +1495,43 @@ class CollectionReference(models.Model):
         )
 
     @cached_property
+    def resolved_valuesets(self):
+        """Each value set the reference names, with the version it resolves to (one without an id if none)"""
+        if not isinstance(self.valueset, list):
+            return []
+        return [
+            (valueset, self.resolve_valueset_version(valueset))
+            for valueset in self.valueset if valueset  # pylint: disable=not-an-iterable
+        ]
+
+    @cached_property
     def resolve_valueset_versions(self):
-        versions = []
-        if isinstance(self.valueset, list):
-            for valueset in self.valueset:  # pylint: disable=not-an-iterable
-                if valueset:
-                    version = self.resolve_valueset_version(valueset)
-                    if version.id:
-                        versions.append(version)
-        return versions
+        return [version for _, version in self.resolved_valuesets if version.id]
+
+    @cached_property
+    def viewable_valueset_version_ids(self):
+        return {
+            version.id for version in self.resolve_valueset_versions if version.can_view_all_content(self.created_by)}
+
+    @cached_property
+    def valueset_expansions(self):
+        """{value set version id: its default expansion} for those the reference's creator can view"""
+        return {
+            version.id: version.expansion for version in self.resolve_valueset_versions
+            if version.expansion_uri and version.id in self.viewable_valueset_version_ids
+        }
+
+    @cached_property
+    def unapplied_valuesets(self):
+        """[(value set, reason)] for those the reference names that can't narrow it. One its creator can't view
+        answers as one that doesn't exist"""
+        unapplied = []
+        for valueset, version in self.resolved_valuesets:
+            if not version.id or version.id not in self.viewable_valueset_version_ids:
+                unapplied.append((valueset, REFERENCE_VALUESET_NOT_FOUND))
+            elif not self.valueset_expansions.get(version.id):
+                unapplied.append((valueset, REFERENCE_VALUESET_NOT_EXPANDED))
+        return unapplied
 
     @staticmethod
     def is_explicit_valueset(valueset, all_forms=True):
@@ -1414,31 +1558,35 @@ class CollectionReference(models.Model):
     def set_valueset_locks(self, locked_versions):
         """Value set versions locked by the expansion this reference is evaluated for"""
         self._valueset_locks = locked_versions
-        for attr in ('resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved'):
+        for attr in self.VALUESET_RESOLUTION_CACHE:
             self.__dict__.pop(attr, None)
+
+    VALUESET_RESOLUTION_CACHE = (
+        'resolved_valuesets', 'resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved',
+        'viewable_valueset_version_ids', 'valueset_expansions', 'unapplied_valuesets')
 
     def clear_resolution_cache(self):
         for attr in ('resolution_namespace', 'resolve_system_version', 'resolve_expression_system_version',
-                     'resolve_valueset_versions', 'resolve_valueset_versions_with_unresolved'):
+                     *self.VALUESET_RESOLUTION_CACHE):
             self.__dict__.pop(attr, None)
 
     @cached_property
     def resolve_valueset_versions_with_unresolved(self):
         explicit = []
         evaluated = []
+        unapplied = dict(self.unapplied_valuesets)
         unresolved = []
-        if isinstance(self.valueset, list):
-            for valueset in self.valueset:  # pylint: disable=not-an-iterable
-                if valueset:
-                    # with the toggle off, classified as before
-                    to_add = explicit if self.is_explicit_valueset(
-                        valueset, self.is_expansion_locked_repo_version_on()) else evaluated
-                    version = self.resolve_valueset_version(valueset)
-                    if version.id:
-                        to_add.append(version)
-                    else:
-                        unresolved.append(
-                            {'url': valueset, 'namespace': self.resolution_namespace, 'type': 'reference.valueset'})
+        for valueset, version in self.resolved_valuesets:
+            # with the toggle off, classified as before
+            to_add = explicit if self.is_explicit_valueset(
+                valueset, self.is_expansion_locked_repo_version_on()) else evaluated
+            if version.id:
+                to_add.append(version)
+            if valueset in unapplied:
+                entry = {'url': valueset, 'namespace': self.resolution_namespace, 'type': 'reference.valueset'}
+                if unapplied[valueset] == REFERENCE_VALUESET_NOT_EXPANDED:
+                    entry['reason'] = REFERENCE_VALUESET_NOT_EXPANDED  # it exists: not answered as one not found
+                unresolved.append(entry)
         return explicit, evaluated, unresolved
 
     def clean(self):
@@ -1463,6 +1611,16 @@ class CollectionReference(models.Model):
         if self.expression is None:
             self.expression = self.build_expression()
 
+    # only what splits or changes a value as the parser reads it; spaces stay, so earlier expressions still match
+    FILTER_VALUE_ESCAPES = (('%', '%25'), ('&', '%26'), ('=', '%3D'), ('#', '%23'), ('+', '%2B'), ('?', '%3F'))
+
+    @classmethod
+    def quote_filter_value(cls, value):
+        value = str(value)
+        for character, escape in cls.FILTER_VALUE_ESCAPES:
+            value = value.replace(character, escape)
+        return value
+
     def filter_to_querystring(self):
         if not self.is_valid_filter():
             return None
@@ -1470,8 +1628,13 @@ class CollectionReference(models.Model):
         if filters:
             queries = []
             for filter_def in filters:  # pylint: disable=not-an-iterable
+                if filter_def.get('op') == self.OPERATOR_IN:  # repeated, as the parser reads an in back
+                    queries += [
+                        f'{filter_def["property"]}={self.quote_filter_value(value)}'
+                        for value in self.get_filter_values(filter_def)]
+                    continue
                 value = ','.join(filter_def['value']) if isinstance(filter_def['value'], list) else filter_def['value']
-                queries.append(f'{filter_def["property"]}={value}')
+                queries.append(f'{filter_def["property"]}={self.quote_filter_value(value)}')
             return '&'.join(queries)
         return None
 
@@ -2104,7 +2267,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         _holding_versions_cache = {}
 
         include_system_versions = []
-        system_versions = self.parameters.get(ExpansionParameters.INCLUDE_SYSTEM)
+        system_versions = ExpansionParameters.get_system_version(self.parameters)
         if should_reevaluate and system_versions:
             namespace = self.get_system_version_namespace(self.collection_version.parent_url)
             evaluated_entry_keys.add((self.SYSTEM_VERSION_UNRESOLVED_TYPE,))
@@ -2187,6 +2350,13 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             _concepts = Concept.objects.none()
             _mappings = Mapping.objects.none()
 
+            unapplied_filters = ref.unapplied_filters
+            if unapplied_filters:
+                unresolved_repo_versions.append(ref.to_unresolved_filter())
+            if ref.unapplied_valuesets:  # on an auto-generated expansion too, which reuses saved results
+                ref.unresolved_reason = ref.unapplied_valuesets[0][1]
+            elif unapplied_filters:
+                ref.unresolved_reason = REFERENCE_FILTER_NOT_APPLIED
             if should_reevaluate:
                 # with no system, a reference evaluates against the value sets it names
                 is_valueset_only = use_any_lock and not ref.system and bool(ref.valueset)
@@ -2200,7 +2370,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                         )
                         _mappings = _mappings.union(__mappings)
                     _mappings = Mapping.objects.filter(id__in=_mappings.values_list('id', flat=True))
-                if resolve_by_resource_version and ref.is_resource_versioned and \
+                if resolve_by_resource_version and ref.is_resource_versioned and not ref.unapplied_valuesets and \
                         not (_mappings if ref.is_mapping else _concepts).exists():
                     unresolved_repo_versions.append(ref.to_unresolved_resource_version())
                     ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD
@@ -2208,9 +2378,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                 if should_write_back and ref.id and (ref_system_versions or ref.system or is_valueset_only):
                     ref.concepts.set(_concepts)
                     ref.mappings.set(_mappings)
-                    is_resolved = ref_system_versions or (
-                        is_valueset_only and (_explicit_valueset_versions or _evaluated_valueset_versions))
+                    is_resolved = not ref.unapplied_valuesets and not unapplied_filters and (ref_system_versions or (
+                        is_valueset_only and (_explicit_valueset_versions or _evaluated_valueset_versions)))
                     (resolved_ref_ids if is_resolved else unresolved_ref_ids).append(ref.id)
+            elif ref.unapplied_valuesets or unapplied_filters:
+                pass  # its saved results predate the rule: it adds or removes nothing
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
@@ -2351,7 +2523,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         """This expansion's system-version, plus each source it locked that the parameter doesn't name yet.
         Entries resolve in the owner's namespace, as the expansion built from them will."""
         namespace = self.get_system_version_namespace(self.collection_version.parent_url)
-        value = str(get(self.parameters, ExpansionParameters.INCLUDE_SYSTEM) or '')
+        value = str(ExpansionParameters.get_system_version(self.parameters) or '')
         repos = self.get_system_version_entry_repos(value, namespace)
         entries = [entry for entry, _, _ in repos]
         named = {repo_url for _, repo_url, _ in repos}
@@ -2447,12 +2619,15 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return (entry_type,)
         if entry_type == 'reference.system':
             return entry_type, entry.get('url'), entry.get('version') or None
+        if entry_type == UNRESOLVED_FILTER_TYPE:  # an include and an exclusion can build one expression
+            return entry_type, entry.get('url'), entry.get('include', True)
         return entry_type, entry.get('url')
 
     @staticmethod
     def get_unresolved_entry_keys_of(reference, is_reevaluating):
         """The unresolved entry keys a reference's evaluation decides, whether it resolves them or not"""
         keys = {('reference.valueset', valueset) for valueset in reference.valueset or []}
+        keys.add((UNRESOLVED_FILTER_TYPE, reference.expression, reference.include))
         if reference.system:
             keys.add(('reference.system', reference.system, reference.version or None))
         if is_reevaluating:
@@ -2533,6 +2708,7 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
         return self.collection_version.uri + f'expansions/{self.mnemonic}/'
 
     def clean(self):
+        self.parameters = ExpansionParameters.normalize_keys(self.parameters)
         if not self.parameters or self.parameters == default_expansion_parameters():
             self.parameters = {}
         if not self.unresolved_repo_versions:
@@ -2653,12 +2829,41 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             return [repo_version]
         return self.get_versions_of_repo(self.recorded_evaluated_collection_versions, repo_version)
 
+    def get_unresolved_repo_versions_for(self, user):
+        """The unresolved entries as `user` may read them: why a value set couldn't be applied only when they can
+        view it, else it answers as one not found"""
+        entries = []
+        recorded = None
+        for entry in self.unresolved_repo_versions or []:
+            if entry.get('reason') and entry.get('type') == 'reference.valueset':
+                if recorded is None:
+                    recorded = self.get_recorded_collection_versions()
+                versions = self.get_valueset_entry_versions(entry.get('url'), entry.get('namespace'), recorded)
+                if not versions or not all(_version.has_view_access(user) for _version in versions):
+                    entry = {key: value for key, value in entry.items() if key != 'reason'}
+            entries.append(entry)
+        return entries
+
+    def get_recorded_collection_versions(self):
+        return [*self.explicit_collection_versions.all(), *self.evaluated_collection_versions.all()]
+
+    @staticmethod
+    def get_valueset_entry_versions(url, namespace, recorded):
+        """The value set versions an unresolved entry names: those the build recorded, if any, not the one the URL
+        resolves to now. None found: []"""
+        version, _ = Collection.resolve_reference_expression(url, namespace)
+        if not version.id:
+            return []
+        return [
+            _version for _version in recorded if drop_version(_version.uri) == drop_version(version.uri)] or [version]
+
     def is_unresolved_resource_version(self, reference):
         return reference.is_resource_versioned and reference.to_unresolved_resource_version() in (
             self.unresolved_repo_versions or [])
 
-    def get_resolved_repo_version_diff_with_latest_updates(self):
-        """Each recorded repo version a rebuild would move, with what its repository resolves to now"""
+    def get_resolved_repo_version_diff_with_latest_updates(self, access=None):
+        """Each recorded repo version a rebuild would move, with what its repository resolves to now. With a reader's
+        ValueSetViewAccess, a value set's only when they can view both versions"""
         diff = {}
         kept_ids = self.get_repo_version_ids_a_rebuild_keeps()
 
@@ -2668,7 +2873,10 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
                     continue
                 repo_url = drop_version(version.url)
                 resolved, _ = ConceptContainerModel.resolve_reference_expression(repo_url)
-                if resolved and resolved.url != version.url:
+                # a repository that no longer resolves is answered as an unsaved one, with no URL
+                if resolved and resolved.id and resolved.url != version.url:
+                    if access and 'collection' in rel and not (access.can_view(version) and access.can_view(resolved)):
+                        continue
                     diff[version.url] = resolved.url
 
         for relation in self.REPO_VERSION_RELATIONS:
@@ -3056,6 +3264,8 @@ class ExpansionParameters:
     EXCLUDE_SYSTEM = 'exclude-system'
     INCLUDE_SYSTEM = 'system-version'
     DATE = 'date'
+    # the keys an expansion stores by default; any other key is rejected on create
+    SUPPORTED = tuple(default_expansion_parameters())
 
     def __init__(self, parameters, is_concept_queryset=True):
         self.parameters = parameters or {}
@@ -3064,9 +3274,32 @@ class ExpansionParameters:
         self.is_concept_queryset = is_concept_queryset
         self.to_parameter_classes()
 
+    @staticmethod
+    def normalize_keys(parameters):
+        """The parameters with spaces dropped from their keys, as they are read. A key written without spaces wins
+        over the same key written with them."""
+        if not isinstance(parameters, dict):
+            return parameters
+        normalized = {}
+        for key, value in parameters.items():
+            _key = key.replace(' ', '') if isinstance(key, str) else key
+            if _key not in normalized or _key == key:
+                normalized[_key] = value
+        return normalized
+
+    @classmethod
+    def get_unsupported_keys(cls, parameters):
+        if not isinstance(parameters, dict):
+            return []
+        return [key for key in parameters if key not in cls.SUPPORTED]
+
+    @classmethod
+    def get_system_version(cls, parameters):
+        """system-version, read as the other keys are: a stored key with spaces (system - version) counts"""
+        return get(cls.normalize_keys(parameters or {}), cls.INCLUDE_SYSTEM)
+
     def to_parameter_classes(self):
-        for parameter, value in self.parameters.items():
-            parameter = parameter.replace(' ', '')
+        for parameter, value in self.normalize_keys(self.parameters).items():
             if parameter == self.ACTIVE:
                 self.parameter_classes[parameter] = ExpansionActiveParameter(value=value)
             elif parameter == self.TEXT_FILTER:

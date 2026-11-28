@@ -161,7 +161,7 @@ class ExpansionVersionLists:
 
     @cached_property
     def parameter_system_versions(self):
-        value = (self.expansion.parameters or {}).get(ExpansionParameters.INCLUDE_SYSTEM)
+        value = ExpansionParameters.get_system_version(self.expansion.parameters)
         if not value:
             return []
         namespace = Expansion.get_system_version_namespace(self.expansion.collection_version.parent_url)

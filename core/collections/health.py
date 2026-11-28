@@ -7,10 +7,11 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from django.utils.functional import cached_property
 
+from core.collections.constants import REFERENCE_VALUESET_NOT_EXPANDED, UNRESOLVED_FILTER_TYPE
 from core.common.constants import HEAD
 from core.common.utils import drop_version
 
-RULES_VERSION = 1
+RULES_VERSION = 2
 
 # member classes
 RELEASE = 'release'
@@ -29,6 +30,11 @@ HEAD_RESOLVED = 'head_resolved'
 HEALTHY = 'healthy'
 
 SYSTEM_VERSION_PARAMETER_TYPE = 'expansion.parameters.system-version'
+VALUE_SET_WITHOUT_EXPANSION = 'value_set_without_expansion'
+UNRESOLVED_REFERENCES = 'unresolved_references'
+# the reasons get_reasons adds before unresolved_references, in its order
+REASONS_BEFORE_UNRESOLVED = (
+    'inconsistent_resolution', 'duplicate_repo_versions', 'locked_version_deleted', 'resource_versioned_references')
 RESOURCE_TYPES = ('concepts', 'mappings')
 MEMBER_REASONS = (
     # references can't resolve to an unreleased version yet, so its owner needs to see it
@@ -253,14 +259,101 @@ class ExpansionHealth:
             reference_id for reference_id, versions in self.resolved_versions.items() if self.is_unexpanded(versions)}
 
     @cached_property
+    def unexpanded_value_set_excludes(self):
+        """{id of an exclude reference against value sets with no default expansion: those versions}: they exclude
+        nothing"""
+        excludes = {}
+        for reference in self.references:
+            if not reference.include and not reference.system and reference.valueset:
+                versions = reference.get_evaluated_repo_versions(
+                    self.expansion, valueset_version_cache=self._valueset_version_cache)
+                if self.is_unexpanded(versions):
+                    excludes[reference.id] = versions
+        return excludes
+
+    @cached_property
     def unexpanded_value_set_exclude_ids(self):
-        """Exclude references against value sets with no default expansion: they exclude nothing"""
-        return {
-            reference.id for reference in self.references
-            if not reference.include and not reference.system and reference.valueset and self.is_unexpanded(
-                reference.get_evaluated_repo_versions(
-                    self.expansion, valueset_version_cache=self._valueset_version_cache))
-        }
+        return set(self.unexpanded_value_set_excludes)
+
+    @cached_property
+    def unexpanded_value_set_entries(self):
+        """{id of a reference naming a value set the build recorded as having no default expansion: the
+        (url, namespace) of each such entry it matched}"""
+        named = {
+            (entry.get('url'), entry.get('namespace') or None)
+            for entry in self.expansion.unresolved_repo_versions or []
+            if entry.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED}
+        urls = {url for url, _ in named}
+        matched = {}
+        for reference in self.references:
+            if not set(reference.valueset or []) & urls:
+                continue
+            # a canonical URL can resolve differently in another namespace
+            keys = {(valueset, reference.resolution_namespace or None) for valueset in reference.valueset} & named
+            if keys:
+                matched[reference.id] = keys
+        return matched
+
+    @cached_property
+    def counted_unexpanded_entries(self):
+        return set().union(*self.unexpanded_value_set_entries.values())
+
+    def is_counted_as_without_expansion(self, entry):
+        return entry.get('reason') == REFERENCE_VALUESET_NOT_EXPANDED and (
+            entry.get('url'), entry.get('namespace') or None) in self.counted_unexpanded_entries
+
+    def get_value_set_without_expansion(self):
+        value_sets = self.get_unexpanded_value_sets()
+        return {'count': count_value_set_references(value_sets), 'value_sets': value_sets}
+
+    def get_unexpanded_value_sets(self):
+        """The value sets with no default expansion the references counted name, each with those references. Stored
+        once for every reader, so each is shown only the value sets they can view"""
+        value_sets = {}
+
+        def add(url, namespace, versions, reference_id):
+            key = self.value_set_key(url, namespace, versions)
+            value_set = value_sets.setdefault(key, {
+                'url': versions[0].versioned_object_url if versions else url,
+                'namespace': None if versions else namespace,
+                'version_urls': sorted(version.uri for version in versions), 'reference_ids': set(), 'entries': 0})
+            value_set['reference_ids'].add(reference_id)
+
+        entry_versions = self.get_entry_versions()
+        # a reference's entry is counted once, on the versions grouped under it, as its reason is shown
+        grouped = {}
+        for reference_id, keys in self.unexpanded_value_set_entries.items():
+            for key in keys:
+                add(*key, entry_versions[key], reference_id)
+                grouped.setdefault(reference_id, set()).update(version.uri for version in entry_versions[key])
+        for reference_id, versions in [
+                *((_id, self.resolved_versions[_id]) for _id in self.unexpanded_value_set_reference_ids),
+                *self.unexpanded_value_set_excludes.items()]:
+            for version in versions:
+                if version.uri not in grouped.get(reference_id, set()):
+                    add(None, None, [version], reference_id)
+        self.add_unresolved_entries(value_sets, entry_versions)
+        return sorted((
+            {**value_set, 'reference_ids': sorted(value_set['reference_ids'])} for value_set in value_sets.values()
+        ), key=lambda value_set: (value_set['url'] or '', value_set['version_urls']))
+
+    def get_entry_versions(self):
+        """{(url, namespace) of each counted entry: the value set versions it names}"""
+        keys = self.counted_unexpanded_entries
+        recorded = self.expansion.get_recorded_collection_versions() if keys else []
+        return {key: self.expansion.get_valueset_entry_versions(*key, recorded) for key in keys}
+
+    @staticmethod
+    def value_set_key(url, namespace, versions):
+        # an entry names every version the build recorded for it: a reader is shown it only if they can view all
+        return tuple(sorted(version.uri for version in versions)) or (url, namespace)
+
+    def add_unresolved_entries(self, value_sets, entry_versions):
+        """How many unresolved entries each value set stands for: one a reader can't view counts them as unresolved"""
+        for entry in self.expansion.unresolved_repo_versions or []:
+            if self.is_counted_as_without_expansion(entry):
+                url, namespace = entry.get('url'), entry.get('namespace') or None
+                value_sets[self.value_set_key(url, namespace, entry_versions[(url, namespace)])]['entries'] += 1
 
     def judge(self, member, reference_id, containments, released_or_head_ids):  # pylint: disable=too-many-arguments
         """The class one reference gives a member (None: nothing to judge it against), and the keys of its
@@ -384,10 +477,15 @@ class ExpansionHealth:
         add('resource_versioned_references', len(
             [reference for reference in self.references if reference.is_resource_versioned]))
         unresolved = self.expansion.unresolved_repo_versions or []
-        add('unresolved_references', len(
-            [entry for entry in unresolved if entry.get('type') != SYSTEM_VERSION_PARAMETER_TYPE]))
-        add('value_set_without_expansion', len(
-            self.unexpanded_value_set_reference_ids | self.unexpanded_value_set_exclude_ids))
+        # a value set with no expansion is counted once, as one without expansion
+        # one no reference matches any more (its namespace changed) is still unresolved
+        add(UNRESOLVED_REFERENCES, len([
+            entry for entry in unresolved if entry.get('type') not in (
+                SYSTEM_VERSION_PARAMETER_TYPE, UNRESOLVED_FILTER_TYPE) and
+            not self.is_counted_as_without_expansion(entry)]))
+        # OCL couldn't evaluate these, so they are counted apart from references that resolved to nothing
+        add('filter_not_applied', len([entry for entry in unresolved if entry.get('type') == UNRESOLVED_FILTER_TYPE]))
+        add(VALUE_SET_WITHOUT_EXPANSION, **self.get_value_set_without_expansion())
         add('system_version_unresolved', len(
             [entry for entry in unresolved if entry.get('type') == SYSTEM_VERSION_PARAMETER_TYPE]))
         for member_class, code in MEMBER_REASONS:
@@ -435,3 +533,157 @@ class ExpansionHealth:
             'rules_version': RULES_VERSION,
             'computed_at': timezone.now().isoformat(),
         }
+
+
+def count_value_set_references(value_sets):
+    return len(set().union(*(value_set['reference_ids'] for value_set in value_sets)))
+
+
+def get_health_value_set_urls(health):
+    """URLs of the value set versions a stored health names, for ValueSetViewAccess to read at once"""
+    return [
+        url for reason in (health or {}).get('reasons') or []
+        if reason.get('code') == VALUE_SET_WITHOUT_EXPANSION for value_set in reason.get('value_sets') or []
+        for url in value_set.get('version_urls') or []]
+
+
+def can_view_value_set(value_set, access):
+    """Only if the reader can view every version it names, as the unresolved entry's reason is shown"""
+    urls = value_set.get('version_urls') or []
+    return bool(urls) and all(access.can_view_url(url) for url in urls)
+
+
+def get_health_for(health, access):
+    """Stored health as one reader may see it: a value set they can't view answers as not found, so it isn't counted
+    as one without expansion, and any unresolved entry it left counts as unresolved. The state follows the reasons
+    left. Health stored before it named its value sets counts none, except for staff"""
+    reasons = (health or {}).get('reasons')
+    if not reasons or access.is_staff or all(reason.get('code') != VALUE_SET_WITHOUT_EXPANSION for reason in reasons):
+        return health
+    access.prime_urls(get_health_value_set_urls(health))
+    kept, hidden_entries = [], 0
+    for reason in reasons:
+        if reason.get('code') != VALUE_SET_WITHOUT_EXPANSION:
+            kept.append(reason)
+            continue
+        value_sets = []
+        for value_set in reason.get('value_sets') or []:
+            if can_view_value_set(value_set, access):
+                value_sets.append(value_set)
+            else:
+                hidden_entries += value_set.get('entries') or 0
+        count = count_value_set_references(value_sets)
+        if count:
+            kept.append({**reason, 'count': count, 'value_sets': value_sets})
+    if hidden_entries:
+        unresolved = next((reason for reason in kept if reason.get('code') == UNRESOLVED_REFERENCES), None)
+        if unresolved:
+            kept[kept.index(unresolved)] = {**unresolved, 'count': unresolved['count'] + hidden_entries}
+        else:
+            # where the computation puts it, so it reads as a value set not found would
+            position = next((
+                index for index, reason in enumerate(kept) if reason.get('code') not in REASONS_BEFORE_UNRESOLVED
+            ), len(kept))
+            kept.insert(position, {'code': UNRESOLVED_REFERENCES, 'count': hidden_entries})
+    state = health.get('state')
+    if state == UNHEALTHY and not kept:
+        state = HEAD_RESOLVED if health.get('head_resolved_repositories') else HEALTHY
+    return {**health, 'state': state, 'reasons': kept}
+
+
+class ValueSetViewAccess:
+    """Which value set versions one reader can view, as has_view_access says, each read once: whatever a page asks
+    about is read in a few queries, not one per item"""
+    CONTEXT_KEY = '_value_set_view_access'
+
+    def __init__(self, user):
+        self.user = user
+        self._by_url = {}
+        self._by_id = {}
+        self._head_public = {}
+        self._organization_ids = None
+
+    @classmethod
+    def for_context(cls, context):
+        """The one a serializer context, and so its nested and listed serializers, shares"""
+        user = getattr((context or {}).get('request'), 'user', None)
+        if context is None:
+            return cls(user)
+        if cls.CONTEXT_KEY not in context:
+            context[cls.CONTEXT_KEY] = cls(user)
+        return context[cls.CONTEXT_KEY]
+
+    @property
+    def is_staff(self):
+        return bool(getattr(self.user, 'is_staff', False))
+
+    @property
+    def organization_ids(self):
+        if self._organization_ids is None:
+            self._organization_ids = set(self.user.organizations.values_list('id', flat=True))
+        return self._organization_ids
+
+    def prime_urls(self, urls):
+        """Reads the active versions at these URLs; one not found can't be viewed"""
+        from core.collections.models import Collection
+        missing = {url for url in urls if url and url not in self._by_url}
+        if not missing:
+            return
+        versions = {version.uri: version for version in Collection.objects.filter(uri__in=missing, is_active=True)}
+        self.prime_versions(versions.values())
+        for url in missing:
+            self._by_url[url] = url in versions and self.can_view(versions[url])
+
+    @staticmethod
+    def head_key(version):
+        return version.organization_id, version.user_id, version.mnemonic
+
+    def prime_versions(self, versions):
+        """Reads the HEADs of these versions at once: a version is public only while its HEAD is"""
+        from core.collections.models import Collection
+        keys = {
+            self.head_key(version) for version in versions
+            if not self.is_staff and version.public_can_view and version.version != HEAD} - set(self._head_public)
+        if not keys:
+            return
+        owners = Q(organization_id__in={key[0] for key in keys if key[0]}) | Q(
+            user_id__in={key[1] for key in keys if key[1]})
+        heads = {}
+        for *key, public_access in Collection.objects.filter(
+                owners, mnemonic__in={key[2] for key in keys}, version=HEAD, is_active=True
+        ).values_list('organization_id', 'user_id', 'mnemonic', 'public_access'):
+            heads.setdefault(tuple(key), public_access)
+        for key in keys:
+            # no HEAD leaves a public version public, as is_publicly_viewable does
+            self._head_public[key] = key not in heads or Collection.is_public_access(heads[key])
+
+    def is_publicly_viewable(self, version):
+        if not version.public_can_view:
+            return False
+        if version.version == HEAD:
+            return True
+        key = self.head_key(version)
+        if key not in self._head_public:
+            self.prime_versions([version])
+        return self._head_public[key]
+
+    def can_view(self, version):
+        if version.id not in self._by_id:
+            user = self.user
+            if self.is_staff or self.is_publicly_viewable(version):
+                can_view = True
+            elif not getattr(user, 'is_authenticated', False):
+                can_view = False
+            elif version.organization_id:
+                can_view = version.organization_id in self.organization_ids
+            else:
+                can_view = version.user_id == user.id
+            self._by_id[version.id] = can_view
+        return self._by_id[version.id]
+
+    def can_view_url(self, url):
+        if not url:
+            return False
+        if url not in self._by_url:
+            self.prime_urls([url])
+        return self._by_url[url]
