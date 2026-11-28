@@ -79,6 +79,7 @@ class ConceptFacetedSearch(CustomESFacetedSearch):
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'is_latest_version': TermsFacet(field='is_latest_version'),
         'is_in_latest_source_version': TermsFacet(field='is_in_latest_source_version'),
+        'verified': TermsFacet(field='verified'),
         'collection_owner_url': TermsFacet(field='collection_owner_url', size=FACET_SIZE),
         'expansion': TermsFacet(field='expansion', size=FACET_SIZE),
         'nameTypes': TermsFacet(field='name_types', size=FACET_SIZE),

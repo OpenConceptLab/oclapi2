@@ -107,6 +107,11 @@ es_fields = {
         'filterable': True,
         'facet': True
     },
+    'verified': {
+        'sortable': False,
+        'filterable': True,
+        'facet': True
+    },
 }
 
 

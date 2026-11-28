@@ -452,7 +452,7 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                 return Q('term', **{f"properties.{property_code}.keyword": clean_val})
 
             clean_val = val.strip('\"').strip('\'')
-            if attr == 'retired':  # indexed as 'true'/'false'; other spellings read as the retired rule reads them
+            if attr in ('retired', 'verified'):  # indexed as 'true'/'false'; other spellings are read as for retired
                 clean_val = 'true' if clean_val in TRUTHY else 'false' if clean_val in FALSY else clean_val
             return Q('term', **{attr: clean_val})
 
@@ -1423,15 +1423,16 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
         results = self.__apply_scope_filters(results)
 
         sort_attrs = self._get_sort_attribute()
-        if has_search_string and self.is_concept_document() and (
-                not sort_attrs or (
-                    '_score' in get(sort_attrs, '0', {}) and
-                    get(sort_attrs, '0._score.order') == 'desc'
-                )
-        ):
+        is_ranked_by_score = has_search_string and (
+            not sort_attrs or (
+                '_score' in get(sort_attrs, '0', {}) and
+                get(sort_attrs, '0._score.order') == 'desc'
+            )
+        )
+        if is_ranked_by_score and self.is_concept_document():
             search_str = self.get_search_string(lower=False)
             results = results.extra(
-                rescore={
+                rescore=[{
                   "window_size": 400,
                   "query": {
                     "score_mode": "total",
@@ -1457,13 +1458,51 @@ class BaseAPIView(generics.GenericAPIView, PathWalkerMixin):
                       }
                     }
                   }
-                }
+                }, self.get_verified_concept_rescore()]
             )
+        if sort and is_ranked_by_score and (
+                self.is_concept_container_document_model() or self.is_repo_document_model()):
+            results = results.extra(rescore=self.get_repo_rescore())
         if fields and highlight and self.request.query_params.get(INCLUDE_SEARCH_META_PARAM) in get_truthy_values():
             results = results.highlight(*self.clean_fields_for_highlight(fields))
         results = self.scope_map_codes(
             results.source(excludes=['_synonyms_embeddings', '_embeddings']), self.map_codes_release)
         return results.sort(*sort_attrs) if sort else results
+
+    @staticmethod
+    def get_verified_concept_rescore():
+        """
+        A moderate boost for concepts in a verified release (ocl_issues#3027): enough to lift one above copies of the
+        same code, not above a better match elsewhere. Multiplied after the exact name boost, so it keeps that order.
+        """
+        return {
+            'window_size': 400,
+            'query': {
+                'score_mode': 'multiply',
+                'rescore_query': {'constant_score': {'filter': {'term': {'verified': 'true'}}, 'boost': 1.25}}
+            }
+        }
+
+    def get_repo_rescore(self):
+        """Repositories that match: an exact id first, then the verified ones, then the rest, each by its score"""
+        return {
+            'window_size': 1000,
+            'query': {
+                'rescore_query': {
+                    'bool': {
+                        'should': [
+                            {'constant_score': {  # boosts sit above any text score, so they order in tiers
+                                'filter': {'term': {'verified': 'true'}}, 'boost': 10_000}},
+                            {'constant_score': {
+                                'filter': {'term': {'_mnemonic': {
+                                    'value': self.get_search_string(lower=False, decode=False),
+                                    'case_insensitive': True}}},
+                                'boost': 100_000}},
+                        ]
+                    }
+                }
+            }
+        }
 
     def get_mandatory_words_criteria(self):
         criterion = None

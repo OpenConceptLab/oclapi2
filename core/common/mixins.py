@@ -982,6 +982,22 @@ class SourceChildMixin(ChecksumModel):
         return self.sources.filter(version=version.version).exists() if version else False
 
     @property
+    def is_verified_in_list(self):
+        """
+        is_verified on a list page, where load_latest_source_versions has read the latest version holding each row: a
+        row whose version has no verification record isn't verified, with no query; only the others are checked.
+        """
+        if hasattr(self, '_latest_source_version') and not get(self._latest_source_version, 'verification'):
+            return False
+        return self.is_verified
+
+    @property
+    def is_verified(self):
+        """In its source's latest release, and that release has a verification record (ocl_issues#3027)"""
+        version = self._cached_latest_source_version
+        return bool(version and version.verification) and self.is_in_latest_source_version
+
+    @property
     def latest_source_version(self):
         if hasattr(self, '_latest_source_version'):  # loaded for the whole page by load_list_fields
             return self._latest_source_version

@@ -23,4 +23,5 @@ class CollectionFacetedSearch(CustomESFacetedSearch):
         'customValidationSchema': TermsFacet(field='custom_validation_schema'),
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'retired': TermsFacet(field='retired'),
+        'verified': TermsFacet(field='verified'),
     }

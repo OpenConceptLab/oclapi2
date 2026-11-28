@@ -165,6 +165,7 @@ class ConceptDocument(Document):
     retired = fields.KeywordField(attr='retired')
     is_latest_version = fields.KeywordField(attr='is_latest_version')
     is_in_latest_source_version = fields.KeywordField(attr='is_in_latest_source_version')
+    verified = fields.KeywordField(attr='is_verified')
     extras = fields.ObjectField(dynamic=True)
     properties = fields.ObjectField(dynamic=True)
     created_by = fields.KeywordField(attr='created_by.username')

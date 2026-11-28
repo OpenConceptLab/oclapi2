@@ -597,6 +597,29 @@ class ReposListViewLatestReleasedVersionTest(OCLAPITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertIsNone(response.data[0]['latest_released_version'])
 
+    def test_org_repos_verified_follows_the_latest_released_version(self):
+        org = OrganizationFactory(mnemonic='vrf-org')
+        source = OrganizationSourceFactory(organization=org, mnemonic='vrf-source')
+        OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=org, version='v1', released=True,
+            verification={'verified_at': '2026-11-20T00:00:00Z', 'process': 'ocl-verification-v1', 'hash': 'sha256:0f'})
+        collection = OrganizationCollectionFactory(organization=org, mnemonic='vrf-collection')
+        OrganizationCollectionFactory(mnemonic=collection.mnemonic, organization=org, version='v1', released=True)
+
+        response = self.client.get(org.uri + 'repos/')
+
+        self.assertEqual(response.status_code, 200)
+        for data in response.data:
+            self.assertFalse('verified' in data)
+
+        response = self.client.get(org.uri + 'repos/?includeLatestReleasedVersion=true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {data['id']: data['verified'] for data in response.data},
+            {'vrf-source': True, 'vrf-collection': False}
+        )
+
     def test_user_repos_include_latest_released_version(self):
         user = UserProfileFactory(username='lrv-user')
         source = UserSourceFactory(user=user, mnemonic='lrv-user-source')

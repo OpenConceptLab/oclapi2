@@ -36,9 +36,11 @@ class CollectionDocument(Document):
     created_by = fields.KeywordField()
     repo_type = fields.KeywordField()
     retired = fields.KeywordField(attr='retired')
+    verified = fields.KeywordField(attr='is_verified')
 
     class Django:
         model = Collection
+        related_models = [Collection]
         fields = [
             'full_name',
             'revision_date',
@@ -150,3 +152,8 @@ class CollectionDocument(Document):
     @staticmethod
     def prepare_repo_type(_):
         return Collection.OBJECT_TYPE
+
+    @staticmethod
+    def get_instances_from_related(related_instance):
+        """The HEAD, whose verified flag follows its latest release: what saving a version can change"""
+        return None if related_instance.is_head else related_instance.head

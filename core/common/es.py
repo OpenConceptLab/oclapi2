@@ -13,6 +13,9 @@ class ESScript:
         if (params.containsKey('is_in_latest_source_version')) {
             ctx._source.is_in_latest_source_version = params.is_in_latest_source_version;
         }
+        if (params.containsKey('verified')) {
+            ctx._source.verified = params.verified;
+        }
     """
 
     # script: append each value to the list field only if not already present

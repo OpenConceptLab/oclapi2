@@ -419,19 +419,24 @@ class BaseModel(models.Model):
         if partial_doc:
             version = partial_doc.get('_append_source_version')
             flag = partial_doc.get('is_in_latest_source_version')
-            flag_only = set(partial_doc) <= {'_append_source_version', 'is_in_latest_source_version'}
+            flag_only = set(partial_doc) <= {'_append_source_version', 'is_in_latest_source_version', 'verified'}
             if version or (flag is not None and flag_only):
                 # Scripted, never upserted: a doc missing from ES is full-indexed, not stubbed with flags only
                 return BaseModel.batch_index_source_version_append(
-                    queryset, document, version, flag, single_batch, bool(parallel)
+                    queryset, document, version, flag, single_batch, bool(parallel), partial_doc.get('verified')
                 )
             return BaseModel.batch_index_partial(queryset, document, single_batch, partial_doc, bool(parallel))
         return BaseModel.batch_index_full(
             single_batch, queryset, document, prefetch, select_related, bool(parallel), refresh)
 
     @staticmethod
+    def document_has_field(document, field):
+        return field in document._doc_type.mapping  # pylint: disable=protected-access
+
+    @staticmethod
     def batch_index_source_version_append(  # pylint: disable=too-many-arguments
-            queryset, document, version=None, is_in_latest_source_version=None, single_batch=False, parallel=True
+            queryset, document, version=None, is_in_latest_source_version=None, single_batch=False, parallel=True,
+            verified=None
     ):
         """
         Partial-update: append `version` (if given) to each resource's `source_version` list, and optionally
@@ -447,6 +452,8 @@ class BaseModel(models.Model):
             params['version'] = version
         if is_in_latest_source_version is not None:
             params['is_in_latest_source_version'] = is_in_latest_source_version
+        if verified is not None and BaseModel.document_has_field(document, 'verified'):  # concepts only
+            params['verified'] = verified
 
         def get_actions(batch_ids):
             for rid in batch_ids:
@@ -1589,6 +1596,11 @@ class ConceptContainerModel(VersionedModel, ChecksumModel):
                 failed_concept_validations.append(concept_validation_error)
 
         return failed_concept_validations
+
+    @property
+    def is_verified(self):
+        """A version is verified by its own record, a repository (its HEAD) by the one of its latest release."""
+        return bool(get(self.get_latest_released_version() if self.is_head else self, 'verification'))
 
     def update_version_data(self, head):
         self.description = self.description or head.description

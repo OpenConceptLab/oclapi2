@@ -29,4 +29,5 @@ class SourceFacetedSearch(CustomESFacetedSearch):
         'updatedBy': TermsFacet(field='updated_by', size=FACET_SIZE),
         'matchAlgorithm': TermsFacet(field='match_algorithm', size=FACET_SIZE),
         'retired': TermsFacet(field='retired'),
+        'verified': TermsFacet(field='verified'),
     }

@@ -53,12 +53,13 @@ class SourceListSerializer(AbstractResourceSerializer):
     summary = SerializerMethodField()
     checksums = SerializerMethodField()
     latest_released_version = SerializerMethodField()
+    verified = SerializerMethodField()
 
     class Meta:
         model = Source
         fields = AbstractResourceSerializer.Meta.fields + (
             'short_code', 'name', 'url', 'owner', 'owner_type', 'owner_url', 'version', 'created_at', 'id',
-            'source_type', 'updated_at', 'canonical_url', 'summary', 'type', 'checksums', 'latest_released_version'
+            'source_type', 'updated_at', 'canonical_url', 'summary', 'type', 'checksums', 'latest_released_version', 'verified'
         )
 
     def __init__(self, *args, **kwargs):
@@ -74,6 +75,7 @@ class SourceListSerializer(AbstractResourceSerializer):
                 self.fields.pop('summary', None)
             if not self.include_latest_released_version:
                 self.fields.pop('latest_released_version', None)
+                self.fields.pop('verified', None)
         except:  # pylint: disable=bare-except
             pass
 
@@ -96,6 +98,10 @@ class SourceListSerializer(AbstractResourceSerializer):
         return get(obj.get_latest_released_version(), 'version') if (
                 self.include_latest_released_version and obj.is_head
         ) else None
+
+    def get_verified(self, obj):
+        """Whether the latest released version has a verification record; what the search index's verified flag holds"""
+        return obj.is_verified if (self.include_latest_released_version and obj.is_head) else None
 
 
 class SourceVersionListSerializer(ModelSerializer):
@@ -218,7 +224,9 @@ class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSeria
         return source
 
     def update(self, instance, validated_data):
+        was_verified = bool(instance.verification)
         if self.persist_verification_only(instance, validated_data):
+            instance.index_concepts_verified(was_verified, self.context['request'].user)
             return instance
 
         original_schema = instance.custom_validation_schema
@@ -229,6 +237,8 @@ class SourceCreateOrUpdateSerializer(RepoVerificationSerializerMixin, ModelSeria
         # read before a concurrent change
         errors = Source.persist_changes(source, user, original_schema, keep_access=keep_access)
         self._errors.update(errors)
+        if not errors:
+            source.index_concepts_verified(was_verified, user)
         return source
 
 
