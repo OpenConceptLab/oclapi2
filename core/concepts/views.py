@@ -47,7 +47,8 @@ from core.common.swagger_parameters import (
 from core.common.tasks import delete_concept, make_hierarchy
 from core.common.throttling import ThrottleUtil
 from core.common.utils import (generate_temp_version, get_truthy_values, to_int,
-                               drop_version, get_falsy_values, parse_id, get_event_metadata)
+                               drop_version, get_falsy_values, parse_id, get_event_metadata, split_canonical,
+                               is_canonical_uri, to_snake_case)
 from core.common.views import SourceChildCommonBaseView, SourceChildExtrasView, \
     SourceChildExtraRetrieveUpdateDestroyView, BaseAPIView
 from core.concepts.constants import (
@@ -1042,6 +1043,9 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
     serializer_class = ConceptListSerializer
     permission_classes = (IsAuthenticated, CanUseMapper)
     document_model = ConceptDocument  # the filters' collection facets count only versions the requester can view
+    # the filters that match a concept row by the collections it's a member of
+    COLLECTION_MEMBERSHIP_FILTERS = (
+        'collection', 'collection_url', 'collection_owner_url', 'collection_version', 'expansion', 'expansion_url')
     es_fields = Concept.es_fields
     # Semantic kNN. Above ~1000 candidates ES compares far more vectors per clause for no gain in hits
     # (OpenConceptLab/ocl_online#255).
@@ -1135,6 +1139,10 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
         score_to_sort = 'search_rerank_score' if reranker else 'search_normalized_score'
         cid = get_cid()
         target_repo_filter = filters.get('target_repo', None)
+        # a collection's reference to a HEAD concept without a version holds HEAD's own concept row, not its newest
+        # version: keep both rows then, as before, so the collection's members still match
+        head_latest_only = not any(
+            to_snake_case(key) in self.COLLECTION_MEMBERSHIP_FILTERS for key in original_filters)
         search_repo_url = f"/orgs/{repo_params.get('owner')}/sources/{repo_params.get('source')}/"
         is_bridge = (is_semantic and target_repo_filter and
                      drop_version(target_repo_filter) != search_repo_url)
@@ -1145,7 +1153,7 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             search = ConceptFuzzySearch.search(
                 row, target_repo_url, repo_params, include_retired,
                 is_semantic, num_candidates, k_nearest, map_config, faceted_criterion, locale_filter,
-                variants_repo=variants_repo,
+                variants_repo=variants_repo, head_latest_only=head_latest_only,
             )
             print(f"[{cid}] ES Search built in {time.time() - start_time} seconds")
             start_time = time.time()
@@ -1224,7 +1232,8 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
         concept._match_type = match_type  # pylint:disable=protected-access
 
     @staticmethod
-    def get_target_repos_from_params(target_repo_params):
+    def get_target_repos_from_params(target_repo_params, version=None):
+        """The sources target_repo describes, in the version passed, else the one it names, else HEAD."""
         from core.sources.models import Source
         owner = target_repo_params.get('owner')
         owner_type = (target_repo_params.get('owner_type') or '').lower()
@@ -1236,37 +1245,97 @@ class MetadataToConceptsListView(CapacityLimitMixin, BaseAPIView):
             owner_criteria = DjangoQ(organization__mnemonic=owner) | DjangoQ(user__username=owner)
         return Source.objects.filter(
             owner_criteria, mnemonic=target_repo_params.get('source'),
-            version=target_repo_params.get('source_version') or target_repo_params.get('version') or HEAD)
+            version=version or target_repo_params.get('source_version') or target_repo_params.get('version') or HEAD)
 
     @staticmethod
-    def get_repo_params(is_semantic, target_repo_params, target_repo_url, user=None):
-        """The repo from target_repo_url, else the one described by target_repo.
-        Target repos the user can't view are reported as unresolvable."""
-        repo = ConceptFuzzySearch.get_target_repo(target_repo_url) if target_repo_url else None
-        if repo and HEAD in (get(target_repo_params, 'source_version'), get(target_repo_params, 'version')):
-            # HEAD's version_url is the bare repo URL, which resolves to the latest released version
-            repo = repo.head or repo
+    def split_target_repo_url(target_repo_url):
+        """
+        target_repo_url and the version it names when that's HEAD or latest, which no repo version is stored at:
+        /orgs/O/sources/S/HEAD/ and /orgs/O/sources/S/latest/ (or url|HEAD, url|latest, relative or canonical) give
+        the bare URL and the version. A relative URL naming no version gives latest, which the bare URL means.
+        Otherwise (url|v1 included, which the resolver reads) the URL as it is and None.
+        """
+        url, version = split_canonical(target_repo_url)
+        if version is not None:
+            return (url, version) if version in (HEAD, LATEST) else (target_repo_url, None)
+        if is_canonical_uri(url):
+            return target_repo_url, None
+        parts = compact(url.split('?')[0].split('/'))
+        if len(parts) == 4:
+            return url, LATEST
+        if len(parts) == 5 and parts[4] in (HEAD, LATEST):
+            return '/' + '/'.join(parts[:4]) + '/', parts[4]
+        return target_repo_url, None
+
+    @staticmethod
+    def get_newest_viewable_release(head, user):
+        """The newest release of head's repo that isn't retired and user can view, else None."""
+        releases = head.released_versions.filter(retired=False).exclude(version=HEAD)
+        return head.__class__.get_viewable(releases, user).order_by('-created_at').first()
+
+    @classmethod
+    def resolve_head_or_latest(cls, head, version, user):
+        """
+        The version of head's source a $match for HEAD or latest searches: HEAD itself for HEAD; for latest, the
+        newest release user can view, else HEAD (OpenConceptLab/ocl_online#779).
+        """
+        if version == HEAD:
+            return head
+        return cls.get_newest_viewable_release(head, user) or head
+
+    @classmethod
+    def get_repo_params(cls, is_semantic, target_repo_params, target_repo_url, user=None):
+        """
+        The repo from target_repo_url, else the one described by target_repo. HEAD and latest are resolved in both
+        forms, and so is a target with no version, as latest: the newest release the user can view, else HEAD.
+        Target repos the user can't view are reported as unresolvable.
+        """
+        requested_version = get(target_repo_params, 'source_version') or get(target_repo_params, 'version')
+        repo = None
+        resolved_latest = False  # whether the version searched is the one latest, or no version, resolved to
+        if target_repo_url:
+            url, url_version = cls.split_target_repo_url(target_repo_url)
+            repo = ConceptFuzzySearch.get_target_repo(url)
+            # target_repo's HEAD or latest applies to the URL's repo: the Mapper sends HEAD with the bare URL
+            version = requested_version if requested_version in (HEAD, LATEST) else url_version
+            if repo and version:
+                repo = cls.resolve_head_or_latest(repo.head or repo, version, user)
+                resolved_latest = version == LATEST
         if repo:
             if not repo.has_view_access(user):
                 raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
             repo_params = ConceptFuzzySearch.get_repo_params(repo)
         elif target_repo_params:
-            repos = list(MetadataToConceptsListView.get_target_repos_from_params(target_repo_params))
+            resolves = requested_version in (None, HEAD, LATEST)
+            repos = list(cls.get_target_repos_from_params(target_repo_params, HEAD if resolves else None))
             if not repos or not all(target_repo.has_view_access(user) for target_repo in repos):
                 raise Http400(f'Unable to resolve "target_repo": "{target_repo_params}"')
+            if resolves:
+                if len(repos) > 1:
+                    # an organization and a user of that name each have the source: which one's HEAD or newest
+                    # release is meant, and its own mapped codes, needs the owner type
+                    raise Http400(
+                        f'"target_repo" owner "{target_repo_params.get("owner")}" names both an organization and a '
+                        f'user with this source: set "owner_type" to "Organization" or "User"')
+                # the source's HEAD was checked; search the version it resolves to
+                repos = [cls.resolve_head_or_latest(repos[0], requested_version or LATEST, user)]
+                resolved_latest = requested_version != HEAD
             repo = repos[0]
             # search the repos that were checked, by their stored names: target_repo's own values may differ
             # in case or key names (e.g. "version", "org"), which the search filters would read differently
-            repo_params = {'owner': repo.parent.mnemonic, 'source': repo.mnemonic}
+            repo_params = {'owner': repo.parent.mnemonic, 'source': repo.mnemonic, 'source_version': repo.version}
             owner_types = {target_repo.parent.resource_type for target_repo in repos}
             if len(owner_types) == 1:
                 repo_params['owner_type'] = owner_types.pop()
-            version = get(target_repo_params, 'source_version') or get(target_repo_params, 'version')
-            if version:
-                repo_params['source_version'] = version
         else:
             raise Http400(f'Unable to resolve "target_repo_url": "{target_repo_url}"')
         if is_semantic and not repo.has_semantic_match_algorithm:
+            # each repo version keeps its own match algorithms, and only rows of a semantic version carry vectors,
+            # so the version searched is the one checked
+            if resolved_latest and not repo.is_head:
+                raise Http400(
+                    f'This repo version does not support semantic search: no version, or "latest", resolved to the '
+                    f'release "{repo.version}"; name "HEAD" to search HEAD')
             raise Http400('This repo version does not support semantic search')
         return repo_params
 
