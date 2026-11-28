@@ -204,7 +204,20 @@ class ListWithHeadersMixin(ListModelMixin):
                 not self.should_include_facets() and not self.should_include_search_stats() and
                 all(params.get(param) not in TRUTHY for param in PER_REQUESTER_LIST_PARAMS) and
                 not any(to_snake_case(param) in collection_facets for param in params) and
-                get(self, 'parent_resource.is_latest_version', False))
+                bool(get(self, 'parent_resource.is_latest_version') or get(self, 'parent_resource.released')))
+
+    @staticmethod
+    def count_repo_version_members(through_qs, filters, prefix, stored_count=None):
+        """
+        A source version's member count for its list. Unfiltered, the version's stored count, so the list doesn't count
+        through the join; with any filter, or before the version is counted, through the join, as the list filters it.
+        """
+        retired = f'{prefix}__retired'
+        if stored_count is not None and filters == {retired: False}:
+            return stored_count
+        if retired in filters:  # filters will have it false to exclude
+            return through_qs.filter(**{retired: False, f'{prefix}__is_active': True}).count()
+        return through_qs.count()
 
     # where a list's concepts and mappings embed others: a concept its mappings and hierarchy, a mapping its concepts
     EMBEDDED_RESOURCE_FIELDS = ('mappings', 'parent_concepts', 'child_concepts', 'from_concept', 'to_concept')
@@ -726,11 +739,24 @@ class SourceChildMixin(ChecksumModel):
         from core.collections.models import Expansion
         # the cascade takes the membership rows (a versioned object's, its versions' too), so expansions go first
         rows = self.__class__.objects.filter(versioned_object_id=self.id) if self.is_versioned_object else [self]
-        after_delete = Expansion.mark_health_not_current_for_members(
-            f'{self.__class__.__name__.lower()}s', [self.id, *[row.id for row in rows]])
+        row_ids = [self.id, *[row.id for row in rows]]
+        after_delete = Expansion.mark_health_not_current_for_members(f'{self.__class__.__name__.lower()}s', row_ids)
+        recount = self.recount_source_versions_after_delete(row_ids)
         result = super().delete(*args, **kwargs)
         after_delete()
+        recount()
         return result
+
+    @classmethod
+    def recount_source_versions_after_delete(cls, ids):
+        """
+        Read before rows are deleted: the source versions holding them, HEAD aside (its caller recounts it). Returns
+        what recounts those versions once the rows are gone, since the cascade takes their membership rows.
+        """
+        resources = f'{cls.__name__.lower()}s'
+        versions = list(cls._meta.get_field('sources').related_model.objects.filter(
+            **{f'{resources}__id__in': ids}).exclude(version=HEAD).distinct())
+        return lambda: [getattr(version, f'update_{resources}_count')() for version in versions]
 
     # relations the list serializers read on every row, prefetched once per page by load_list_fields
     LIST_PREFETCHES = ()
