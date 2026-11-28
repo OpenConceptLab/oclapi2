@@ -1297,7 +1297,11 @@ class ImportIndexer:
         # every row first, so that a failure to queue can't leave any deferred
         for resource, model in (('concept', Concept), ('mapping', Mapping)):
             for chunk in chunks(sorted(self.ids[resource]), self.CHUNK_SIZE):
-                model.objects.filter(id__in=chunk, _index=False).update(_index=True)
+                with transaction.atomic():
+                    # locked in id order first, as a version comparison's checksum repair does: they can't deadlock
+                    ids = list(model.objects.select_for_update().filter(
+                        id__in=chunk, _index=False).order_by('id').values_list('id', flat=True))
+                    model.objects.filter(id__in=ids).update(_index=True)
         if not self.index:
             DeferredImportIndex.record(self)
             return

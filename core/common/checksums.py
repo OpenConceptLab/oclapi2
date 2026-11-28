@@ -2,7 +2,7 @@ import logging
 import time
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from ocldev.checksum import Checksum as ChecksumBase
 from pydash import get
@@ -196,7 +196,12 @@ class ChecksumDiff:
         to_repair = list(queryset)
         for resource in to_repair:
             resource.checksums = resource.get_all_checksums()
-        model.objects.bulk_update(to_repair, ['checksums'], batch_size=500)
+        to_repair.sort(key=lambda resource: resource.id)
+        with transaction.atomic():
+            # locked in id order first, as an import's index flags are, so the two can't deadlock on HEAD's rows
+            list(model.objects.select_for_update().filter(
+                id__in=[resource.id for resource in to_repair]).order_by('id').values_list('id', flat=True))
+            model.objects.bulk_update(to_repair, ['checksums'], batch_size=500)
 
         repaired_by_id = {resource.id: resource.checksums for resource in to_repair}
         for resource in incomplete:

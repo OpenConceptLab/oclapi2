@@ -3,6 +3,7 @@ import json
 import os
 import tarfile
 import tempfile
+import threading
 import time
 import uuid
 from json import JSONDecodeError
@@ -16,7 +17,7 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import connection, DatabaseError
+from django.db import connection, DatabaseError, OperationalError, transaction
 from django.db.models import F
 from django.test import override_settings, tag
 from django.test.utils import CaptureQueriesContext
@@ -34,7 +35,8 @@ from core.common.tasks import post_import_update_resource_counts, bulk_import_pa
     bulk_import, batch_index_resources, bulk_import_parallel_inline, bulk_import_new, index_concepts_mapped_codes, \
     index_dropped_source_children, try_job_lock, POST_IMPORT_COUNTS_LOCK, POST_IMPORT_COUNTS_REQUEUE_SECONDS
 from core.common.backends import QueueOnceRedisBackend
-from core.common.tests import OCLAPITestCase, OCLTestCase
+from core.common.checksums import ChecksumDiff
+from core.common.tests import OCLAPITestCase, OCLTestCase, OCLAPITransactionTestCase
 from core.common.utils import decode_string, startswith_temp_version, get_bulk_import_celery_once_lock_key, \
     write_export_file
 from core.concepts.documents import ConceptDocument, MappedCodes
@@ -8177,3 +8179,74 @@ class IsolatedVersionZipImportTest(OCLTestCase):
             Importer.get_isolated_version_resource_types(
                 ['Source', 'Source Version', 'Concept', 'Mapping', 'Reference']),
             ['Source', 'Concept', 'Mapping', 'Source Version', 'Reference'])
+
+
+
+class RowLockOrderMixin:
+    """
+    An import's index flags and a version comparison's checksum repair update the same HEAD rows at once. Each must
+    lock its rows in id order, whatever order the scan reads them in, or the two can deadlock.
+    """
+    def setUp(self):
+        super().setUp()
+        source = OrganizationSourceFactory()
+        self.low, self.high = ConceptFactory(parent=source), ConceptFactory(parent=source)
+        # updated last, the low id's row now comes after the high one in a scan in table order
+        for concept in (self.high, self.low):
+            Concept.objects.filter(id=concept.id).update(_index=False, checksums={})
+
+    def assert_waits_on_the_low_row_holding_no_other(self, write):
+        errors = []
+
+        def run():
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute('SET enable_indexscan = off; SET enable_bitmapscan = off')
+                write()
+            except Exception as ex:  # pylint: disable=broad-except
+                errors.append(ex)
+            finally:
+                connection.close()
+
+        writer = threading.Thread(target=run)
+        with transaction.atomic():
+            Concept.objects.select_for_update().get(id=self.low.id)
+            writer.start()
+            self.wait_for_a_lock_wait(writer, errors)
+            try:
+                with transaction.atomic(), connection.cursor() as cursor:
+                    cursor.execute('SELECT id FROM concepts WHERE id = %s FOR UPDATE NOWAIT', [self.high.id])
+                high_was_free = True
+            except OperationalError:
+                high_was_free = False
+        writer.join(10)
+        self.assertTrue(high_was_free, 'the writer locked the higher id before the lower one')
+        self.assertEqual(errors, [])
+
+    @staticmethod
+    def wait_for_a_lock_wait(writer, errors):
+        deadline = time.monotonic() + 10
+        with connection.cursor() as cursor:
+            while time.monotonic() < deadline and writer.is_alive():
+                cursor.execute('SELECT count(*) FROM pg_locks WHERE NOT granted')  # live, unlike pg_stat_activity
+                if cursor.fetchone()[0]:
+                    return
+                time.sleep(0.05)
+        raise AssertionError(f'the writer never waited on a lock: {errors}')
+
+
+class ImportIndexFlagsRowLockOrderTest(RowLockOrderMixin, OCLAPITransactionTestCase):
+    def test_import_index_flags_lock_rows_in_id_order(self):
+        indexer = ImportIndexer(False)
+        indexer.ids['concept'] = {self.low.id, self.high.id}
+        self.assert_waits_on_the_low_row_holding_no_other(indexer.finish)
+        self.assertFalse(Concept.objects.filter(id__in=[self.low.id, self.high.id], _index=False).exists())
+
+
+class ChecksumRepairRowLockOrderTest(RowLockOrderMixin, OCLAPITransactionTestCase):
+    def test_checksum_repair_locks_rows_in_id_order(self):
+        self.assert_waits_on_the_low_row_holding_no_other(
+            lambda: ChecksumDiff._repair_incomplete_checksums(  # pylint: disable=protected-access
+                list(Concept.objects.filter(id__in=[self.high.id, self.low.id]))))
+        for concept in Concept.objects.filter(id__in=[self.low.id, self.high.id]):
+            self.assertTrue(concept.has_all_checksums())
