@@ -494,6 +494,23 @@ class SourceTest(OCLTestCase):
         self.new_source = OrganizationSourceFactory.build(organization=None)
         self.user = UserProfileFactory()
 
+    def test_get_resource_facet_filters(self):
+        head = OrganizationSourceFactory(version=HEAD)
+        release = OrganizationSourceFactory(version='v1', mnemonic=head.mnemonic, organization=head.organization)
+        common = {
+            'source': head.mnemonic, 'ownerType': head.parent.resource_type, 'owner': head.parent.mnemonic,
+            'retired': False
+        }
+
+        self.assertEqual(
+            head._get_resource_facet_filters(),  # pylint: disable=protected-access
+            {**common, 'source_version': HEAD, 'is_latest_version': True}
+        )
+        self.assertEqual(
+            release._get_resource_facet_filters({'retired': True}),  # pylint: disable=protected-access
+            {**common, 'source_version': 'v1', 'retired': True}
+        )
+
     def test_public_can_view(self):
         self.assertFalse(Source(public_access='none').public_can_view)
         self.assertFalse(Source(public_access='foobar').public_can_view)

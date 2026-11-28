@@ -1504,10 +1504,9 @@ class Source(DirtyFieldsMixin, VersionCompareMixin, ConceptContainerModel):
             'owner': self.parent.mnemonic,
             'retired': False
         }
-        if self.is_head:
+        _filters['source_version'] = self.version
+        if self.is_head:  # HEAD holds each member's versioned object and latest version
             _filters['is_latest_version'] = True
-        else:
-            _filters['source_version'] = self.version
 
         return {**_filters, **(filters or {})}
 
