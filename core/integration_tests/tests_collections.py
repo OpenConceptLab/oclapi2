@@ -1463,6 +1463,84 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                        f'no concepts or mappings in {repo_version}'
         }
 
+    def _added_after_release_item(self, expression, release, resource_type='concept'):
+        return {
+            'added': True,
+            'resolved': False,
+            'expression': expression,
+            'repo_versions': [release.uri],
+            'message': f'The reference is saved in collection {self.collection.name}, but its {resource_type} is not '
+                       f'in {release.uri}, the release the collection resolves through, because it was added after '
+                       f'that release. To include it, create a new release of {drop_version(release.uri)} and '
+                       f'rebuild the expansion, or pin the reference to a version that holds it'
+        }
+
+    def _use_auto_generated_expansion(self):
+        expansion = ExpansionFactory(collection_version=self.collection, mnemonic='autoexpand-HEAD')
+        self.collection.expansion_uri = expansion.uri
+        self.collection.save()
+        self.assertTrue(self.collection.expansion.is_auto_generated)
+
+    @staticmethod
+    def _source_with_concept_and_mapping_added_after_release():
+        source = OrganizationSourceFactory(organization=OrganizationFactory())
+        release = OrganizationSourceFactory(
+            mnemonic=source.mnemonic, organization=source.organization, version='v1', released=True)
+        concept = ConceptFactory(parent=source, mnemonic='c1')
+        mapping = MappingFactory(parent=source, mnemonic='m1')
+        return concept, mapping, release
+
+    def test_put_200_reference_to_a_concept_added_after_the_release_says_why_on_both_kinds_of_expansion(self):
+        for is_auto_generated in (False, True):
+            with self.subTest(is_auto_generated=is_auto_generated):
+                if is_auto_generated:
+                    self._use_auto_generated_expansion()
+                else:
+                    self.assertFalse(self.collection.expansion.is_auto_generated)
+                concept, mapping, release = self._source_with_concept_and_mapping_added_after_release()
+
+                response = self._put_expressions([concept.uri, mapping.uri])
+
+                self.assertEqual(response.status_code, 200)
+                self.assertCountEqual(
+                    list(response.data),
+                    [
+                        self._added_after_release_item(concept.uri, release),
+                        self._added_after_release_item(mapping.uri, release, 'mapping')
+                    ]
+                )
+
+    def test_put_200_reference_naming_the_release_a_concept_was_added_after_names_only_that_version(self):
+        concept, _, release = self._source_with_concept_and_mapping_added_after_release()
+        expression = f'{release.uri}concepts/{concept.mnemonic}/'
+
+        response = self._put_expressions([expression])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(expression, release.uri)])
+
+    def test_put_200_pinned_reference_no_version_holds_says_so_on_both_kinds_of_expansion(self):
+        for is_auto_generated in (False, True):
+            with self.subTest(is_auto_generated=is_auto_generated):
+                if is_auto_generated:
+                    self._use_auto_generated_expansion()
+                source, old, _ = self._source_with_concept_version_no_release_holds()
+
+                response = self._put_with_resolution_on(old.uri)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.data,
+                    [{
+                        'added': True,
+                        'resolved': False,
+                        'expression': old.uri,
+                        'repo_versions': [source.uri],
+                        'message': f'The reference is saved in collection {self.collection.name}, but no version '
+                                   f'of {source.uri} holds resource version {old.version}'
+                    }]
+                )
+
     def test_put_200_reference_to_a_repository_the_requester_cannot_view_answers_like_a_missing_one(self):
         source, concept, _ = self._private_source_with_empty_release()
         missing_expression = '/orgs/nobody/sources/nothing/concepts/c1/'
@@ -1485,7 +1563,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         response = self._put_expressions([concept.uri])
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(concept.uri, release.uri)])
+        self.assertEqual(list(response.data), [self._added_after_release_item(concept.uri, release)])
 
     def test_put_200_reference_to_a_private_repository_names_the_version_to_staff(self):
         _, concept, release = self._private_source_with_empty_release()
@@ -1495,7 +1573,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
         response = self._put_expressions([concept.uri])
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(list(response.data), [self._resolved_to_nothing_item(concept.uri, release.uri)])
+        self.assertEqual(list(response.data), [self._added_after_release_item(concept.uri, release)])
 
     def test_put_200_pinned_reference_naming_a_version_the_requester_cannot_view_answers_like_a_missing_one(self):
         source, old, v2 = self._source_with_concept_version_no_release_holds()
@@ -2232,7 +2310,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 {
                     'added': True,
                     'expression': source1_v1.uri + 'concepts/' + concept1_v2.mnemonic + '/',
-                    'message': 'The reference is successfully added to collection '
+                    'message': f'The reference is successfully added to collection {collection.name}'
                 }
             ]
         )
@@ -2259,7 +2337,7 @@ class CollectionReferencesViewTest(OCLAPITestCase):
                 {
                     'added': True,
                     'expression': source1_v2.uri + 'concepts/' + concept1_v2.mnemonic + '/',
-                    'message': 'The reference is successfully added to collection '
+                    'message': f'The reference is successfully added to collection {collection.name}'
                 }
             ]
         )

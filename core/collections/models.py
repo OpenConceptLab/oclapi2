@@ -1786,6 +1786,38 @@ class CollectionReference(models.Model):
         return [version.uri for version in versions if version.has_view_access(user)] or compact(
             [self.system, *valuesets])
 
+    def get_release_added_after(self, expansion, user, system_version_cache=None, release_head_cache=None):
+        """The latest release of its source, when its expansion evaluated it there and its source's HEAD holds
+        the concept or mapping it names, both of which `user` can view: added after that release. Else None."""
+        if not self.system or not self.code or self.filter or self.valueset or self.names_repo_version:
+            return None
+        release = self._get_expression_system_version(system_version_cache)
+        if not release or release.is_head or not release.released:
+            return None
+        evaluated = self._get_resolved_system_versions(system_version_cache, {self.collection_id: expansion})
+        if any(version.id != release.id for version in evaluated):
+            return None
+        head = self._get_viewable_release_head(release, user, release_head_cache)
+        if not head:
+            return None
+        # as evaluating it in HEAD would find it
+        queryset = head.mappings.filter(mnemonic=self.code) if self.is_mapping else head.concepts.filter(
+            mnemonic=decode_string(self.code))
+        queryset = queryset.filter(version=self.resource_version) if self.resource_version else queryset.filter(
+            id=F('versioned_object_id'))
+        return release if queryset.exists() else None
+
+    @staticmethod
+    def _get_viewable_release_head(release, user, release_head_cache=None):
+        """The release's HEAD, when `user` can view the release and all of HEAD's content. Else None"""
+        if release_head_cache is not None and release.id in release_head_cache:
+            return release_head_cache[release.id]
+        head = release.head if release.has_view_access(user) else None
+        head = head if head and head.can_view_all_content(user) else None
+        if release_head_cache is not None:
+            release_head_cache[release.id] = head
+        return head
+
     def get_evaluated_repo_versions(self, expansion, system_version_cache=None, valueset_version_cache=None):
         """The repository versions its expansion evaluated it in: its system's, else its value sets'"""
         expansion_cache = {self.collection_id: expansion}
@@ -2354,6 +2386,11 @@ class Expansion(VersionCompareMixin, BaseResourceModel):
             else:
                 _concepts = ref.concepts.filter()
                 _mappings = ref.mappings.filter()
+                # as a re-evaluation would mark it, so an auto-generated expansion reports it alike. If this expansion
+                # never evaluated the version the reference names, holding nothing can mean only that
+                if resolve_by_resource_version and ref.is_resource_versioned and \
+                        not (_mappings if ref.is_mapping else _concepts).exists():
+                    ref.unresolved_reason = REFERENCE_VERSION_NOT_HELD
 
             if ref.is_versionless_expression:
                 evaluated_system_versions += ref_system_versions
